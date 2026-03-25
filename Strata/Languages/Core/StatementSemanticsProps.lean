@@ -1329,7 +1329,22 @@ theorem EvalStatementsContractApp' {φ : CoreEval → PureFunc Expression → Co
   ∃ σ' br₁ δ',
     EvalStatementsContract π φ δ σ ss₁ σ' br₁ δ' ∧
     (br₁ = .normal → EvalStatementsContract π φ δ' σ' ss₂ σ'' br δ'') ∧
-    (∀ l, br₁ = .exited l → σ'' = σ' ∧ δ'' = δ' ∧ br = .exited l) := by sorry
+    (∀ l, br₁ = .exited l → σ'' = σ' ∧ δ'' = δ' ∧ br = .exited l) := by
+  intros Heval
+  induction ss₁ generalizing σ δ <;> simp_all
+  case nil =>
+    exact ⟨σ, .normal, δ, EvalBlock.stmts_none_sem, fun _ => Heval, fun _ h => by contradiction⟩
+  case cons h t ih =>
+    cases Heval with
+    | stmts_normal_sem Hh Ht =>
+      next σ₁ δ₁ =>
+      obtain ⟨σ', br₁, δ', Heval₁, Hnorm, Hexit⟩ := ih Ht
+      exact ⟨σ', br₁, δ', EvalBlock.stmts_normal_sem Hh Heval₁, Hnorm, Hexit⟩
+    | stmts_exit_sem Hh =>
+      next label =>
+      exact ⟨σ'', .exited label, δ'', EvalBlock.stmts_exit_sem Hh,
+        fun h => by contradiction,
+        fun l h => by simp_all⟩
 
 theorem EvalStatementsContractApp {φ : CoreEval → PureFunc Expression → CoreEval} {δ δ' δ'' : CoreEval} :
   EvalStatementsContract π φ δ σ ss₁ σ' .normal δ' →

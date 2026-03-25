@@ -14,9 +14,10 @@ correctly via an `exitLabel` field. The type checker
 (`StatementType.lean`) enforces well-formedness constraints on
 labels.
 
-This specification defines the formal semantics for `exit` so
-that Lean theorems can be proven about programs that use labeled
-blocks and exit — including the exception translation.
+Exit and labeled blocks are used by multiple language features:
+Java break/continue, Python try/except, Go defer, and the
+Laurel→Core exception translation. This specification defines
+the formal semantics independently of any particular use case.
 
 ## 2. Definitions
 
@@ -311,16 +312,17 @@ The loop's `EvalStmt` constructor must handle `BlockResult` from
 its body evaluation. If the body produces `exited L`, the loop
 terminates and propagates the exit.
 
-## 6. Relationship to Exception Properties
+## 6. Dependents
 
-Once E1-E9 are proven, the exception properties follow:
+The following features depend on exit semantics being formalized:
 
-| Exception Property | Depends on |
-|---|---|
-| P1: Throw Produces Failure | E1 (exit preserves store where flag=true), E2 (skips remaining) |
-| P2: Success Path Isolation | E2 (if no exit, flag stays false), E5 (normal completion) |
-| P4: Normal Completion Skips Handlers | E3 (exit $try_end consumed), E2 (catch code skipped) |
-| P6: Finally Execution | E3 (exit consumed by try block), E5 (finally runs after block) |
+- **Laurel exception translation** (`Throw`/`TryCatch` desugar
+  to labeled blocks and exit). See
+  `docs/design/laurel-exceptions/spec.md`.
+- **Break/continue** in loops (desugar to exit).
+- **Early return** (desugars to `exit $body`).
+- **Python try/except** (uses exit + labeled blocks in
+  `PythonToLaurel.lean`).
 
 ## 7. Compatibility
 

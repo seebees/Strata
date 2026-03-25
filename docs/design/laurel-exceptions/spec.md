@@ -209,7 +209,20 @@ This follows from Property 7 (exhaustiveness) and the semantics
 of implication, but should be stated explicitly as it is the
 foundation for separating success and failure contracts.
 
-## 6. Proof Assumptions {#proof-assumptions}
+## 6. Proof Dependencies
+
+The Lean proofs for Properties 1, 2, 4, and 6 depend on the
+exit semantics defined in
+[`docs/design/exit-semantics/spec.md`](../exit-semantics/spec.md).
+
+| Exception Property | Exit Properties Used |
+|---|---|
+| P1: Throw Produces Failure | E1 (exit preserves store), E2 (skips remaining) |
+| P2: Success Path Isolation | E2 (skips remaining), E5 (normal completion) |
+| P4: Normal Completion Skips Handlers | E3 (matching block consumes), E2 (skips remaining) |
+| P6: Finally Execution | E3 (matching block consumes), E5 (normal completion) |
+
+## 7. Proof Assumptions {#proof-assumptions}
 
 The Lean proofs in the Laurel→Core translator prove:
 

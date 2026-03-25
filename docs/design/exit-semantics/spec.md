@@ -170,7 +170,23 @@ theorem matching_block_consumes :
 ### E4: Non-Matching Exit Propagates
 
 A block with label L that contains an `exit (some M)` where
-M ≠ L propagates the exit.
+M ≠ L does not consume the exit. The exit passes through the
+block unchanged.
+
+This is the mechanism that makes uncaught exceptions work. In
+the exception translation, a try/catch block has label `$try_end`.
+The catch dispatch code checks each handler's exception type.
+If none match, the exception must propagate to the caller. The
+catch dispatch does NOT re-throw — instead, the original exit
+(targeting `$body` or an outer handler) simply passes through
+the `$try_end` block because the labels don't match.
+
+Example in Java terms: `try { foo() } catch (IOException e) { ... }`
+where `foo()` throws `NullPointerException`. The try block's
+label is `$try_end`. The exit from the throw targets `$body`
+(the procedure boundary). Since `$body ≠ $try_end`, the exit
+propagates through the try block, skipping the catch handler
+entirely.
 
 ```
 theorem nonmatching_exit_propagates :
@@ -192,8 +208,29 @@ theorem normal_block_completion :
 
 ### E6: Exit Propagates Through Conditionals
 
-If the taken branch of a conditional produces an exit, the
-conditional produces the same exit.
+Conditionals (`if/else`) are not blocks. They have no label.
+They cannot consume exits. If the taken branch produces an exit,
+the conditional produces the same exit — it is transparent.
+
+This matters because throw (which desugars to exit) can occur
+inside a conditional inside a try body:
+
+```java
+try {
+    if (badInput) {
+        throw new IllegalArgumentException();
+    }
+    doWork();
+} catch (IllegalArgumentException e) { ... }
+```
+
+The `throw` produces an exit. The `if` must propagate that exit
+so it reaches the enclosing handlers block. If the conditional
+absorbed the exit, the catch handler would never run.
+
+The same applies to any non-block statement that contains nested
+evaluation: conditionals are the primary case because they
+evaluate sub-blocks (the then/else branches).
 
 ```
 theorem exit_propagates_through_ite :
@@ -255,62 +292,8 @@ consumed before reaching the procedure boundary.
 
 ## 5. Decisions
 
-### Decision 1: BlockResult as a separate type vs encoding in store
-
-**Option A**: `BlockResult` as a new inductive type (proposed above).
-
-- Pro: Clean separation. The store only contains program
-  variables. Exit status is control flow, not data.
-- Pro: Proofs about store preservation are simpler — exit
-  doesn't modify the store by definition.
-- Con: Changes the signature of `EvalStmt` and `EvalBlock`,
-  affecting all downstream proofs.
-
-**Option B**: Encode exit as a special store variable
-(e.g., `$exit_label`).
-
-- Pro: No signature change to `EvalStmt`/`EvalBlock`.
-- Con: Conflates control flow with data. Every proof about
-  store values must account for the special variable.
-- Con: The operational evaluator uses a separate field
-  (`exitLabel`), so this would diverge from the implementation.
-
-**Decision**: Option A. The operational evaluator already uses a
-separate field. The formal semantics should match. The signature
-change is the right cost to pay for clean separation.
-
-### Decision 2: Where to define BlockResult
-
-**Option A**: In `DL/Imperative/StmtSemantics.lean` alongside
-`EvalStmt`/`EvalBlock`.
-
-- Pro: Co-located with the semantics that use it.
-- Con: The DL layer is language-independent. `BlockResult` is
-  specific to imperative languages with labeled blocks.
-
-**Option B**: In `DL/Imperative/Stmt.lean` alongside the `Stmt`
-type definition.
-
-- Pro: `BlockResult` is about statement evaluation outcomes,
-  which is part of the statement abstraction.
-
-**Decision**: Option A. `BlockResult` is a semantic concept (an
-evaluation outcome), not a syntactic concept. It belongs with
-the semantics.
-
-### Decision 3: Loop semantics and exit
-
-The current `EvalStmt` has a `loop` constructor (not shown in
-detail). Can `exit` occur inside a loop body?
-
-The type checker allows it — `exit` inside a loop exits the
-loop's enclosing block, not the loop itself. The loop body is
-not a labeled block.
-
-**Decision**: Exit inside a loop body propagates out of the loop.
-The loop's `EvalStmt` constructor must handle `BlockResult` from
-its body evaluation. If the body produces `exited L`, the loop
-terminates and propagates the exit.
+See [decisions.md](decisions.md) for design decisions about
+`BlockResult` representation, placement, and loop interaction.
 
 ## 6. Dependents
 

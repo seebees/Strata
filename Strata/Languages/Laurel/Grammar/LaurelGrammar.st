@@ -99,6 +99,22 @@ op block (stmts : SemicolonSepBy StmtExpr) : StmtExpr => @[prec(1000)] "{" stmts
 op labelledBlock (stmts : SemicolonSepBy StmtExpr, label : Ident) : StmtExpr => @[prec(1000)] "{" stmts "}" label;
 op exit (label : Ident) : StmtExpr => @[prec(0)] "exit " label;
 
+// Throw
+op throw (exception : StmtExpr) : StmtExpr => @[prec(0)] "throw " exception:0;
+
+// Try-catch-finally
+category CatchClause;
+op catchClause (exType: LaurelType, varName: Ident, body: StmtExpr): CatchClause
+  => "catch (" varName ":" exType ")" body:0;
+op catchClauseNoVar (exType: LaurelType, body: StmtExpr): CatchClause
+  => "catch (" exType ")" body:0;
+
+category OptionalFinally;
+op optionalFinally (body: StmtExpr): OptionalFinally => "finally" body:0;
+
+op tryCatch (body: StmtExpr, catches: Seq CatchClause, finally_: Option OptionalFinally): StmtExpr
+  => @[prec(0)] "try" body:0 catches finally_;
+
 // While loops
 category InvariantClause;
 op invariantClause (cond: StmtExpr): InvariantClause => "\n  invariant " cond:0;

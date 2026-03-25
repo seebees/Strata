@@ -209,6 +209,32 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
     | q`Laurel.exit, #[arg0] =>
       let label ← translateIdent arg0
       return mkStmtExprMd (.Exit label.text) md
+    | q`Laurel.throw, #[arg0] =>
+      let exception ← translateStmtExpr arg0
+      return mkStmtExprMd (.Throw exception) md
+    | q`Laurel.tryCatch, #[bodyArg, catchSeqArg, finallyArg] =>
+      let body ← translateStmtExpr bodyArg
+      let catches ← match catchSeqArg with
+        | .seq _ _ clauses => clauses.toList.mapM fun arg => match arg with
+            | .op catchOp => match catchOp.name, catchOp.args with
+              | q`Laurel.catchClause, #[typeArg, nameArg, bodyArg] => do
+                let exType ← translateHighType typeArg
+                let varName ← translateIdent nameArg
+                let catchBody ← translateStmtExpr bodyArg
+                pure { exceptionType := exType, variableName := some varName, body := catchBody : CatchClause }
+              | q`Laurel.catchClauseNoVar, #[typeArg, bodyArg] => do
+                let exType ← translateHighType typeArg
+                let catchBody ← translateStmtExpr bodyArg
+                pure { exceptionType := exType, variableName := none, body := catchBody : CatchClause }
+              | _, _ => TransM.error "Expected catchClause"
+            | _ => TransM.error "Expected operation"
+        | _ => pure []
+      let finally_ ← match finallyArg with
+        | .option _ (some (.op finOp)) => match finOp.name, finOp.args with
+          | q`Laurel.optionalFinally, #[finBodyArg] => translateStmtExpr finBodyArg >>= (pure ∘ some)
+          | _, _ => pure none
+        | _ => pure none
+      return mkStmtExprMd (.TryCatch body catches finally_) md
     | q`Laurel.literalBool, #[arg0] => return mkStmtExprMd (.LiteralBool (← translateBool arg0)) md
     | q`Laurel.int, #[arg0] =>
       let n ← translateNat arg0

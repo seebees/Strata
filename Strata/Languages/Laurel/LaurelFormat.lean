@@ -154,8 +154,20 @@ def formatStmtExprVal (s : StmtExpr) : Format :=
   | .All => "all"
   | .Hole true _ => "<?>"
   | .Hole false _ => "<??>"
+  | .Throw exception => "throw " ++ formatStmtExpr exception
+  | .TryCatch body catches finally_ =>
+      "try " ++ formatStmtExpr body ++
+      Format.join (catches.map fun c =>
+        " catch (" ++ (match c.variableName with | some n => format n ++ ": " | none => "") ++
+        formatHighType c.exceptionType ++ ") " ++ formatStmtExpr c.body) ++
+      match finally_ with
+      | none => ""
+      | some f => " finally " ++ formatStmtExpr f
   termination_by sizeOf s
-  decreasing_by all_goals term_by_mem
+  decreasing_by
+    all_goals first
+      | term_by_mem
+      | (add_mem_size_lemmas; cases ‹CatchClause›; simp_all; omega)
 end
 
 def formatParameter (p : Parameter) : Format :=

@@ -101,6 +101,10 @@ def computeExprType (model : SemanticModel) (expr : StmtExprMd) : HighTypeMd :=
   | .Abstract =>default -- TODO: implement
   | .All => default -- TODO: implement
   | .Hole _ typeOption => typeOption.getD  ⟨ HighType.Unknown, md ⟩
+  -- Throw has no meaningful type (it never returns normally)
+  | .Throw _ => ⟨ .TVoid, md ⟩
+  -- TryCatch has the type of its body (the overall expression type)
+  | .TryCatch body _ _ => computeExprType model body
 
 end Strata.Laurel
 

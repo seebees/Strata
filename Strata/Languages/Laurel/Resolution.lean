@@ -395,9 +395,22 @@ def resolveStmtExpr (exprMd : StmtExprMd) : ResolveM StmtExprMd := do
       let ty' ← resolveHighType ty
       pure (.Hole det ty')
     | none => pure (.Hole det none)
+  | .Throw exception =>
+    let exception' ← resolveStmtExpr exception
+    pure (.Throw exception')
+  | .TryCatch body catches finally_ =>
+    let body' ← resolveStmtExpr body
+    let catches' ← catches.mapM fun c => do
+      let exType' ← resolveHighType c.exceptionType
+      let body' ← resolveStmtExpr c.body
+      pure { c with exceptionType := exType', body := body' }
+    let finally_' ← finally_.attach.mapM (fun a => have := a.property; resolveStmtExpr a.val)
+    pure (.TryCatch body' catches' finally_')
   return ⟨val', md⟩
   termination_by exprMd
-  decreasing_by all_goals term_by_mem
+  decreasing_by all_goals first
+    | term_by_mem
+    | (add_mem_size_lemmas; cases ‹CatchClause›; simp_all; omega)
 
 /-- Resolve a parameter: assign a fresh ID and add to scope. -/
 def resolveParameter (param : Parameter) : ResolveM Parameter := do
@@ -617,6 +630,17 @@ private def collectStmtExpr (map : Std.HashMap Nat AstNode) (expr : StmtExprMd)
   | .ContractOf _ fn => collectStmtExpr map fn
   | .New _ | .This | .Exit _ | .LiteralInt _ | .LiteralBool _ | .LiteralString _ | .LiteralDecimal _
   | .Abstract | .All | .Hole _ _ => map
+  | .Throw exception => collectStmtExpr map exception
+  | .TryCatch body catches finally_ =>
+    let map := collectStmtExpr map body
+    let map := catches.foldl (fun m c =>
+      let m := collectHighType m c.exceptionType
+      collectStmtExpr m c.body) map
+    match finally_ with | some f => collectStmtExpr map f | none => map
+  termination_by expr
+  decreasing_by all_goals first
+    | term_by_mem
+    | (add_mem_size_lemmas; cases ‹CatchClause›; simp_all; omega)
 
 private def collectBody (map : Std.HashMap Nat AstNode) (body : Body)
     : Std.HashMap Nat AstNode :=

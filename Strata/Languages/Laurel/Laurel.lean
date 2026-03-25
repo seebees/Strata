@@ -315,6 +315,23 @@ inductive StmtExpr : Type where
         not allowed in functions.
       - `type`: inferred by the hole type inference pass; `none` means not yet inferred. -/
   | Hole (deterministic : Bool := true) (type : Option (WithMetadata HighType) := none)
+  /-- Throw an exception. The expression must evaluate to a composite (class) type. -/
+  | Throw (exception : WithMetadata StmtExpr)
+  /-- Try-catch-finally. Execute body; on failure, dispatch to the first matching
+      catch clause by exception type. The finally block, if present, executes
+      regardless of outcome. -/
+  | TryCatch (body : WithMetadata StmtExpr)
+      (catches : List CatchClause)
+      (finally_ : Option (WithMetadata StmtExpr))
+
+/-- A catch clause in a TryCatch construct. -/
+structure CatchClause where
+  /-- The exception type to match. -/
+  exceptionType : WithMetadata HighType
+  /-- Optional variable name to bind the caught exception. -/
+  variableName : Option Identifier
+  /-- The handler body. -/
+  body : WithMetadata StmtExpr
 
 inductive ContractType where
   | Reads | Modifies | Precondition | PostCondition

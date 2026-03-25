@@ -298,6 +298,8 @@ def translateExpr (expr : StmtExprMd)
   | .InstanceCall target callee args => throwExprDiagnostic $ md.toDiagnostic "instance call expression translation" DiagnosticType.NotYetImplemented
   | .PureFieldUpdate _ _ _ => throwExprDiagnostic $ md.toDiagnostic "pure field update expression translation" DiagnosticType.NotYetImplemented
   | .This => throwExprDiagnostic $ md.toDiagnostic "this expression translation" DiagnosticType.NotYetImplemented
+  | .Throw _ => throwExprDiagnostic $ md.toDiagnostic "throw in expression position is not supported" DiagnosticType.UserError
+  | .TryCatch _ _ _ => throwExprDiagnostic $ md.toDiagnostic "try/catch in expression position is not supported" DiagnosticType.UserError
   termination_by expr
   decreasing_by
     all_goals (have := WithMetadata.sizeOf_val_lt expr; term_by_mem)
@@ -464,6 +466,12 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       return [Imperative.Stmt.loop condExpr decreasingExprCore invExprs bodyStmts md]
   | .Exit target =>
       return [Imperative.Stmt.exit (some target) md]
+  | .Throw _ =>
+      emitDiagnostic $ md.toDiagnostic "throw statement translation not yet implemented" DiagnosticType.NotYetImplemented
+      returnNone
+  | .TryCatch _ _ _ =>
+      emitDiagnostic $ md.toDiagnostic "try/catch statement translation not yet implemented" DiagnosticType.NotYetImplemented
+      returnNone
   | _ =>
       -- Expression in statement position: preserve as an unused variable init
       exprAsUnusedInit stmt md

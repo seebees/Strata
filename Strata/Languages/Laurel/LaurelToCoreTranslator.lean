@@ -494,9 +494,6 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       let tryLabel := s!"$try_end_{id}"
       let handlersLabel := s!"$handlers_{id}"
       let flagIdent : Core.CoreIdent := ⟨"$has_exception", ()⟩
-      let flagType : LTy := LTy.forAll [] LMonoTy.bool
-      -- Declare and init the exception flag
-      let initFlag := Core.Statement.init flagIdent flagType (some (.const () (.boolConst false))) md
       -- Translate the try body
       let bodyStmts ← translateStmt outputParams body
       -- Normal completion: exit the try block (skip handlers)
@@ -526,7 +523,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       let finallyStmts ← match finally_ with
         | some f => translateStmt outputParams f
         | none => pure []
-      return [initFlag, tryBlock] ++ finallyStmts
+      return [tryBlock] ++ finallyStmts
   | _ =>
       -- Expression in statement position: preserve as an unused variable init
       exprAsUnusedInit stmt md
@@ -587,7 +584,11 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
     | .Opaque _postconds (some impl) _ => translateStmt proc.outputs impl
     | _ => pure [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty]
   -- Wrap body in a labeled block so early returns (exit) work correctly.
-  let body : List Core.Statement := [.block "$body" bodyStmts .empty]
+  -- Add exception flag init so Throw has a variable to set.
+  let flagIdent : Core.CoreIdent := ⟨"$has_exception", ()⟩
+  let flagType : LTy := LTy.forAll [] LMonoTy.bool
+  let initFlag := Core.Statement.init flagIdent flagType (some (.const () (.boolConst false))) .empty
+  let body : List Core.Statement := [initFlag, .block "$body" bodyStmts .empty]
   let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions }
   return { header, spec, body }
 

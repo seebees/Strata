@@ -19,6 +19,17 @@ private def assertNoDiagnostics (name : String) (prog : String) : IO Unit := do
   | [] => pure ()
   | ds => throw (IO.userError s!"{name}: expected 0 diagnostics, got {ds.length}: {ds.map (·.message)}")
 
+/-- Property 1 from spec: Throw makes subsequent code unreachable. -/
+def throwUnreachable := r"
+composite MyException {}
+procedure throwUnreachable(e: MyException) {
+    throw e;
+    assert false
+};
+"
+
+#eval! assertNoDiagnostics "throwUnreachable" throwUnreachable
+
 /-- Property 4 from spec: Normal completion skips catch handlers. -/
 def normalSkipsHandlers := r"
 composite MyException {}

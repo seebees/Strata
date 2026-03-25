@@ -12,75 +12,58 @@ open StrataTest.Util
 namespace Strata
 namespace Laurel
 
-/-- Test that throw parses and reaches the translator (which emits not-yet-implemented). -/
-def throwProgram := r"
-composite MyException {}
-
-procedure throwSimple(e: MyException) {
-    throw e
-//  ^^^^^^^ error: throw statement translation not yet implemented
-};
-"
-
-#guard_msgs(drop info, error) in
-#eval testInputWithOffset "ThrowSimple" throwProgram 17 processLaurelFile
-
-/-- Test that try/catch parses correctly by verifying the translator receives it. -/
-def tryCatchProgram := r"
-composite MyException {}
-
-procedure tryCatchSimple(e: MyException) {
-    try {
-        var x: int := 1
-    } catch (e: MyException) {
-        var y: int := 2
-    }
-};
-"
-
-/-- Test that try/catch/finally parses correctly. -/
-def tryCatchFinallyProgram := r"
-composite MyException {}
-
-procedure tryCatchFinally(e: MyException) {
-    try {
-        var x: int := 1
-    } catch (e: MyException) {
-        var y: int := 2
-    } finally {
-        var z: int := 3
-    }
-};
-"
-
-/-- Test that multiple catch clauses parse correctly. -/
-def multiCatchProgram := r"
-composite ExceptionA {}
-composite ExceptionB {}
-
-procedure multiCatch(e: ExceptionA) {
-    try {
-        var x: int := 1
-    } catch (a: ExceptionA) {
-        var y: int := 2
-    } catch (b: ExceptionB) {
-        var z: int := 3
-    }
-};
-"
-
-private def assertSingleDiagnostic (name : String) (prog : String) (expectedMsg : String) : IO Unit := do
+private def assertNoDiagnostics (name : String) (prog : String) : IO Unit := do
   let inputContext := Strata.Parser.stringInputContext name prog
   let diagnostics ← processLaurelFile inputContext
   match diagnostics.toList with
-  | [d] =>
-    if !stringContains d.message expectedMsg then
-      throw (IO.userError s!"{name}: expected message containing '{expectedMsg}', got '{d.message}'")
-  | other =>
-    throw (IO.userError s!"{name}: expected 1 diagnostic, got {other.length}")
+  | [] => pure ()
+  | ds => throw (IO.userError s!"{name}: expected 0 diagnostics, got {ds.length}: {ds.map (·.message)}")
 
-#eval! assertSingleDiagnostic "tryCatch" tryCatchProgram "try/catch statement translation not yet implemented"
-#eval! assertSingleDiagnostic "tryCatchFinally" tryCatchFinallyProgram "try/catch statement translation not yet implemented"
-#eval! assertSingleDiagnostic "multiCatch" multiCatchProgram "try/catch statement translation not yet implemented"
+/-- Property 4 from spec: Normal completion skips catch handlers. -/
+def normalSkipsHandlers := r"
+composite MyException {}
+procedure normalSkipsHandlers() {
+    var x: int := 0;
+    try { x := 1 } catch (e: MyException) { x := 99 };
+    assert x == 1
+};
+"
+
+#eval! assertNoDiagnostics "normalSkipsHandlers" normalSkipsHandlers
+
+/-- Assertion inside try body is verified. -/
+def assertInTryBody := r"
+composite MyException {}
+procedure assertInTryBody() {
+    try { var x: int := 42; assert x == 42 } catch (e: MyException) { assert true }
+};
+"
+
+#eval! assertNoDiagnostics "assertInTryBody" assertInTryBody
+
+/-- Property 6 from spec: Finally block executes. -/
+def finallyExecutes := r"
+composite MyException {}
+procedure finallyExecutes() {
+    var z: int := 0;
+    try { var x: int := 1 } catch (e: MyException) { var y: int := 2 } finally { z := 42 };
+    assert z == 42
+};
+"
+
+#eval! assertNoDiagnostics "finallyExecutes" finallyExecutes
+
+/-- Multiple catch clauses — normal path skips all handlers. -/
+def multipleCatches := r"
+composite ExceptionA {}
+composite ExceptionB {}
+procedure multipleCatches() {
+    var x: int := 0;
+    try { x := 1 } catch (a: ExceptionA) { x := 10 } catch (b: ExceptionB) { x := 20 };
+    assert x == 1
+};
+"
+
+#eval! assertNoDiagnostics "multipleCatches" multipleCatches
 
 end Laurel

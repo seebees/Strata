@@ -466,20 +466,75 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       return [Imperative.Stmt.loop condExpr decreasingExprCore invExprs bodyStmts md]
   | .Exit target =>
       return [Imperative.Stmt.exit (some target) md]
-  | .Throw _ =>
-      emitDiagnostic $ md.toDiagnostic "throw statement translation not yet implemented" DiagnosticType.NotYetImplemented
-      returnNone
-  | .TryCatch _ _ _ =>
-      emitDiagnostic $ md.toDiagnostic "try/catch statement translation not yet implemented" DiagnosticType.NotYetImplemented
-      returnNone
+  | .Throw exception =>
+      -- Throw translates to:
+      --   $has_exception := true;
+      --   exit $body;
+      -- The exception expression is evaluated but for now we only track the flag.
+      -- The enclosing TryCatch (or procedure wrapper) provides the labeled block.
+      let _exceptionExpr ← translateExpr exception
+      let flagIdent : Core.CoreIdent := ⟨"$has_exception", ()⟩
+      let setFlag := Core.Statement.set flagIdent (.const () (.boolConst true)) md
+      let exitBody := Imperative.Stmt.exit (some "$body") md
+      return [setFlag, exitBody]
+  | .TryCatch body catches finally_ =>
+      -- TryCatch translates to:
+      --   var $has_exception: bool := false;
+      --   { // $try_end
+      --     { // $handlers
+      --       <body>
+      --       exit $try_end;  // normal completion skips handlers
+      --     }
+      --     // catch dispatch:
+      --     if ($has_exception) { <first matching handler> }
+      --     // uncaught: propagate
+      --   }
+      --   <finally>
+      let id ← freshId
+      let tryLabel := s!"$try_end_{id}"
+      let handlersLabel := s!"$handlers_{id}"
+      let flagIdent : Core.CoreIdent := ⟨"$has_exception", ()⟩
+      let flagType : LTy := LTy.forAll [] LMonoTy.bool
+      -- Declare and init the exception flag
+      let initFlag := Core.Statement.init flagIdent flagType (some (.const () (.boolConst false))) md
+      -- Translate the try body
+      let bodyStmts ← translateStmt outputParams body
+      -- Normal completion: exit the try block (skip handlers)
+      let exitTry := Imperative.Stmt.exit (some tryLabel) md
+      -- Handlers block: body + normal exit
+      let handlersBlock := Imperative.Stmt.block handlersLabel (bodyStmts ++ [exitTry]) md
+      let flagRef : Core.Expression.Expr := .fvar () flagIdent none
+      -- Catch dispatch: for now, if $has_exception then run first handler
+      -- TODO: add typed dispatch using IsType when exception types are modeled
+      let catchStmts ← catches.attach.flatMapM fun ⟨c, _hc⟩ => do
+        have : sizeOf c.body < sizeOf stmt := by
+          have := WithMetadata.sizeOf_val_lt stmt
+          have : sizeOf c < sizeOf catches := List.sizeOf_lt_of_mem _hc
+          cases c; cases stmt; simp_all; omega
+        let handlerBody ← translateStmt outputParams c.body
+        -- Reset the flag after catching
+        let resetFlag := Core.Statement.set flagIdent (.const () (.boolConst false)) md
+        let catchBlock := Imperative.Stmt.ite
+          flagRef
+          (resetFlag :: handlerBody ++ [Imperative.Stmt.exit (some tryLabel) md])
+          []
+          md
+        pure [catchBlock]
+      -- Try block: handlers block + catch dispatch
+      let tryBlock := Imperative.Stmt.block tryLabel ([handlersBlock] ++ catchStmts) md
+      -- Finally block (if present)
+      let finallyStmts ← match finally_ with
+        | some f => translateStmt outputParams f
+        | none => pure []
+      return [initFlag, tryBlock] ++ finallyStmts
   | _ =>
       -- Expression in statement position: preserve as an unused variable init
       exprAsUnusedInit stmt md
   termination_by sizeOf stmt
   decreasing_by
-    all_goals
-      have hlt := WithMetadata.sizeOf_val_lt stmt
-      cases stmt; term_by_mem
+    all_goals first
+      | (have hlt := WithMetadata.sizeOf_val_lt stmt; cases stmt; term_by_mem)
+      | (add_mem_size_lemmas; cases ‹CatchClause›; simp_all; omega)
 
 /--
 Translate a list of checks (preconditions or postconditions) to Core checks.

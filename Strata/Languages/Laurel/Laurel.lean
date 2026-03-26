@@ -506,4 +506,10 @@ structure Program where
   constants : List Constant := []
   deriving Inhabited
 
+/-- Construct the Core procedure name for an instance procedure.
+    Both the definition translator and call translator must use this function.
+    See Decision 7 (instance-methods/decisions.md). -/
+def instanceProcCoreName (typeName : String) (procName : String) : String :=
+  typeName ++ ".." ++ procName
+
 end

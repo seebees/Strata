@@ -59,7 +59,9 @@ def collectExpr (expr : StmtExpr) : StateM AnalysisResult Unit := do
   match _: expr with
   | .FieldSelect target _ =>
       modify fun s => { s with readsHeapDirectly := true }; collectExprMd target
-  | .InstanceCall target _ args => collectExprMd target; for a in args do collectExprMd a
+  | .InstanceCall target callee args =>
+      modify fun s => { s with callees := callee :: s.callees }
+      collectExprMd target; for a in args do collectExprMd a
   | .StaticCall callee args => modify fun s => { s with callees := callee :: s.callees }; for a in args do collectExprMd a
   | .IfThenElse c t e => collectExprMd c; collectExprMd t; if let some x := e then collectExprMd x
   | .Block stmts _ => for s in stmts do collectExprMd s
@@ -291,7 +293,22 @@ where
     | .InstanceCall callTarget callee args =>
         let t ← recurse callTarget
         let args' ← args.mapM (recurse ·)
-        return ⟨ .InstanceCall t callee args', md ⟩
+        let calleeReadsHeap ← readsHeap callee
+        let calleeWritesHeap ← writesHeap callee
+        if calleeWritesHeap then
+          if valueUsed then
+            let freshVar ← freshVarName
+            let varDecl := mkMd (.LocalVariable freshVar (computeExprType model exprMd) none)
+            let callWithHeap := ⟨ .Assign
+              [mkMd (.Identifier heapVar), mkMd (.Identifier freshVar)]
+              (⟨ .InstanceCall t callee (mkMd (.Identifier heapVar) :: args'), md ⟩), md ⟩
+            return ⟨ .Block [varDecl, callWithHeap, mkMd (.Identifier freshVar)] none, md ⟩
+          else
+            return ⟨ .Assign [mkMd (.Identifier heapVar)] (⟨ .InstanceCall t callee (mkMd (.Identifier heapVar) :: args'), md ⟩), md ⟩
+        else if calleeReadsHeap then
+          return ⟨ .InstanceCall t callee (mkMd (.Identifier heapVar) :: args'), md ⟩
+        else
+          return ⟨ .InstanceCall t callee args', md ⟩
     | .IfThenElse c t e =>
         let e' ← match e with | some x => some <$> recurse x valueUsed | none => pure none
         return ⟨ .IfThenElse (← recurse c) (← recurse t valueUsed) e', md ⟩

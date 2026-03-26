@@ -163,7 +163,19 @@ def modifiesClausesTransform (model: SemanticModel) (program : Program) : Progra
     | .ok proc' => (acc ++ [proc'], errs)
     | .error newErrs => (acc ++ [proc], errs ++ newErrs.toList)
   ) ([], [])
-  ({ program with staticProcedures := procs' }, errors)
+  -- Also process instance procedures on composite types
+  let (types', instErrors) := program.types.foldl (fun (accTypes, accErrs) td =>
+    match td with
+    | .Composite ct =>
+      let (instProcs', instErrs) := ct.instanceProcedures.foldl (fun (acc, errs) proc =>
+        match transformModifiesClauses model proc with
+        | .ok proc' => (acc ++ [proc'], errs)
+        | .error newErrs => (acc ++ [proc], errs ++ newErrs.toList)
+      ) ([], [])
+      (accTypes ++ [.Composite { ct with instanceProcedures := instProcs' }], accErrs ++ instErrs)
+    | other => (accTypes ++ [other], accErrs)
+  ) ([], [])
+  ({ program with staticProcedures := procs', types := types' }, errors ++ instErrors)
 
 end -- public section
 end Strata.Laurel

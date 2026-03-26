@@ -499,9 +499,24 @@ def heapParameterization (model: SemanticModel) (program : Program) : Program :=
   -- Generate Box datatype from all constructors used during transformation
   let boxDatatype : TypeDefinition :=
     .Datatype { name := "Box", typeArgs := [], constructors := state2.usedBoxConstructors }
+  -- Collect transformed instance procedures and promote to static.
+  -- After heap parameterization, instance procedures are effectively static
+  -- (self is a regular parameter, fields go through the heap).
+  -- Qualify names with the composite type name to avoid collisions
+  -- (e.g., "increment" on Counter becomes "Counter..increment").
+  let instanceProcs' := types'.foldl (fun acc td =>
+    match td with
+    | .Composite ct => acc ++ ct.instanceProcedures.map fun proc =>
+        { proc with name := { proc.name with text := ct.name.text ++ ".." ++ proc.name.text } }
+    | _ => acc) ([] : List Procedure)
+  -- Remove instance procedures from composites (they're now static)
+  let types'' := types'.map fun td =>
+    match td with
+    | .Composite ct => .Composite { ct with instanceProcedures := [] }
+    | other => other
   { program with
-    staticProcedures := heapConstants.staticProcedures ++ procs',
-    types := fieldDatatype :: boxDatatype :: heapConstants.types ++ types' }
+    staticProcedures := heapConstants.staticProcedures ++ procs' ++ instanceProcs',
+    types := fieldDatatype :: boxDatatype :: heapConstants.types ++ types'' }
 
 end Strata.Laurel
 

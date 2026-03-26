@@ -34,6 +34,15 @@ def consumeExit (blockLabel : String) : BlockResult → BlockResult
   | .exited .none => .normal
   | .exited (.some l) => if l == blockLabel then .normal else .exited (.some l)
 
+
+@[simp] theorem consumeExit_normal (L : String) : consumeExit L .normal = .normal := by
+  unfold consumeExit; rfl
+@[simp] theorem consumeExit_exited_none (L : String) : consumeExit L (.exited .none) = .normal := by
+  unfold consumeExit; rfl
+@[simp] theorem consumeExit_exited_same (L : String) : consumeExit L (.exited (.some L)) = .normal := by
+  simp [consumeExit]
+theorem consumeExit_exited_ne {M L : String} (h : M ≠ L) : consumeExit L (.exited (.some M)) = .exited (.some M) := by
+  simp [consumeExit, bne_iff_ne, h]
 mutual
 
 /--

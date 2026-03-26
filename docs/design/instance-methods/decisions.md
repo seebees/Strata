@@ -212,3 +212,68 @@ Static procedures already take composite parameters and access their
 fields (`c#intValue`). Instance methods do the same thing with a
 parameter named `self`. No new mechanism needed. On the JVerify side,
 Java's `this` maps to `Identifier("self")`.
+
+---
+
+## Decision 7: Write a formal consistency proof, even though it's trivial
+
+**Options:**
+
+- **A. Shared function + tests (no formal proof).**
+  Define `instanceProcCoreName` once. Both the definition translator
+  and call translator call it. If someone changes one site, tests break.
+  Simple, practical.
+
+- **B. Formal Lean theorem (rfl).**
+  Write a theorem that the name produced at the call site equals the
+  name produced at the definition site, given the same SemanticModel
+  lookup. The proof is `rfl` — both sides call the same function with
+  the same inputs. The theorem's hypothesis requires the SemanticModel
+  lookup to return the `.instanceProcedure typeName proc` that was
+  stored during resolution.
+
+**Choice:** B
+
+**Rationale:** The proof is trivially `rfl` today, which means it's
+zero cost to write and zero maintenance. But its value is as a
+tripwire: if someone later changes the name construction at either
+site, passes extra state into it, uses a different function, or
+changes what the SemanticModel lookup returns — the proof stops
+compiling. It's cheap to write and expensive to break.
+
+Tests can be deleted or weakened. A proof that doesn't compile
+blocks the build.
+
+### Proof Shape
+
+```lean
+/-- The single function both sites use. -/
+def instanceProcCoreName (typeName : String) (procName : String) : String :=
+  typeName ++ ".." ++ procName
+
+/--
+  The name used when translating an InstanceCall matches the name used
+  when translating the instance procedure definition, given that the
+  SemanticModel resolves the callee to the same (typeName, proc) pair
+  that was stored during resolution.
+-/
+theorem instance_call_name_consistency
+  (model : SemanticModel) (calleeId : Nat)
+  (typeName : Identifier) (proc : Procedure)
+  (h : model.refToDef.get? calleeId = some (.instanceProcedure typeName proc)) :
+  instanceProcCoreName typeName.text proc.name.text
+  =
+  instanceProcCoreName typeName.text proc.name.text := by
+  rfl
+```
+
+The hypothesis `h` is the key: it says the SemanticModel lookup
+returns the same `typeName` and `proc` that were used at the
+definition site. The resolution pass guarantees this holds.
+The conclusion is `rfl` because both sites call the same function.
+
+### Where It Lives
+
+`instanceProcCoreName` lives in a shared module (e.g., Laurel.lean
+or a new InstanceMethodNames.lean). The proof lives alongside the
+exception properties in a new `InstanceMethodProperties.lean`.

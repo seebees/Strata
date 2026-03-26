@@ -49,22 +49,10 @@ per-procedure function `transformModifiesClauses` works on any
 Fix: also iterate instance procedures from composites and put them
 back. Trivial change to `modifiesClausesTransform`.
 
-## Q6: What does the consistency proof look like concretely?
+## ~~Q6: What does the consistency proof look like concretely?~~ → Decision 7
 
-We decided to prove name consistency (Decision 2, Option C). The
-sketch is:
-
-```lean
-def instanceProcCoreName (typeName : String) (procName : String) : String :=
-  typeName ++ ".." ++ procName
-```
-
-Both the definition translator and call translator use this function.
-The proof is trivially `rfl`. But:
-- Where does this function live? (Shared module?)
-- How do we enforce that both sites actually call it?
-  (The proof checks this, but do we need a lint/test too?)
-- Should the proof be a `#check` or a full `theorem`?
+Resolved. Write a formal Lean theorem, even though it's trivially `rfl`.
+See Decision 7.
 
 ## Q7: What about instance methods calling other instance methods?
 

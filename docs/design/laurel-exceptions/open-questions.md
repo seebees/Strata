@@ -87,3 +87,32 @@ success path. `postconditionOnThrow(P)` applies only to the throw
 path. `postcondition(P)` remains unconditional (all paths).
 
 See Decision 9 in `jverify/design/exceptions/decisions.md`.
+
+---
+
+## 6. Propagation check exits procedure, not try block
+
+**Problem:** The cross-method exception propagation check
+(`if isFailure($result) { exit $body }`) always exits to `$body`
+(the procedure-level label). When a method call is inside a
+try/catch block, the propagation exit should go to the try block's
+handler, not to the procedure body.
+
+**Impact:** `try { throwingMethod(); } catch (E e) { ... }` does
+not work as expected. The propagation check after `throwingMethod()`
+exits the procedure instead of entering the catch handler. This
+means try/catch around method calls doesn't catch cross-method
+exceptions.
+
+**Workaround:** If the callee declares `postconditionOnThrow(false)`,
+the propagation check sees `$result == Success` and doesn't fire.
+This works when the callee genuinely never throws.
+
+**Fix:** The propagation check needs to be context-aware. Inside a
+try block, it should exit to the try block's handler label instead
+of `$body`. This requires the translator to track the current
+try/catch context and pass the right label to the propagation check.
+
+**Status:** Known limitation. The non-throwing composition pattern
+(chain of `postconditionOnThrow(false)` methods) works as a
+workaround.

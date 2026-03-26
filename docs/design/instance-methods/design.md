@@ -358,13 +358,17 @@ without seeing the body.
 
 ## Implementation Order
 
-1. `instanceProcCoreName` in Laurel.lean
-2. Heap analysis fix (collectExpr)
-3. Heap transform fix (heapTransformExpr)
-4. Modifies clauses fix (modifiesClausesTransform)
-5. Translator: instance procedure definitions
-6. Translator: InstanceCall at call sites
-7. Update T7 test
-8. Write edge case tests E1-E7
-9. Consistency proof
-10. Run full test suite (516+ tests)
+1. ✅ `instanceProcCoreName` in Laurel.lean
+2. ✅ Heap analysis fix (collectExpr)
+3. ✅ Heap transform fix (heapTransformExpr)
+4. ✅ Modifies clauses fix (modifiesClausesTransform)
+5. ✅ Translator: instance procedure definitions
+6. ✅ Translator: InstanceCall at call sites
+7. ✅ Update T7 test
+8. Edge case tests — **cannot test InstanceCall from Laurel source.**
+   The Laurel grammar has no syntax for instance calls (`obj.method(args)`).
+   InstanceCall nodes can only be constructed programmatically by JVerify.
+   Instance procedure DEFINITIONS are tested via T7. Instance CALLS
+   must be tested through JVerify end-to-end tests.
+9. ✅ Consistency proof (IM1)
+10. ✅ Full test suite passes (516 tests, 488 build jobs)

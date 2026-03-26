@@ -480,3 +480,53 @@ was implementing it per-language, which led to bugs. Centralizing
 it in the Laurel→Core translator (in Lean) and generating it from
 a first-class `TryCatch` construct gives us the working pattern
 with the correctness guarantee.
+
+## Decision 7: How to route cross-method propagation in try/catch {#decision-7}
+
+**Context:** After every procedure call, the translator inserts a
+propagation check: `if isFailure($result) { exit <label> }`. The
+question is what `<label>` should be.
+
+### Option A: Always exit $body (current, broken)
+
+The propagation check always exits `$body` (the procedure-level
+label). This is correct when the call is NOT inside a try/catch,
+but wrong when it IS — the exception skips the catch handler.
+
+- Pro: Simple. No context tracking needed.
+- Con: **Broken.** try/catch around method calls doesn't work.
+
+### Option B: Track exception target label in translator state
+
+The translator maintains a "current exception target" label:
+- At procedure level: `$body`
+- Inside a try body: the try body's `$handlers_N` label
+- Nested try: innermost handler label
+
+The propagation check uses this label instead of hardcoding `$body`.
+
+- Pro: Correct. Matches Java semantics. Composable with nesting.
+- Con: Adds state to the translator. Must be threaded through
+  all `translateStmt` calls.
+
+### Option C: Don't insert propagation checks; let TryCatch handle it
+
+Instead of inserting propagation checks after calls, rely on the
+TryCatch translation's existing `isFailure` check at the end of
+the body block. The call sets `$result = Failure` (via the output
+parameter), and the TryCatch body block's normal exit check
+detects it.
+
+- Pro: No propagation check needed inside try bodies.
+- Con: Doesn't work — the call's `$result` output is separate
+  from the procedure's `$result`. The TryCatch body block doesn't
+  see the callee's result unless we explicitly propagate it.
+
+### Decision: Option B (track exception target label)
+
+Option B is the only correct approach. The translator already
+tracks state (fresh IDs, diagnostics, model). Adding an exception
+target label is a small addition. The label is set when entering
+a TryCatch body and restored when leaving.
+
+This satisfies Properties 9-12 in the spec.

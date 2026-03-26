@@ -119,16 +119,39 @@ procedure foo(x: int) returns (result: Result<int>)
 
 ### 4.2 Call Sites {#call-sites}
 
-After calling a method that returns `Result<T>`:
+After calling a method that returns `Result<T>`, the translator
+inserts a propagation check. The check's exit target depends on
+context:
 
+**Outside try/catch** — propagate to procedure boundary:
 ```
 var callResult := foo(x);
 if isFailure(callResult) {
     result := callResult;  -- propagate
-    exit $body;
+    exit $body;             -- exit procedure
 }
-var value := callResult.value;  -- safe: checked isSuccess
 ```
+
+**Inside try body** — propagate to try block's handler:
+```
+{ // $try_end
+    { // $handlers
+        var callResult := foo(x);
+        if isFailure(callResult) {
+            exit $handlers;     -- exit to catch dispatch, NOT $body
+        }
+        ...
+        exit $try_end;          -- normal completion
+    }
+    // catch dispatch runs here
+    if isFailure($result) { $result := Success(); <handler>; exit $try_end }
+}
+```
+
+The translator tracks the current "exception target" label:
+- At procedure level: `$body`
+- Inside a try body: the try body's `$handlers` label
+- Nested try blocks: the innermost try body's label
 
 ## 5. Correctness Properties {#correctness-properties}
 
@@ -179,13 +202,19 @@ handler executes. The result is whatever the body produced.
 
 ### Property 5: Exception Propagation {#property-5-propagation}
 
-If a callee returns `Failure(e)` and the caller does not have
-a `TryCatch` that catches `e`, then the caller's result is
-`Failure(e)`.
+If a `Throw` occurs inside a `TryCatch` body and the catch
+clause matches, the handler executes. If no catch matches (or
+there is no enclosing `TryCatch`), the exception propagates —
+the enclosing procedure's result is `Failure`.
 
-Formally: for any call `r := callee(args)` where
-`isFailure(r)` and no enclosing `TryCatch` catches `r.exception`,
-the caller's result is `Failure(r.exception)`.
+Formally: for `Throw(e)` inside `TryCatch(body, catches, finally)`,
+if some catch clause matches `e`, that handler executes. If no
+catch matches, `$result` remains `Failure` after the `TryCatch`
+completes.
+
+Note: This property covers LOCAL throws (Throw construct inside
+the body). Cross-method propagation (callee returns Failure) is
+covered by Properties 9-12.
 
 ### Property 6: Finally Execution {#property-6-finally}
 
@@ -208,6 +237,44 @@ checked on a failure path. An `ensures` clause guarded by
 This follows from Property 7 (exhaustiveness) and the semantics
 of implication, but should be stated explicitly as it is the
 foundation for separating success and failure contracts.
+
+### Property 9: Cross-Method Propagation Into Try {#property-9-propagation-into-try}
+
+If a procedure call inside a try body returns `Failure`, the
+catch handler executes. The propagation check exits to the try
+block's handler label, not to `$body`.
+
+Formally: for a call `r := callee(args)` inside a `TryCatch`
+body, if `isFailure(r)`, then the catch dispatch block executes.
+
+### Property 10: Cross-Method Propagation Outside Try {#property-10-propagation-outside-try}
+
+If a procedure call outside any try body returns `Failure`, the
+caller's result is `Failure` and the caller exits.
+
+Formally: for a call `r := callee(args)` NOT inside a `TryCatch`
+body, if `isFailure(r)`, then the caller's `$result` is `Failure`
+and the caller exits `$body`.
+
+### Property 11: Nested Try Targets Innermost Handler {#property-11-nested-try}
+
+If a procedure call is inside nested try blocks, the propagation
+check targets the innermost try block's handler.
+
+Formally: for a call inside `TryCatch(TryCatch(body, ...), ...)`,
+if the callee returns `Failure`, the inner catch dispatch executes
+first. If the inner catch handles it, the outer catch does not
+execute.
+
+### Property 12: Propagation Through Try/Finally {#property-12-propagation-finally}
+
+If a procedure call inside a try/finally returns `Failure` and
+no catch handles it, the finally block executes before the
+exception propagates.
+
+Formally: for a call inside `TryCatch(body, [], some(finally))`,
+if the callee returns `Failure`, the finally block executes and
+then the caller's `$result` is `Failure`.
 
 ## 6. Proof Dependencies
 

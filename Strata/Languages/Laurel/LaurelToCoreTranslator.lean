@@ -735,8 +735,13 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
   datatypes share a single `.data` declaration.
   -/
   translateTypes (program : Program) (model : SemanticModel) : TranslateM (List Core.Decl) := do
-    -- Instance procedures are promoted to static by heapParameterization,
-    -- so they're already in program.staticProcedures at this point.
+    -- Emit diagnostics for composite types that have instance procedures.
+    for td in program.types do
+      if let .Composite ct := td then
+        for proc in ct.instanceProcedures do
+          emitDiagnostic $ proc.md.toDiagnostic
+            s!"Instance procedure '{proc.name.text}' on composite type '{ct.name.text}' is not yet supported"
+            DiagnosticType.NotYetImplemented
     -- Translate datatype definitions to Core declarations.
     let laurelDatatypes := program.types.filterMap fun td => match td with
       | .Datatype dt => some dt

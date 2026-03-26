@@ -120,3 +120,19 @@ Option C works but sacrifices readability. Option B follows established
 convention, is human-readable, and the `..` separator is already used
 throughout the codebase. A single pure function constructs the name,
 which is what Decision 2 relies on for the consistency proof.
+
+The key insight: an instance procedure is defined on the composite TYPE,
+not on any particular instance. There is one `Counter..increment` for all
+Counters. When you call `myCounter.increment()` vs `yourCounter.increment()`,
+you're calling the same procedure — the difference is the value of `self`
+passed as a parameter. After heap parameterization, `self` is a `Composite`
+reference and field access goes through `readField($heap, self, field)`.
+Different instances have different references, so they read different heap
+locations, but the procedure body is identical.
+
+The prover proves properties about `Counter..increment` that hold for ALL
+counters: "for any self and any heap, if the precondition holds, then after
+executing the body, the postcondition holds." We don't need per-instance
+names because we're proving universal properties. The `Counter..` prefix
+distinguishes between different TYPES (Counter vs Timer), not different
+instances of the same type.

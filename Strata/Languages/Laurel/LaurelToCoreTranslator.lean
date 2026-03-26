@@ -587,11 +587,45 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   let preconditions ← translateChecks proc.preconditions "requires"
 
   -- Translate postconditions for Opaque bodies
-  let postconditions : ListMap Core.CoreLabel Core.Procedure.Check ←
+  let basePostconditions : ListMap Core.CoreLabel Core.Procedure.Check ←
     match proc.body with
     | .Opaque postconds _ _ =>
         translateChecks postconds "postcondition"
     | _ => pure []
+
+  -- Build $result checks
+  let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+  let isFailureCheck : Core.Expression.Expr :=
+    .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
+  let isSuccessCheck : Core.Expression.Expr :=
+    .app () (.op () ⟨"ExceptionResult..isSuccess", ()⟩ none) (.fvar () resultIdent none)
+
+  -- Wrap existing postconditions: postcondition(P) → ensures isSuccess($result) ==> P
+  let wrappedBase : ListMap Core.CoreLabel Core.Procedure.Check :=
+    basePostconditions.map fun (label, check) =>
+      let impliesExpr : Core.Expression.Expr := .app ()
+        (.app () boolImpliesOp isSuccessCheck) check.expr
+      (label, { check with expr := impliesExpr })
+
+  -- Translate guards: guard(C) → ensures C ==> isFailure($result)
+  let guardChecks : ListMap Core.CoreLabel Core.Procedure.Check ←
+    proc.guards.mapM fun guard => do
+      let guardExpr ← translateExpr guard [] (isPureContext := true)
+      let label := "guard"
+      let impliesExpr : Core.Expression.Expr := .app ()
+        (.app () boolImpliesOp guardExpr) isFailureCheck
+      return (label, { expr := impliesExpr, md := guard.md : Core.Procedure.Check })
+
+  -- Translate postconditionsOnThrow: postconditionOnThrow(P) → ensures isFailure($result) ==> P
+  let potChecks : ListMap Core.CoreLabel Core.Procedure.Check ←
+    proc.postconditionsOnThrow.mapM fun pot => do
+      let potExpr ← translateExpr pot [] (isPureContext := true)
+      let label := "postconditionOnThrow"
+      let impliesExpr : Core.Expression.Expr := .app ()
+        (.app () boolImpliesOp isFailureCheck) potExpr
+      return (label, { expr := impliesExpr, md := pot.md : Core.Procedure.Check })
+
+  let allPostconditions := wrappedBase ++ guardChecks ++ potChecks
   let modifies : List Core.Expression.Ident := []
   let bodyStmts : List Core.Statement ←
     match proc.body with
@@ -600,11 +634,10 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
     | _ => pure [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty]
   -- Wrap body in a labeled block so early returns (exit) work correctly.
   -- Set $result to Success (it's declared as an output parameter).
-  let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
   let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
   let setResult := Core.Statement.set resultIdent successCtor .empty
   let body : List Core.Statement := [setResult, .block "$body" bodyStmts .empty]
-  let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions }
+  let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions := allPostconditions }
   return { header, spec, body }
 
 /--

@@ -181,12 +181,6 @@ structure Procedure : Type where
   outputs : List Parameter
   /-- The preconditions that callers must satisfy. -/
   preconditions : List (WithMetadata StmtExpr)
-  /-- Guard conditions: if the condition holds at entry, the method throws.
-      Translated to: ensures C ==> isFailure($result) -/
-  guards : List (WithMetadata StmtExpr) := []
-  /-- Postconditions on the throw path: if the method throws, these must hold.
-      Translated to: ensures isFailure($result) ==> P -/
-  postconditionsOnThrow : List (WithMetadata StmtExpr) := []
   /-- Whether the procedure is deterministic or nondeterministic. -/
   determinism : Determinism
   /-- Optional termination measure for recursive procedures. -/

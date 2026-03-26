@@ -59,7 +59,8 @@ procedure caller() {
 //}
 
 procedure modifyContainerWithoutPermission1(c: Container, d: Container)
-//        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: assertion does not hold
+//        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: assertion could not be proved
+//        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: assertion could not be proved
 // the above error is because the body does not satisfy the empty modifies clause. error needs to be improved
    ensures true
 {
@@ -76,8 +77,9 @@ procedure modifyContainerWithoutPermission2(c: Container, d: Container)
 };
 
 procedure modifyContainerWithoutPermission3(c: Container, d: Container)
-//        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: assertion does not hold
+//        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: assertion could not be proved
 // the above error is because the body does not satisfy the modifies clause. error needs to be improved
+//        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: assertion could not be proved
   ensures true
   modifies d
 {
@@ -107,4 +109,4 @@ procedure newObjectDoNotCountForModifies()
 "
 
 #guard_msgs (drop info, error) in
-#eval testInputWithOffset "ModifiesClauses" program 24 processLaurelFile
+#eval testInputWithOffset "ModifiesClauses" program 26 processLaurelFile

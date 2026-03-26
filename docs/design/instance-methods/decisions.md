@@ -136,3 +136,31 @@ executing the body, the postcondition holds." We don't need per-instance
 names because we're proving universal properties. The `Counter..` prefix
 distinguishes between different TYPES (Counter vs Timer), not different
 instances of the same type.
+
+---
+
+## Decision 4: Heap parameterization handles InstanceCall heap injection
+
+**Options:**
+
+- **A. Heap parameterization injects `$heap` into InstanceCall args.**
+  The pass already has the heap reader/writer analysis (a fixpoint
+  computation over all procedures). It already injects `$heap` into
+  StaticCall. Adding the same logic for InstanceCall is the same
+  pattern applied to a different AST node. The InstanceCall stays
+  as InstanceCall, just with `$heap` in its args.
+
+- **B. Translator handles heap injection for InstanceCall.**
+  The heap parameterization passes InstanceCall through unchanged.
+  The translator figures out whether the callee needs heap parameters.
+
+**Choice:** A
+
+**Rationale:** The heap parameterization is where the information lives.
+It has the reader/writer analysis. The translator doesn't — it would
+have to redo the analysis or receive it through some side channel.
+
+More fundamentally: the heap parameterization's job is heap
+parameterization. It does this for StaticCall. It should do it for
+InstanceCall too. Leaving InstanceCall unparameterized would mean
+the pass is incomplete — it handles some calls but not others.

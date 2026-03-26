@@ -2,27 +2,10 @@
 
 **Date:** 2026-03-26
 
-## Q1: InstanceCall heap parameter placement
+## ~~Q1: InstanceCall heap parameter placement~~ → Decision 4
 
-When heap parameterization injects `$heap` into an `InstanceCall`,
-where does it go? The target is separate from args in the AST:
-
-```
-InstanceCall(target, callee, args)
-```
-
-Options:
-- a. Prepend to args: `InstanceCall target callee ($heap :: args)`
-- b. Leave InstanceCall unchanged, let translator handle heap
-
-If (a), the instance procedure's `self` parameter is the target,
-and `$heap` is the first arg. The translator flattens to
-`Core.call name ($heap, target, args...)`.
-
-If (b), the heap parameterization doesn't touch InstanceCall at all,
-and the translator is responsible for knowing whether the callee
-needs heap parameters. This is simpler for the pass but pushes
-complexity to the translator.
+Resolved. Heap parameterization injects `$heap` into InstanceCall args,
+same as it does for StaticCall. See Decision 4.
 
 ## Q2: Instance procedure parameter order in Core
 

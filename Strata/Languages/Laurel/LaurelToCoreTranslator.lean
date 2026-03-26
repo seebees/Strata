@@ -86,6 +86,11 @@ structure TranslateState where
   model : SemanticModel
   /-- Do not process the produces Core program, since it has superfluous errors -/
   coreProgramHasSuperfluousErrors: Bool := false
+  /-- The label that exception propagation should exit to.
+      At procedure level this is "$body". Inside a try body, it's the
+      try block's handlers label so the catch dispatch can run.
+      See spec Property 9 and Decision 7. -/
+  exceptionTarget : String := "$body"
 
 /-- The translation monad: state over Except, allowing both accumulated diagnostics and hard failures -/
 @[expose] abbrev TranslateM := OptionT (StateM TranslateState)
@@ -345,11 +350,12 @@ private def exprAsUnusedInit (expr : StmtExprMd) (md : Imperative.MetaData Core.
 
 /-- Generate exception propagation check after a procedure call.
     If $result is Failure, propagate by exiting $body. -/
-private def exceptionPropagationCheck (md : Imperative.MetaData Core.Expression) : List Core.Statement :=
+private def exceptionPropagationCheck (md : Imperative.MetaData Core.Expression) : TranslateM (List Core.Statement) := do
+  let target := (← get).exceptionTarget
   let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
   let isFailureCheck : Core.Expression.Expr :=
     .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
-  [Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some "$body") md] [] md]
+  return [Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some target) md] [] md]
 
 /--
 Translate Laurel StmtExpr to Core Statements using the `TranslateM` monad.
@@ -391,7 +397,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
             let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
             let initStmt := Core.Statement.init ident coreType (some defaultExpr) md
             let callStmt := Core.Statement.call [ident, resultIdent] callee.text coreArgs md
-            return [initStmt, callStmt] ++ exceptionPropagationCheck md
+            return [initStmt, callStmt] ++ (← exceptionPropagationCheck md)
       | some (⟨ .InstanceCall .., _⟩) =>
           -- Instance method call as initializer: var name := target.method(args)
           -- Havoc the result since instance methods may be on unmodeled types
@@ -420,7 +426,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                 -- Procedure calls need to be translated as call statements
                 let coreArgs ← args.mapM (fun a => translateExpr a)
                 let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-                return [Core.Statement.call [ident, resultIdent] callee.text coreArgs md] ++ exceptionPropagationCheck md
+                return [Core.Statement.call [ident, resultIdent] callee.text coreArgs md] ++ (← exceptionPropagationCheck md)
           | .InstanceCall .. =>
               -- Instance method call: havoc the target variable
               return [Core.Statement.havoc ident md]
@@ -438,7 +444,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                 | .Identifier name => some (⟨name.text, ()⟩)
                 | _ => none
               let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-              return [Core.Statement.call (lhsIdents ++ [resultIdent]) callee.text coreArgs value.md] ++ exceptionPropagationCheck value.md
+              return [Core.Statement.call (lhsIdents ++ [resultIdent]) callee.text coreArgs value.md] ++ (← exceptionPropagationCheck value.md)
           | .InstanceCall .. =>
               -- Instance method call: havoc all target variables
               let havocStmts := targets.filterMap fun t =>
@@ -464,7 +470,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       else
         let coreArgs ← args.mapM (fun a => translateExpr a)
         let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-        return [Core.Statement.call [resultIdent] callee.text coreArgs md] ++ exceptionPropagationCheck md
+        return [Core.Statement.call [resultIdent] callee.text coreArgs md] ++ (← exceptionPropagationCheck md)
   | .InstanceCall .. =>
       -- Instance method call as statement: no return value, treated as no-op
       return ([])
@@ -491,14 +497,15 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
   | .Throw _exception =>
       -- Throw translates to:
       --   $result := Failure();
-      --   exit $body;
-      -- Note: the exception expression is not translated because the ExceptionResult
-      -- ADT doesn't carry a value. The exception type is only used for catch dispatch.
+      --   exit <exceptionTarget>;
+      -- The exit target is the current exception target: $body at procedure
+      -- level, or the try block's handlers label inside a try body.
+      let target := (← get).exceptionTarget
       let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
       let failureCtor : Core.Expression.Expr := .op () ⟨"Failure", ()⟩ none
       let setResult := Core.Statement.set resultIdent failureCtor md
-      let exitBody := Imperative.Stmt.exit (some "$body") md
-      return [setResult, exitBody]
+      let exitTarget := Imperative.Stmt.exit (some target) md
+      return [setResult, exitTarget]
   | .TryCatch body catches finally_ =>
       -- TryCatch translates to:
       --   { // $try_end
@@ -518,7 +525,12 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
         .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
       let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
       -- Translate the try body
+      -- Set exception target to handlers label so propagation checks
+      -- and throws inside the try body exit to the catch dispatch.
+      let savedTarget := (← get).exceptionTarget
+      modify fun s => { s with exceptionTarget := handlersLabel }
       let bodyStmts ← translateStmt outputParams body
+      modify fun s => { s with exceptionTarget := savedTarget }
       -- Normal completion: exit the try block (skip handlers)
       let exitTry := Imperative.Stmt.exit (some tryLabel) md
       -- Handlers block: body + normal exit

@@ -333,6 +333,15 @@ private def exprAsUnusedInit (expr : StmtExprMd) (md : Imperative.MetaData Core.
   let coreType := LTy.forAll [tyVarName] (.ftvar tyVarName)
   return [Core.Statement.init ident coreType (some coreExpr) md]
 
+
+/-- Generate exception propagation check after a procedure call.
+    If $result is Failure, propagate by exiting $body. -/
+private def exceptionPropagationCheck (md : Imperative.MetaData Core.Expression) : List Core.Statement :=
+  let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+  let isFailureCheck : Core.Expression.Expr :=
+    .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
+  [Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some "$body") md] [] md]
+
 /--
 Translate Laurel StmtExpr to Core Statements using the `TranslateM` monad.
 Diagnostics are emitted into the monad state.
@@ -367,12 +376,13 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
             let coreExpr ← translateExpr (⟨ .StaticCall callee args, callMd ⟩)
             return [Core.Statement.init ident coreType (some coreExpr) md]
           else
-            -- Translate as: var name; call name := callee(args)
+            -- Translate as: var name; call [name, $result] := callee(args); check propagation
             let coreArgs ← args.mapM (fun a => translateExpr a)
             let defaultExpr := defaultExprForType model ty
+            let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
             let initStmt := Core.Statement.init ident coreType (some defaultExpr) md
-            let callStmt := Core.Statement.call [ident] callee.text coreArgs md
-            return [initStmt, callStmt]
+            let callStmt := Core.Statement.call [ident, resultIdent] callee.text coreArgs md
+            return [initStmt, callStmt] ++ exceptionPropagationCheck md
       | some (⟨ .InstanceCall .., _⟩) =>
           -- Instance method call as initializer: var name := target.method(args)
           -- Havoc the result since instance methods may be on unmodeled types
@@ -400,7 +410,8 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
               else
                 -- Procedure calls need to be translated as call statements
                 let coreArgs ← args.mapM (fun a => translateExpr a)
-                return [Core.Statement.call [ident] callee.text coreArgs md]
+                let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+                return [Core.Statement.call [ident, resultIdent] callee.text coreArgs md] ++ exceptionPropagationCheck md
           | .InstanceCall .. =>
               -- Instance method call: havoc the target variable
               return [Core.Statement.havoc ident md]
@@ -417,7 +428,8 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                 match t.val with
                 | .Identifier name => some (⟨name.text, ()⟩)
                 | _ => none
-              return [Core.Statement.call lhsIdents callee.text coreArgs value.md]
+              let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+              return [Core.Statement.call (lhsIdents ++ [resultIdent]) callee.text coreArgs value.md] ++ exceptionPropagationCheck value.md
           | .InstanceCall .. =>
               -- Instance method call: havoc all target variables
               let havocStmts := targets.filterMap fun t =>
@@ -442,7 +454,8 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
         exprAsUnusedInit stmt md
       else
         let coreArgs ← args.mapM (fun a => translateExpr a)
-        return [Core.Statement.call [] callee.text coreArgs md]
+        let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+        return [Core.Statement.call [resultIdent] callee.text coreArgs md] ++ exceptionPropagationCheck md
   | .InstanceCall .. =>
       -- Instance method call as statement: no return value, treated as no-op
       return ([])
@@ -560,11 +573,14 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   let inputPairs := proc.inputs.map (translateParameterToCore (← get).model)
   let inputs := inputPairs
   let outputs := proc.outputs.map (translateParameterToCore (← get).model)
+  -- Add $result output for exception propagation (every procedure can throw)
+  let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+  let resultMonoTy : LMonoTy := .tcons "ExceptionResult" []
   let header : Core.Procedure.Header := {
     name := proc.name.text
     typeArgs := []
     inputs := inputs
-    outputs := outputs
+    outputs := outputs ++ [(resultIdent, resultMonoTy)]
   }
   -- Translate preconditions
   let preconditions ← translateChecks proc.preconditions "requires"
@@ -582,12 +598,11 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
     | .Opaque _postconds (some impl) _ => translateStmt proc.outputs impl
     | _ => pure [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty]
   -- Wrap body in a labeled block so early returns (exit) work correctly.
-  -- Add exception result init so Throw has a variable to set.
+  -- Set $result to Success (it's declared as an output parameter).
   let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-  let resultType : LTy := LTy.forAll [] (.tcons "ExceptionResult" [])
   let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
-  let initResult := Core.Statement.init resultIdent resultType (some successCtor) .empty
-  let body : List Core.Statement := [initResult, .block "$body" bodyStmts .empty]
+  let setResult := Core.Statement.set resultIdent successCtor .empty
+  let body : List Core.Statement := [setResult, .block "$body" bodyStmts .empty]
   let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions }
   return { header, spec, body }
 

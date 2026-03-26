@@ -468,52 +468,50 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       return [Imperative.Stmt.exit (some target) md]
   | .Throw exception =>
       -- Throw translates to:
-      --   $has_exception := true;
+      --   $result := Failure();
       --   exit $body;
-      -- The exception expression is evaluated but for now we only track the flag.
-      -- The enclosing TryCatch (or procedure wrapper) provides the labeled block.
       let _exceptionExpr ← translateExpr exception
-      let flagIdent : Core.CoreIdent := ⟨"$has_exception", ()⟩
-      let setFlag := Core.Statement.set flagIdent (.const () (.boolConst true)) md
+      let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+      let failureCtor : Core.Expression.Expr := .op () ⟨"Failure", ()⟩ none
+      let setResult := Core.Statement.set resultIdent failureCtor md
       let exitBody := Imperative.Stmt.exit (some "$body") md
-      return [setFlag, exitBody]
+      return [setResult, exitBody]
   | .TryCatch body catches finally_ =>
       -- TryCatch translates to:
-      --   var $has_exception: bool := false;
       --   { // $try_end
       --     { // $handlers
       --       <body>
       --       exit $try_end;  // normal completion skips handlers
       --     }
       --     // catch dispatch:
-      --     if ($has_exception) { <first matching handler> }
-      --     // uncaught: propagate
+      --     if (isFailure($result)) { $result := Success(); <handler>; exit $try_end }
       --   }
       --   <finally>
       let id ← freshId
       let tryLabel := s!"$try_end_{id}"
       let handlersLabel := s!"$handlers_{id}"
-      let flagIdent : Core.CoreIdent := ⟨"$has_exception", ()⟩
+      let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+      let isFailureCheck : Core.Expression.Expr :=
+        .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
+      let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
       -- Translate the try body
       let bodyStmts ← translateStmt outputParams body
       -- Normal completion: exit the try block (skip handlers)
       let exitTry := Imperative.Stmt.exit (some tryLabel) md
       -- Handlers block: body + normal exit
       let handlersBlock := Imperative.Stmt.block handlersLabel (bodyStmts ++ [exitTry]) md
-      let flagRef : Core.Expression.Expr := .fvar () flagIdent none
-      -- Catch dispatch: for now, if $has_exception then run first handler
-      -- TODO: add typed dispatch using IsType when exception types are modeled
+      -- Catch dispatch: if isFailure($result) then run handler
       let catchStmts ← catches.attach.flatMapM fun ⟨c, _hc⟩ => do
         have : sizeOf c.body < sizeOf stmt := by
           have := WithMetadata.sizeOf_val_lt stmt
           have : sizeOf c < sizeOf catches := List.sizeOf_lt_of_mem _hc
           cases c; cases stmt; simp_all; omega
         let handlerBody ← translateStmt outputParams c.body
-        -- Reset the flag after catching
-        let resetFlag := Core.Statement.set flagIdent (.const () (.boolConst false)) md
+        -- Reset result to Success after catching
+        let resetResult := Core.Statement.set resultIdent successCtor md
         let catchBlock := Imperative.Stmt.ite
-          flagRef
-          (resetFlag :: handlerBody ++ [Imperative.Stmt.exit (some tryLabel) md])
+          isFailureCheck
+          (resetResult :: handlerBody ++ [Imperative.Stmt.exit (some tryLabel) md])
           []
           md
         pure [catchBlock]
@@ -584,11 +582,12 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
     | .Opaque _postconds (some impl) _ => translateStmt proc.outputs impl
     | _ => pure [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty]
   -- Wrap body in a labeled block so early returns (exit) work correctly.
-  -- Add exception flag init so Throw has a variable to set.
-  let flagIdent : Core.CoreIdent := ⟨"$has_exception", ()⟩
-  let flagType : LTy := LTy.forAll [] LMonoTy.bool
-  let initFlag := Core.Statement.init flagIdent flagType (some (.const () (.boolConst false))) .empty
-  let body : List Core.Statement := [initFlag, .block "$body" bodyStmts .empty]
+  -- Add exception result init so Throw has a variable to set.
+  let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+  let resultType : LTy := LTy.forAll [] (.tcons "ExceptionResult" [])
+  let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
+  let initResult := Core.Statement.init resultIdent resultType (some successCtor) .empty
+  let body : List Core.Statement := [initResult, .block "$body" bodyStmts .empty]
   let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions }
   return { header, spec, body }
 
@@ -746,8 +745,21 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
 
     -- Translate Laurel datatype definitions to Core declarations.
     let groupedDatatypeDecls ← translateTypes program model
+
+    -- Inject ExceptionResult datatype for exception support
+    let exceptionResultDt : Lambda.LDatatype Unit := {
+      name := "ExceptionResult"
+      typeArgs := []
+      constrs := [
+        { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
+        { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
+      ]
+      constrs_ne := by decide
+    }
+    let exceptionResultDecl := Core.Decl.type (.data [exceptionResultDt]) .empty
+
     let program := {
-      decls := groupedDatatypeDecls ++ constantDecls ++ pureFuncDecls ++ procDecls
+      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ constantDecls ++ pureFuncDecls ++ procDecls
     }
 
     -- dbg_trace "=== Generated Strata Core Program ==="

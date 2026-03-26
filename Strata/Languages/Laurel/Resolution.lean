@@ -448,6 +448,12 @@ def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
   withScope do
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
+    -- Add $result, Success, and Failure to scope so ensures clauses can reference them.
+    -- These are injected by the Laurel→Core translator for exception support.
+    let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
+    let _ ← defineName { text := "$result" } resultParam
+    let _ ← defineName { text := "Success" } resultParam
+    let _ ← defineName { text := "Failure" } resultParam
     let pres' ← proc.preconditions.mapM resolveStmtExpr
     let det' ← resolveDeterminism proc.determinism
     let dec' ← proc.decreases.mapM resolveStmtExpr
@@ -472,6 +478,11 @@ def resolveInstanceProcedure (typeName : Identifier) (proc : Procedure) : Resolv
     modify fun s => { s with instanceTypeName := some typeName.text }
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
+    -- Add $result, Success, and Failure to scope for ensures clauses.
+    let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
+    let _ ← defineName { text := "$result" } resultParam
+    let _ ← defineName { text := "Success" } resultParam
+    let _ ← defineName { text := "Failure" } resultParam
     let pres' ← proc.preconditions.mapM resolveStmtExpr
     let det' ← resolveDeterminism proc.determinism
     let dec' ← proc.decreases.mapM resolveStmtExpr

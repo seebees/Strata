@@ -152,6 +152,15 @@ def translateExpr (expr : StmtExprMd)
           -- Bound variable: use de Bruijn index
           return .bvar () idx
       | none =>
+        -- Special case: $result is the ExceptionResult output parameter
+        -- injected by the translator. It's not in the Laurel model but
+        -- is accessible in ensures clauses.
+        if name.text == "$result" then
+          return .fvar () ⟨"$result", ()⟩ (some (.tcons "ExceptionResult" []))
+        else if name.text == "Success" || name.text == "Failure" then
+          -- ExceptionResult constructors, used in ensures clauses
+          return .op () ⟨name.text, ()⟩ none
+        else
         match model.get name with
         | .field _ f =>
             return .op () ⟨f.name.text, ()⟩ none

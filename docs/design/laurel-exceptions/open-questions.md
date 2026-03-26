@@ -18,21 +18,8 @@ type int already in context."
 
 ---
 
-## 2. Propagation check exits procedure, not try block
+## 2. ~~Propagation check exits procedure, not try block~~ ✅ FIXED
 
-**Problem:** The cross-method exception propagation check
-(`if isFailure($result) { exit $body }`) always exits to `$body`
-(the procedure-level label). When a method call is inside a
-try/catch block, the propagation exit should go to the try block's
-handler, not to the procedure body.
-
-**Impact:** `try { throwingMethod(); } catch (E e) { ... }` does
-not work as expected for cross-method exceptions.
-
-**Fix:** The propagation check needs to be context-aware. Inside a
-try block, it should exit to the try block's handler label instead
-of `$body`. This requires the translator to track the current
-try/catch context and pass the right label to the propagation check.
-
-**Status:** Known limitation. Workaround: `postconditionOnThrow(false)`
-on the callee prevents the propagation check from firing.
+Fixed: the translator now tracks the current exception target label.
+Inside a try body, propagation exits to the handlers label. Properties
+P9-P12 proven in Lean. See Decision 7 in decisions.md.

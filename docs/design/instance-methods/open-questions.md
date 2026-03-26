@@ -54,17 +54,32 @@ back. Trivial change to `modifiesClausesTransform`.
 Resolved. Write a formal Lean theorem, even though it's trivially `rfl`.
 See Decision 7.
 
-## Q7: What about instance methods calling other instance methods?
+## ~~Q7: Instance methods calling other instance methods~~ → Covered by Q4
 
-If `Counter.increment` calls `Counter.reset` internally, the body
-of `increment` contains an `InstanceCall` to `reset`. After heap
-parameterization, does this work? The callee `reset` needs to be
-recognized as a heap writer, and the call needs heap parameter
-injection. This is the same as Q4 but for intra-composite calls.
+Not a separate question. Once InstanceCall callees are added to the
+`callees` list (Q4 fix), the fixpoint computation in `computeReadsHeap`
+and `computeWritesHeap` handles transitive heap access automatically.
+If `increment` calls `reset` and `reset` writes the heap, the fixpoint
+propagates this to `increment`. The fixpoint doesn't care about call
+type — just callee names.
 
-## Q8: What about inherited instance methods?
+## ~~Q8: Inherited instance methods~~ → Pre-existing limitation, not blocking
 
-If `Extender extends Base` and `Base` has instance method `foo`,
-can `Extender` objects call `foo`? The resolution pass builds
-type scopes with inherited fields. Does it also inherit instance
-procedures? If not, calls to inherited methods won't resolve.
+Instance procedures are defined in the GLOBAL scope (via `defineName`),
+not in a per-type scope. So `Base.foo` is visible everywhere — a call
+to `extender.foo()` resolves `foo` in the global scope and finds it.
+
+Inheritance works for the simple case. The issue is if two different
+types define a method with the same name — the second shadows the first
+in the global scope. This is a pre-existing limitation of the resolution
+pass, not something we introduce.
+
+For our immediate goal (verifying Java code), this isn't blocking:
+Java method calls are resolved by the Java compiler, and JVerify
+emits the resolved method. We don't need Laurel's resolution to
+handle method overriding — JVerify already knows which method is
+being called.
+
+If Laurel needs proper method dispatch later, the resolution pass
+would need per-type method scopes (like it has for fields). That's
+future work.

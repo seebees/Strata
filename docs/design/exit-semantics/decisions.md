@@ -99,3 +99,47 @@ Exit inside a loop body propagates out of the loop. The loop's
 `EvalStmt` constructor must handle `BlockResult` from its body
 evaluation. If the body produces `exited L`, the loop terminates
 and propagates the exit.
+
+## Decision 4: Impact on det→nondet transform
+
+**Context:** Adding exit semantics to `EvalStmt`/`EvalBlock`
+introduced 1 new `sorry` in `Transform/DetToNondetCorrect.lean`.
+The det→nondet transform converts structured imperative programs
+(if/else, while, blocks) into a flat nondeterministic language
+(cmd, seq, choice, loop) for an alternative verification path.
+
+The transform strips block labels and replaces `exit` with
+`assume true` (a no-op). This means `block "L" [s1, exit "L", s2]`
+becomes `seq(s1, seq(skip, s2))` — executing s2 even though the
+deterministic program skips it.
+
+### Is this a soundness issue?
+
+No, for two reasons:
+
+1. **The transform is not in the production pipeline.** The actual
+   verification path is Laurel → Core → `StatementEval.lean`
+   (operational evaluator) → SMT. The operational evaluator
+   handles exit correctly via its `exitLabel` field. Nothing in
+   the production pipeline imports `DetToNondet` or
+   `DetToNondetCorrect`.
+
+2. **Over-approximation is conservative.** The nondet program
+   explores MORE paths than the deterministic one (it doesn't
+   skip statements after exit). For verification, more paths =
+   more checks = conservative. If the nondet program has no
+   assertion violations, the deterministic program doesn't either.
+   The sorry is about the precision of the correctness theorem's
+   statement, not about verification soundness.
+
+### Decision
+
+Leave the sorry. It marks a real limitation in a theoretical
+formalization that is not on our execution path. The sorry is
+isolated — nothing imports `DetToNondetCorrect.lean`. Lean's
+sorry tracking will flag any accidental dependency.
+
+If the det→nondet transform is later needed for programs with
+exit, the transform itself should be updated to model exit
+(e.g., by translating labeled blocks and exit into the nondet
+language), and the correctness theorem should be re-proven.

@@ -25,6 +25,7 @@ import Strata.Languages.Core.SeqModel
 import Strata.Languages.Core.StatementSemantics
 import Strata.Languages.Core.SarifOutput
 import Strata.Languages.Laurel.LaurelToCoreTranslator
+import Strata.Languages.Laurel.InstanceMethodProperties
 
 /- Code Transforms -/
 import Strata.Transform.CallElimCorrect

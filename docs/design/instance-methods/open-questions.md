@@ -7,18 +7,12 @@
 Resolved. Heap parameterization injects `$heap` into InstanceCall args,
 same as it does for StaticCall. See Decision 4.
 
-## Q2: Instance procedure parameter order in Core
+## ~~Q2: Instance procedure parameter order in Core~~ → Decision 5
 
-After heap transform, an instance procedure has parameters:
-- `$heap_in` (if heap writer) or `$heap` (if heap reader)
-- `self: Composite`
-- Other params
-
-At the call site, `InstanceCall target callee args` should produce
-Core arguments in the same order. Need to confirm:
-- Does `target` map to `self`?
-- Does `$heap` come before or after `target` in the Core call?
-- This must match the definition's parameter order exactly.
+Resolved. Same pattern as static calls. `$heap` is prepended to args
+by heap parameterization. The translator flattens InstanceCall by
+prepending `target` (which maps to `self`) after `$heap`. No new
+information — follows the existing static call convention. See Decision 5.
 
 ## Q3: SelfRef / This handling
 

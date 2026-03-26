@@ -164,3 +164,22 @@ More fundamentally: the heap parameterization's job is heap
 parameterization. It does this for StaticCall. It should do it for
 InstanceCall too. Leaving InstanceCall unparameterized would mean
 the pass is incomplete — it handles some calls but not others.
+
+---
+
+## Decision 5: Instance procedure parameter order follows static call convention
+
+**Options:**
+
+- **A. Invent a new parameter order for instance calls.**
+- **B. Follow the same pattern as static calls.**
+
+**Choice:** B
+
+**Rationale:** There's no new information here. Static calls prepend
+`$heap` to args. Instance procedure definitions prepend `$heap` to
+inputs (with `self` as the first declared parameter). The translator
+flattens `InstanceCall target callee [$heap, otherArgs...]` to
+`Core.call name [$heap, target, otherArgs...]`. `target` maps to
+`self` — same position in both definition and call. Just follow
+what static calls already do.

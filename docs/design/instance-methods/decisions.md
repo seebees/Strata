@@ -183,3 +183,32 @@ flattens `InstanceCall target callee [$heap, otherArgs...]` to
 `Core.call name [$heap, target, otherArgs...]`. `target` maps to
 `self` — same position in both definition and call. Just follow
 what static calls already do.
+
+---
+
+## Decision 6: self is a regular parameter, not a special AST node
+
+**Options:**
+
+- **A. Use the `This` AST node for self-references in instance methods.**
+  The Laurel AST has a `This` node. We could parse `self` as `This`
+  and handle it specially in each pass.
+
+- **B. Use `self` as a regular parameter name (`Identifier("self")`).**
+  Instance methods declare `self` as their first parameter, same as
+  any other parameter. Field access `self#count` is
+  `FieldSelect(Identifier("self"), "count")` — identical to how
+  static procedures access composite fields.
+
+**Choice:** B
+
+**Rationale:** This is already how Laurel works. The T7 test declares
+`procedure increment(self: Counter)` — `self` is a parameter. The
+`This` AST node exists but is dead code: nothing parses it, no test
+uses it, resolution passes it through unchanged, the type computation
+returns `default` with a TODO, and the translator rejects it.
+
+Static procedures already take composite parameters and access their
+fields (`c#intValue`). Instance methods do the same thing with a
+parameter named `self`. No new mechanism needed. On the JVerify side,
+Java's `this` maps to `Identifier("self")`.

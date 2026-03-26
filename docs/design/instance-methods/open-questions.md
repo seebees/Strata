@@ -14,14 +14,14 @@ by heap parameterization. The translator flattens InstanceCall by
 prepending `target` (which maps to `self`) after `$heap`. No new
 information — follows the existing static call convention. See Decision 5.
 
-## Q3: SelfRef / This handling
+## ~~Q3: SelfRef / This handling~~ → Decision 6
 
-Inside an instance method body, `self` is an explicit parameter in
-Laurel. The AST also has `SelfRef` / `This` nodes. Questions:
-- Is `SelfRef` used anywhere, or is `self` always an `Identifier`?
-- When JVerify emits Laurel for Java instance methods, should it
-  emit `SelfRef` or `Identifier("self")`?
-- Does the resolution pass handle `SelfRef` specially?
+Resolved. `This`/`SelfRef` is dead code in the Laurel AST — nothing
+parses it, no test uses it, the translator rejects it. Instance methods
+use `self` as a regular parameter (`Identifier("self")`). Field access
+`self#count` is `FieldSelect(Identifier("self"), "count")` — identical
+to how static procedures access composite fields (`c#intValue`).
+No special handling needed. See Decision 6.
 
 ## Q4: Heap analysis for InstanceCall callees
 

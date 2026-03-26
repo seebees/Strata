@@ -479,11 +479,12 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       return [Imperative.Stmt.loop condExpr decreasingExprCore invExprs bodyStmts md]
   | .Exit target =>
       return [Imperative.Stmt.exit (some target) md]
-  | .Throw exception =>
+  | .Throw _exception =>
       -- Throw translates to:
       --   $result := Failure();
       --   exit $body;
-      let _exceptionExpr ← translateExpr exception
+      -- Note: the exception expression is not translated because the ExceptionResult
+      -- ADT doesn't carry a value. The exception type is only used for catch dispatch.
       let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
       let failureCtor : Core.Expression.Expr := .op () ⟨"Failure", ()⟩ none
       let setResult := Core.Statement.set resultIdent failureCtor md

@@ -23,27 +23,31 @@ use `self` as a regular parameter (`Identifier("self")`). Field access
 to how static procedures access composite fields (`c#intValue`).
 No special handling needed. See Decision 6.
 
-## Q4: Heap analysis for InstanceCall callees
+## ~~Q4: Heap analysis for InstanceCall callees~~ → Not a decision, mechanical fix
 
-The heap analysis phase does NOT add `InstanceCall` callees to the
-`callees` list (line 62 of HeapParameterization.lean). This means
-if procedure A calls instance method B that writes the heap, A won't
-know it needs `$heap` as a parameter.
+Confirmed this is a real bug. The analysis does NOT add `InstanceCall`
+callees to the `callees` list. A procedure that only interacts with
+the heap through instance calls (no direct field access, no `new`)
+won't be identified as a heap reader/writer.
 
-Fix seems straightforward: add callee to `callees` list. But the
-callee name must match the instance procedure's name as it appears
-in the analysis. Need to verify the names align.
+The analysis already runs over all procedures including instance ones
+(line 478: `allProcs := staticProcedures ++ instanceProcs`), so
+instance procedures themselves are correctly analyzed. The gap is
+at CALL SITES — `InstanceCall` in a caller's body doesn't propagate
+the callee's heap status to the caller.
 
-## Q5: Modifies clauses for instance procedures
+Fix: add callee to `callees` list in `collectExpr`, same as `StaticCall`.
+Also: inject `$heap` into `InstanceCall` in the transform phase, same
+pattern as `StaticCall`. Both are mechanical — follow the existing code.
 
-The modifies clauses transform only processes `staticProcedures`.
-Instance procedures with `modifies self` won't get frame conditions.
+## ~~Q5: Modifies clauses for instance procedures~~ → Not a decision, mechanical fix
 
-Options:
-- a. Also iterate instance procedures from composites
-- b. Handle modifies in the translator for instance procedures
-- c. Promote instance procedures to staticProcedures just for
-     this pass (but this contradicts Decision 1)
+`modifiesClausesTransform` only iterates `staticProcedures`. The
+per-procedure function `transformModifiesClauses` works on any
+`Procedure` — it doesn't care if it's static or instance.
+
+Fix: also iterate instance procedures from composites and put them
+back. Trivial change to `modifiesClausesTransform`.
 
 ## Q6: What does the consistency proof look like concretely?
 

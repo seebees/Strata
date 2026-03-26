@@ -276,6 +276,12 @@ Formally: for a call inside `TryCatch(body, [], some(finally))`,
 if the callee returns `Failure`, the finally block executes and
 then the caller's `$result` is `Failure`.
 
+Note: This may follow directly from P6 (finally execution for
+local throws) composed with P9 (propagation into try). Stating
+it separately reduces cognitive load for reviewers — "does finally
+run when a callee throws?" should be answerable without composing
+two other properties. The proof can reference P6 and P9.
+
 ## 6. Proof Dependencies
 
 The Lean proofs for Properties 1, 2, 4, and 6 depend on the

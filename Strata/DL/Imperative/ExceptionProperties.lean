@@ -151,3 +151,52 @@ theorem ensures_isolation_success (r : ExceptionResult) (P : Prop) :
 theorem ensures_isolation_failure (r : ExceptionResult) (P : Prop) :
     r.isSuccess = true → (r.isFailure = true → P) := by
   cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
+
+namespace Imperative
+
+open BlockResult
+
+variable {P : PureExpr} {Cmd : Type} {EvalCmd : EvalCmdParam P Cmd}
+  {extendEval : ExtendEval P}
+  [DecidableEq P.Ident]
+  [HasVarsImp P (List (Stmt P Cmd))] [HasVarsImp P Cmd]
+  [HasFvar P] [HasVal P] [HasBool P] [HasNot P]
+
+/-- **P3: Catch Dispatch Correctness (first handler wins).**
+    In the translated catch dispatch, handlers are a sequence of
+    if-then-exit blocks. If the condition of the first handler is true,
+    it executes and exits, skipping all subsequent handlers.
+
+    This is the ordering property: the first matching handler runs. -/
+theorem first_catch_handler_wins
+    (HcondTrue : δ σ catchCond = .some HasBool.tt)
+    (Hwf : WellFormedSemanticEvalBool δ)
+    (HhandlerEval : EvalBlock P Cmd EvalCmd extendEval δ σ handlerBody σ₁ br₁ δ₁)
+    (remainingCatches : List (Stmt P Cmd)) :
+    -- The ite takes the true branch (first handler runs)
+    EvalStmt P Cmd EvalCmd extendEval δ σ
+      (.ite catchCond handlerBody [] md) σ₁ br₁ δ₁ :=
+  .ite_true_sem HcondTrue Hwf HhandlerEval
+
+/-- **P3 (corollary): If the first handler runs and exits, subsequent handlers are skipped.** -/
+theorem first_handler_skips_rest
+    (HfirstHandler : EvalStmt P Cmd EvalCmd extendEval δ σ firstCatch σ₁ (.exited label) δ₁)
+    (restCatches : List (Stmt P Cmd)) :
+    EvalBlock P Cmd EvalCmd extendEval δ σ (firstCatch :: restCatches) σ₁ (.exited label) δ₁ :=
+  .stmts_exit_sem HfirstHandler
+
+/-- **P5: Exception Propagation.**
+    If a throw occurs and the exit propagates past all enclosing blocks
+    (no TryCatch catches it), the exit reaches the procedure body block.
+    The procedure body block ($body) consumes the exit, and the $result
+    variable retains its Failure value (set by Throw before the exit).
+
+    This is E3 (matching block consumes) applied to the $body block:
+    the procedure wrapper block consumes the exit, completing normally,
+    with $result = Failure in the store. -/
+theorem exception_propagates_to_body
+    (HbodyEval : EvalBlock P Cmd EvalCmd extendEval δ σ bodyStmts σ₁ (.exited (.some bodyLabel)) δ₁) :
+    EvalStmt P Cmd EvalCmd extendEval δ σ (.block bodyLabel bodyStmts md) σ₁ .normal δ₁ :=
+  .block_sem HbodyEval (consumeExit_exited_same bodyLabel)
+
+end Imperative

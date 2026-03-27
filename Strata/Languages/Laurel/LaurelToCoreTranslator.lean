@@ -56,7 +56,9 @@ def translateType (model : SemanticModel) (ty : HighTypeMd) : LMonoTy :=
   | .TSet elementType => Core.mapTy (translateType model elementType) LMonoTy.bool
   | .TMap keyType valueType => Core.mapTy (translateType model keyType) (translateType model valueType)
   | .UserDefined name =>
-    match name.uniqueId.bind model.refToDef.get? with
+    -- JArray maps to Core Sequence type (polymorphic, using int as element placeholder)
+    if name.text == "JArray" then Core.seqTy LMonoTy.int
+    else match name.uniqueId.bind model.refToDef.get? with
     | some (.compositeType _) => .tcons "Composite" []
     | some (.datatypeDefinition dt) => .tcons dt.name.text []
     | some (.constrainedType ct) =>
@@ -783,6 +785,7 @@ Translate Laurel Program to Core Program
 def translate (options: LaurelTranslateOptions) (program : Program): TranslateResult :=
   let program := { program with
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+    types := coreDefinitionsForLaurel.types ++ program.types
   }
 
   let result := resolve program

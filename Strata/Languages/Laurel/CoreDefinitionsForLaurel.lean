@@ -38,6 +38,23 @@ function update(map: int, key: int, value: int) : int
 function const(value: int) : int
   external;
 
+// Sequence (array) operations — types are placeholders, Core handles polymorphism
+function Sequence.length(s: int) : int
+  external;
+
+function Sequence.select(s: int, i: int) : int
+  external;
+
+function Sequence.update(s: int, i: int, v: int) : int
+  external;
+
+function Sequence.build(i: int, v: int) : int
+  external;
+
+// JArray: placeholder composite so resolution succeeds for array parameters.
+// Translated to Core Sequence type by the translator.
+composite JArray {}
+
 #end
 
 /--

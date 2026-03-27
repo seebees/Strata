@@ -253,7 +253,8 @@ public def constrainedTypeElim (_model : SemanticModel) (program : Program) : Pr
                         ++ witnessProcedures
     types := (program.types.filter fun | .Constrained _ => false | _ => true).map fun
       | .Composite ct => .Composite { ct with
-          instanceProcedures := ct.instanceProcedures.map (elimProc ptMap) }
+          instanceProcedures := ct.instanceProcedures.map (elimProc ptMap)
+          fields := ct.fields.map fun f => { f with type := resolveType ptMap f.type } }
       | other => other },
    funcDiags)
 

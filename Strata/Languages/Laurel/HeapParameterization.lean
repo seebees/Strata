@@ -179,8 +179,17 @@ def boxDestructorName (model : SemanticModel) (ty : HighType) : Identifier :=
   | .TReal => "Box..realVal!"
   | .TString => "Box..stringVal!"
   | .UserDefined name =>
-      if isDatatype model name then s!"Box..{name.text}Val!"
-      else "Box..compositeVal!"
+      match name.uniqueId.bind model.refToDef.get? with
+      | some (.constrainedType ct) =>
+          match ct.base.val with
+          | .TInt => "Box..intVal!"
+          | .TBool => "Box..boolVal!"
+          | .TReal => "Box..realVal!"
+          | .TString => "Box..stringVal!"
+          | _ => "Box..compositeVal!"
+      | _ =>
+        if isDatatype model name then s!"Box..{name.text}Val!"
+        else "Box..compositeVal!"
   | .TCore name => s!"Box..{name}Val!"
   | _ => dbg_trace f!"BUG, boxDestructorName bad type {ty}"; "boxDestructorNameError"
 
@@ -195,8 +204,17 @@ def boxConstructorName (model : SemanticModel) (ty : HighType) : Identifier :=
   | .TReal => "BoxReal"
   | .TString => "BoxString"
   | .UserDefined name =>
-      if isDatatype model name then s!"Box..{name.text}"
-      else "BoxComposite"
+      match name.uniqueId.bind model.refToDef.get? with
+      | some (.constrainedType ct) =>
+          match ct.base.val with
+          | .TInt => "BoxInt"
+          | .TBool => "BoxBool"
+          | .TReal => "BoxReal"
+          | .TString => "BoxString"
+          | _ => "BoxComposite"
+      | _ =>
+        if isDatatype model name then s!"Box..{name.text}"
+        else "BoxComposite"
   | .TCore name => s!"Box..{name}"
   | ty => dbg_trace s!"BUG, boxConstructorName bad type: {repr ty}"; "boxConstructorNameError"
 
@@ -209,10 +227,19 @@ private def boxConstructorDef (model : SemanticModel) (ty : HighType) : Option D
   | .TFloat64 => some { name := "BoxFloat64", args := [{ name := "float64Val", type := ⟨.TFloat64, #[]⟩ }] }
   | .TString => some { name := "BoxString", args := [{ name := "stringVal", type := ⟨.TString, #[]⟩ }] }
   | .UserDefined name =>
-      if isDatatype model name then
-        some { name := s!"Box..{name.text}", args := [{ name := s!"{name.text}Val", type := ⟨.UserDefined name, #[]⟩ }] }
-      else
-        some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
+      match name.uniqueId.bind model.refToDef.get? with
+      | some (.constrainedType ct) =>
+          match ct.base.val with
+          | .TInt => some { name := "BoxInt", args := [{ name := "intVal", type := ⟨.TInt, #[]⟩ }] }
+          | .TBool => some { name := "BoxBool", args := [{ name := "boolVal", type := ⟨.TBool, #[]⟩ }] }
+          | .TReal => some { name := "BoxReal", args := [{ name := "realVal", type := ⟨.TReal, #[]⟩ }] }
+          | .TString => some { name := "BoxString", args := [{ name := "stringVal", type := ⟨.TString, #[]⟩ }] }
+          | _ => some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
+      | _ =>
+        if isDatatype model name then
+          some { name := s!"Box..{name.text}", args := [{ name := s!"{name.text}Val", type := ⟨.UserDefined name, #[]⟩ }] }
+        else
+          some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
   | .TCore name =>
         some { name := s!"Box..{name}", args := [{ name := s!"{name}Val", type := ⟨.TCore name, #[]⟩ }] }
   | ty => dbg_trace s!"BUG, boxConstructorDef bad type: {repr ty}"; none

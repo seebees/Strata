@@ -542,9 +542,35 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       match valueOpt, outputParams.head? with
       | some value, some outParam =>
           let ident := ⟨outParam.name.text, ()⟩
-          let coreExpr ← translateExpr value
-          let assignStmt := Core.Statement.set ident coreExpr md
-          return [assignStmt, .exit (some "$body") md]
+          -- Check if the return value is a procedure call (not a function)
+          match value.val with
+          | .InstanceCall target callee args =>
+              match resolveInstanceCallName model callee with
+              | some coreName =>
+                  if model.isFunction callee then
+                    let coreExpr ← translateExpr value
+                    return [Core.Statement.set ident coreExpr md, .exit (some "$body") md]
+                  else
+                    let coreTarget ← translateExpr target
+                    let coreArgs ← args.mapM (fun a => translateExpr a)
+                    let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+                    let callStmt := Core.Statement.call [ident, resultIdent] coreName (coreTarget :: coreArgs) value.md
+                    return [callStmt] ++ (← exceptionPropagationCheck value.md) ++ [.exit (some "$body") md]
+              | none =>
+                  let coreExpr ← translateExpr value
+                  return [Core.Statement.set ident coreExpr md, .exit (some "$body") md]
+          | .StaticCall callee args =>
+              if model.isFunction callee then
+                let coreExpr ← translateExpr value
+                return [Core.Statement.set ident coreExpr md, .exit (some "$body") md]
+              else
+                let coreArgs ← args.mapM (fun a => translateExpr a)
+                let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+                let callStmt := Core.Statement.call [ident, resultIdent] callee.text coreArgs value.md
+                return [callStmt] ++ (← exceptionPropagationCheck value.md) ++ [.exit (some "$body") md]
+          | _ =>
+              let coreExpr ← translateExpr value
+              return [Core.Statement.set ident coreExpr md, .exit (some "$body") md]
       | none, _ =>
           return [.exit (some "$body") md]
       | some _, none =>

@@ -13,14 +13,15 @@ the compiler — which is the long-term goal.
 
 If `nat32 ⊆ int64`, should Strata prove this? This would let the
 prover automatically accept assignments from `nat32` to `int64`
-without re-proving the constraint. This is a future optimization.
+without re-proving the constraint. Future optimization.
 
-### Q3: What about compound constraints?
+### Q3: Should `constrainedTypeElim` support constrained return types on functions?
 
-Some languages have constraints that aren't simple ranges. For
-example, "this value is a valid Unicode code point" (0..0x10FFFF,
-excluding surrogates). Should the library support arbitrary
-predicates, or only range constraints?
+The current implementation uses procedures with postconditions as
+a workaround. Supporting constrained return types on functions
+directly would be cleaner for pure operations. The `elimProc`
+function already has the infrastructure — the `isFunctional` guard
+just needs to be removed, and the translator needs to handle
+functions with postconditions.
 
-For now, range constraints are sufficient. Arbitrary predicates
-can be added later if needed.
+This is not blocking but would be a nice cleanup.

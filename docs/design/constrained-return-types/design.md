@@ -37,34 +37,27 @@ Mathematical facts true for all languages:
 
 These are proven in Lean. No trust required.
 
-### Layer 2: Strata/Laurel — Library of Constrained Types
+### Layer 2: Strata/Laurel — Constrained Types and Procedure Postconditions
 
-Mathematical number sets with proven properties:
-- `nat32`: `x >= 0 && x <= 2147483647`
-- `nat53`: `x >= 0 && x <= 9007199254740991` (JS safe integer)
-- `nat63`: `x >= 0 && x <= 9223372036854775807` (64-bit non-negative)
-- `int8`, `int16`, `int32`, `int64`: signed ranges
-- `uint8`, `uint16`, `uint32`: unsigned ranges
+Constrained types (`int32`, `nat32`, etc.) are mathematical facts
+about number ranges. They live in Laurel. Strata translates them
+to Core. The existing procedure postcondition machinery propagates
+constraints to callers.
 
-These are mathematical facts — not language-specific. Any language
-can use them. Their properties (subset relationships, range bounds)
-are provable.
+### Layer 3: Language Compiler — Type Selection and Wrapper Procedures
 
-### Layer 3: Language Compiler — Type Selection
+Each compiler selects constrained types and emits wrapper procedures
+with postconditions that encode language-specific invariants. The
+compiler CANNOT invent new axioms in Core. It can only emit Laurel
+procedures with postconditions, which Strata translates to Core
+using the existing proven machinery.
 
-Each compiler selects from the library of constrained types:
-- Java: `array.length` returns `nat32`
-- JavaScript: `array.length` returns `nat53`
-- Go: `len(slice)` returns `nat63`
-- Python: `len(list)` returns `int` (unbounded, no constraint)
+## Current Status
 
-The compiler CANNOT invent new axioms. It can only SELECT from
-proven constrained types. The trust surface is: "did the compiler
-pick the right type?" This is small, auditable, and eventually
-verifiable (by verifying the compiler itself).
+The initial design assumed we'd need to modify Strata's
+`constrainedTypeElim` to support constrained return types on
+functions. This turned out to be unnecessary. The existing procedure
+postcondition machinery already handles everything we need.
 
-## Implementation Plan
-
-1. Support constrained return types on functions in `constrainedTypeElim`
-2. Define `nat32` and other common constrained types in shared Laurel
-3. JVerify compiler: emit `JArray.length` returning `nat32`
+See `jverify/design/array-support/decisions.md` for the JVerify-side
+implementation that uses this architecture.

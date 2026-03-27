@@ -289,6 +289,13 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
         | .seq _ .comma args => args.toList.mapM translateStmtExpr
         | _ => pure []
       return mkStmtExprMd (.StaticCall calleeName argsList) md
+    | q`Laurel.instanceCall, #[targetArg, calleeArg, argsSeq] =>
+      let target ← translateStmtExpr targetArg
+      let calleeName ← translateIdent calleeArg
+      let argsList ← match argsSeq with
+        | .seq _ .comma args => args.toList.mapM translateStmtExpr
+        | _ => pure []
+      return mkStmtExprMd (.InstanceCall target calleeName argsList) md
     | q`Laurel.return, #[arg0] =>
       let value ← translateStmtExpr arg0
       return mkStmtExprMd (.Return (some value)) md

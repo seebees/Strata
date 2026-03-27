@@ -59,6 +59,14 @@ def translateType (model : SemanticModel) (ty : HighTypeMd) : LMonoTy :=
     match name.uniqueId.bind model.refToDef.get? with
     | some (.compositeType _) => .tcons "Composite" []
     | some (.datatypeDefinition dt) => .tcons dt.name.text []
+    | some (.constrainedType ct) =>
+        -- Translate the base type directly (one level only, no recursion)
+        match ct.base.val with
+        | .TInt => LMonoTy.int
+        | .TBool => LMonoTy.bool
+        | .TString => LMonoTy.string
+        | .TReal => LMonoTy.real
+        | _ => .tcons "Composite" []
     | _ => .tcons "Composite" [] -- fallback for unresolved refs
   | .TCore s => .tcons s []
   | .TReal => LMonoTy.real

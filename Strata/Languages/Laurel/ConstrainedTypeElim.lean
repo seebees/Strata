@@ -251,7 +251,10 @@ public def constrainedTypeElim (_model : SemanticModel) (program : Program) : Pr
   ({ program with
     staticProcedures := constraintFuncs ++ program.staticProcedures.map (elimProc ptMap)
                         ++ witnessProcedures
-    types := program.types.filter fun | .Constrained _ => false | _ => true },
+    types := (program.types.filter fun | .Constrained _ => false | _ => true).map fun
+      | .Composite ct => .Composite { ct with
+          instanceProcedures := ct.instanceProcedures.map (elimProc ptMap) }
+      | other => other },
    funcDiags)
 
 end Strata.Laurel

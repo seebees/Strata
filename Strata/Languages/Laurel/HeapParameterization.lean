@@ -241,6 +241,23 @@ def freshVarName : TransformM Identifier := do
 /-- Helper to wrap a StmtExpr into StmtExprMd with empty metadata -/
 private def mkMd (e : StmtExpr) : StmtExprMd := ⟨e, #[]⟩
 
+/-- Substitute all occurrences of an identifier name in a StmtExprMd. -/
+partial def substituteIdentifier (from_ to_ : Identifier) (expr : StmtExprMd) : StmtExprMd :=
+  let rec go (e : StmtExprMd) : StmtExprMd :=
+    let ⟨val, md⟩ := e
+    match val with
+    | .Identifier name => if name.text == from_.text then ⟨.Identifier to_, md⟩ else e
+    | .StaticCall callee args => ⟨.StaticCall callee (args.map go), md⟩
+    | .PrimitiveOp op args => ⟨.PrimitiveOp op (args.map go), md⟩
+    | .Block stmts label => ⟨.Block (stmts.map go) label, md⟩
+    | .IfThenElse c t el => ⟨.IfThenElse (go c) (go t) (el.map go), md⟩
+    | .Assign targets v => ⟨.Assign (targets.map go) (go v), md⟩
+    | .LocalVariable n ty i => ⟨.LocalVariable n ty (i.map go), md⟩
+    | .FieldSelect t f => ⟨.FieldSelect (go t) f, md⟩
+    | .InstanceCall t c args => ⟨.InstanceCall (go t) c (args.map go), md⟩
+    | _ => e
+  go expr
+
 /--
 Resolve the owning composite type name for a field access by computing the target expression's type.
 Returns the qualified field name "DeclaringType.fieldName".
@@ -397,7 +414,13 @@ where
       let trigger' ← trigger.attach.mapM fun ⟨t, _⟩ => recurse t
       return ⟨.Exists p trigger' (← recurse b), md⟩
     | .Assigned n => return ⟨ .Assigned (← recurse n), md ⟩
-    | .Old v => return ⟨ .Old (← recurse v), md ⟩
+    | .Old v =>
+        -- Inside old(), field reads should use the input heap ($heap_in), not the current heap.
+        -- We recurse normally (using $heap), then substitute $heap → $heap_in in the result.
+        let inner ← recurse v
+        let heapInName : Identifier := "$heap_in"
+        let replaced := substituteIdentifier heapVar heapInName inner
+        return ⟨ .Old replaced, md ⟩
     | .Fresh v => return ⟨ .Fresh (← recurse v), md ⟩
     | .Assert c => return ⟨ .Assert (← recurse c), md ⟩
     | .Assume c => return ⟨ .Assume (← recurse c), md ⟩

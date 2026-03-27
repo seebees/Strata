@@ -97,6 +97,7 @@ op ifThenElse (cond: StmtExpr, thenBranch: StmtExpr, elseBranch: Option Optional
 
 op assert (cond : StmtExpr, errorMessage: Option OptionalErrorMessage) : StmtExpr => @[prec(0)] "assert " cond:0 errorMessage:0;
 op assume (cond : StmtExpr) : StmtExpr => @[prec(0)] "assume " cond:0;
+op old (value : StmtExpr) : StmtExpr => "old(" value ")";
 op return (value : StmtExpr) : StmtExpr => @[prec(0)] "return " value:0;
 op block (stmts : SemicolonSepBy StmtExpr) : StmtExpr => @[prec(1000)] "{" stmts "}";
 op labelledBlock (stmts : SemicolonSepBy StmtExpr, label : Ident) : StmtExpr => @[prec(1000)] "{" stmts "}" label;

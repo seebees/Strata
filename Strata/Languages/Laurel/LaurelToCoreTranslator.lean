@@ -318,7 +318,12 @@ def translateExpr (expr : StmtExprMd)
 
   | .AsType target _ => throwExprDiagnostic $ md.toDiagnostic "AsType expression translation" DiagnosticType.NotYetImplemented
   | .Assigned _ => throwExprDiagnostic $ md.toDiagnostic "assigned expression translation" DiagnosticType.NotYetImplemented
-  | .Old value => throwExprDiagnostic $ md.toDiagnostic "old expression translation" DiagnosticType.NotYetImplemented
+  | .Old value =>
+      -- old(expr) in postconditions references the pre-state.
+      -- For heap state: the heap parameterization already substituted $heap → $heap_in inside Old.
+      -- For parameters: they're immutable, so old(x) == x.
+      -- In both cases, just translate the inner expression normally.
+      translateExpr value boundVars isPureContext
   | .Fresh _ => throwExprDiagnostic $ md.toDiagnostic "fresh expression translation" DiagnosticType.NotYetImplemented
   | .Assert _ => throwExprDiagnostic $ md.toDiagnostic "assert expression translation" DiagnosticType.NotYetImplemented
   | .Assume _ => throwExprDiagnostic $ md.toDiagnostic "assume expression translation" DiagnosticType.NotYetImplemented

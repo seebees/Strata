@@ -54,6 +54,8 @@ function Sequence.build(i: int, v: int) : int
 // JArray: placeholder composite so resolution succeeds for array parameters.
 // Translated to Core Sequence type by the translator.
 composite JArray {}
+composite JArrayBool {}
+composite JArrayComposite {}
 
 #end
 

@@ -56,8 +56,10 @@ def translateType (model : SemanticModel) (ty : HighTypeMd) : LMonoTy :=
   | .TSet elementType => Core.mapTy (translateType model elementType) LMonoTy.bool
   | .TMap keyType valueType => Core.mapTy (translateType model keyType) (translateType model valueType)
   | .UserDefined name =>
-    -- JArray maps to Core Sequence type (polymorphic, using int as element placeholder)
+    -- JArray types map to Core Sequence with appropriate element type
     if name.text == "JArray" then Core.seqTy LMonoTy.int
+    else if name.text == "JArrayBool" then Core.seqTy LMonoTy.bool
+    else if name.text == "JArrayComposite" then Core.seqTy (.tcons "Composite" [])
     else match name.uniqueId.bind model.refToDef.get? with
     | some (.compositeType _) => .tcons "Composite" []
     | some (.datatypeDefinition dt) => .tcons dt.name.text []

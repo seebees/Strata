@@ -188,7 +188,7 @@ def boxDestructorName (model : SemanticModel) (ty : HighType) : Identifier :=
           | .TString => "Box..stringVal!"
           | _ => "Box..compositeVal!"
       | some (.compositeType _) =>
-          if name.text == "JArray" then "Box..sequenceVal!"
+          if name.text.startsWith "JArray" then "Box..sequenceVal!"
           else "Box..compositeVal!"
       | _ =>
         if isDatatype model name then s!"Box..{name.text}Val!"
@@ -216,7 +216,7 @@ def boxConstructorName (model : SemanticModel) (ty : HighType) : Identifier :=
           | .TString => "BoxString"
           | _ => "BoxComposite"
       | some (.compositeType _) =>
-          if name.text == "JArray" then "BoxSequence"
+          if name.text.startsWith "JArray" then "BoxSequence"
           else "BoxComposite"
       | _ =>
         if isDatatype model name then s!"Box..{name.text}"
@@ -242,7 +242,7 @@ private def boxConstructorDef (model : SemanticModel) (ty : HighType) : Option D
           | .TString => some { name := "BoxString", args := [{ name := "stringVal", type := ⟨.TString, #[]⟩ }] }
           | _ => some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
       | some (.compositeType _) =>
-          if name.text == "JArray"
+          if name.text.startsWith "JArray"
           then some { name := "BoxSequence", args := [{ name := "sequenceVal", type := ⟨.UserDefined name, #[]⟩ }] }
           else some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
       | _ =>

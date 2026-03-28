@@ -30,40 +30,34 @@ Strata translates using proven machinery.
 `seqLengthFunc` in `Factory.lean` has this axiom. Language compilers
 only need to add the UPPER bound via their wrapper procedures.
 
-### D4: Functions with axioms are the right mechanism
+### D4: Functions with axioms are the right long-term mechanism
 
-**Status:** Revised
+**Status:** Revised — deferred pending Core investigation
 
 We originally chose to emit `JArray.length` as a procedure with
 ensures because functions couldn't carry postconditions. This was
 a workaround, not the right design.
 
-Core functions DO carry properties — via axioms, not postconditions.
-Axioms are the established mechanism for function properties in
-Core. The Sequence operations use axioms. Functions are pure and
-callable in all contexts (contracts, postconditions, statements).
+Core functions carry properties via axioms (e.g., Sequence
+operations). Functions are pure and callable in all contexts
+(contracts, postconditions, statements). `JArray.length` as a
+function with axioms would eliminate the `pureContext` flag.
 
-The procedure approach forced a `pureContext` flag in the JVerify
-compiler: contracts use `Sequence.length` directly (a function),
-while statements use `JArray.length` (a procedure). This
-distinction is unnecessary if `JArray.length` is a function with
-axioms.
+However, the Laurel-to-Core translator does not currently generate
+axioms from Laurel functions. Core function axioms are built into
+Core's Factory for mathematical operations. Extending the translator
+to generate axioms from Laurel is possible but requires
+investigation.
 
-`JArray.length` should be refactored from a procedure with ensures
-to a function with axioms:
+For the immediate constrained-type-in-heap problem, we chose a
+different mechanism: the constrained type elimination pass generates
+assumes for datatype accessor reads. See
+`constrained-types-in-heap/decisions.md` D4.
 
-```
-function JArray.length(heap: Heap, s: JArray) : int
-  axiom: JArray.length(heap, s) == Sequence.length(...)
-  axiom: JArray.length(heap, s) >= 0
-  axiom: JArray.length(heap, s) <= 2147483647
-```
-
-This eliminates the `pureContext` flag for array length and allows
-`JArray.length` to be used in contracts and postconditions.
-
-See also: `constrained-types-in-heap/decisions.md` D4, which uses
-the same pattern for constrained-type field reads.
+The `JArray.length` refactoring from procedure to function with
+axioms remains a future improvement. The `pureContext` flag stays
+for now. This is a two-way door — the compiler interface doesn't
+change, only Strata internals.
 
 ### D5: Different languages have different bounds
 

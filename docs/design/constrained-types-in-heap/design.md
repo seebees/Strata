@@ -49,44 +49,46 @@ destructors.
 
 ### The fix
 
-The heap parameterization generates wrapper functions for
-constrained-type field reads. The wrapper calls the raw datatype
-accessor and carries the constraint as a function axiom.
+The constrained type elimination pass handles both sides of the
+heap round-trip:
 
-Core functions already have an `axioms` field — this is the
-established mechanism for function properties. The Sequence
-operations use axioms (e.g., `Sequence.length(Sequence.build(s, v))
-== Sequence.length(s) + 1`). The wrapper functions follow the same
-pattern.
+- **Write side (existing):** When a value is stored in a Box
+  constructor with a constrained-type argument, the pass inserts
+  `assert int32$constraint(value)`. The prover must prove this.
 
-Functions are pure and callable in all contexts — contracts,
-postconditions, and statements. This avoids the limitation where
-procedures cannot be called in pure contexts.
+- **Read side (new):** When a datatype accessor extracts a value
+  whose constructor argument had a constrained type, the pass
+  inserts `assume int32$constraint(value)`. The prover can use
+  this knowledge.
 
-This is general — it applies to all datatypes, not just Box. If
-a user defines `datatype Pair { MkPair(x: int32, y: int32) }`,
-then reading `x` through the heap would use a wrapper function
-with an axiom carrying the `int32` constraint.
+The assume is justified by the write-side assert plus heap
+faithfulness: the value was checked going in, the heap preserves
+it, the accessor extracts the same value.
+
+This approach keeps all constraint handling in one pass. The heap
+parameterization doesn't need to know about constrained types. The
+translator doesn't need to generate axioms. Core stays simple.
 
 ### Interaction with existing passes
 
-- **Heap parameterization:** Generates wrapper functions for
-  constrained-type field reads. The wrapper calls the raw accessor
-  and has axioms carrying the constraint.
+- **Heap parameterization:** No changes needed. It generates Box
+  constructors/destructors based on field types. With the stripping
+  workaround removed, it uses the constrained type directly.
 
-- **Constrained type elimination:** The wrapper function's output
-  type is the constrained type. The elimination pass resolves it
-  to the base type and may add additional constraint checks at
-  call sites. The axiom carries the constraint independently.
+- **Constrained type elimination:** Extended to handle the read
+  side of the heap round-trip. When it encounters a datatype
+  accessor call whose constructor argument had a constrained type,
+  it inserts an assume with the constraint. This is the same pass
+  that generates the write-side assert and the constraint function.
 
 - **Modifies clause transformation:** No changes needed. The frame
   condition preserves field values for unmodified objects. If the
   value satisfies a constraint before modification, it still
   satisfies it after (since it's the same value).
 
-- **Translator:** Functions with axioms are already supported in
-  Core. The translator handles them through the existing function
-  translation path. No changes needed.
+- **Translator:** No changes needed. The assume is a Laurel-level
+  statement that translates to a Core assume. The constraint
+  function is already in Core after elimination.
 
 ### What gets removed
 

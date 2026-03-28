@@ -30,23 +30,40 @@ Strata translates using proven machinery.
 `seqLengthFunc` in `Factory.lean` has this axiom. Language compilers
 only need to add the UPPER bound via their wrapper procedures.
 
-### D4: Strata changes NOT required for the initial implementation
+### D4: Functions with axioms are the right mechanism
 
-**Status:** Accepted (revised from original plan)
+**Status:** Revised
 
-We originally planned to modify `constrainedTypeElim` to support
-constrained return types on functions (D1 in the original design).
-This turned out to be unnecessary because:
+We originally chose to emit `JArray.length` as a procedure with
+ensures because functions couldn't carry postconditions. This was
+a workaround, not the right design.
 
-1. The JVerify compiler emits `JArray.length` as a PROCEDURE (not
-   a function) with postconditions
-2. Strata's existing procedure postcondition machinery translates
-   these to Core postconditions
-3. Callers automatically get the constraint knowledge
+Core functions DO carry properties — via axioms, not postconditions.
+Axioms are the established mechanism for function properties in
+Core. The Sequence operations use axioms. Functions are pure and
+callable in all contexts (contracts, postconditions, statements).
 
-The `constrainedTypeElim` change (supporting constrained return
-types on functions) remains a good future enhancement for Strata,
-but it's not blocking any current work.
+The procedure approach forced a `pureContext` flag in the JVerify
+compiler: contracts use `Sequence.length` directly (a function),
+while statements use `JArray.length` (a procedure). This
+distinction is unnecessary if `JArray.length` is a function with
+axioms.
+
+`JArray.length` should be refactored from a procedure with ensures
+to a function with axioms:
+
+```
+function JArray.length(heap: Heap, s: JArray) : int
+  axiom: JArray.length(heap, s) == Sequence.length(...)
+  axiom: JArray.length(heap, s) >= 0
+  axiom: JArray.length(heap, s) <= 2147483647
+```
+
+This eliminates the `pureContext` flag for array length and allows
+`JArray.length` to be used in contracts and postconditions.
+
+See also: `constrained-types-in-heap/decisions.md` D4, which uses
+the same pattern for constrained-type field reads.
 
 ### D5: Different languages have different bounds
 

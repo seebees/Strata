@@ -791,21 +791,6 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
   let (program, model) := (result.program, result.model)
   let diamondErrors := validateDiamondFieldAccesses model program
 
-  -- Resolve constrained types on composite fields before heap parameterization,
-  -- so Box constructors/destructors use the correct base types.
-  let program := { program with types := program.types.map fun td =>
-    match td with
-    | .Composite ct => .Composite { ct with fields := ct.fields.map fun f =>
-        match f.type.val with
-        | .UserDefined name =>
-          match model.get name with
-          | .constrainedType cty => { f with type := cty.base }
-          | _ => f
-        | _ => f }
-    | other => other }
-  let result := resolve program (some model)
-  let (program, model) := (result.program, result.model)
-
   let program := heapParameterization model program
   let result := resolve program (some model)
   let (program, model) := (result.program, result.model)

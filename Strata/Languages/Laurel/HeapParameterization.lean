@@ -341,7 +341,20 @@ where
         let readExpr := ⟨ .StaticCall "readField" [mkMd (.Identifier heapVar), selectTarget', mkMd (.StaticCall qualifiedName [])], md ⟩
         -- Unwrap Box: apply the appropriate destructor
         recordBoxConstructor model valTy.val
-        return mkMd <| .StaticCall (boxDestructorName model valTy.val) [readExpr]
+        let unboxed := mkMd <| .StaticCall (boxDestructorName model valTy.val) [readExpr]
+        -- For constrained-type fields, assume the constraint holds on the read value.
+        -- This is sound: the value was checked at write time and the heap preserves it.
+        match valTy.val with
+        | .UserDefined name =>
+          match model.get name with
+          | .constrainedType ct =>
+            let freshVar ← freshVarName
+            let varDecl := ⟨.LocalVariable freshVar valTy (some unboxed), md⟩
+            let constraintExpr := substituteIdentifier ct.valueName freshVar ct.constraint
+            let constraintAssume := ⟨.Assume constraintExpr, md⟩
+            return ⟨ .Block [varDecl, constraintAssume, mkMd (.Identifier freshVar)] none, md ⟩
+          | _ => return unboxed
+        | _ => return unboxed
     | .StaticCall callee args =>
         let args' ← args.mapM (recurse ·)
         let calleeReadsHeap ← readsHeap callee

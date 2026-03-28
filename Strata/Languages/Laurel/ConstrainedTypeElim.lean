@@ -192,7 +192,9 @@ def elimProc (ptMap : ConstrainedTypeMap) (proc : Procedure) : Procedure :=
     constraintCallFor ptMap p.type.val p.name p.type.md
   let outputEnsures := if proc.isFunctional then [] else proc.outputs.filterMap fun p =>
     (constraintCallFor ptMap p.type.val p.name p.type.md).map
-      fun c => ⟨c.val, p.type.md⟩
+      -- Use the parameter type's metadata if it has a file range; otherwise fall back
+      -- to the procedure's metadata for valid diagnostic source locations.
+      fun c => ⟨c.val, if (Imperative.getFileRange p.type.md).isSome then p.type.md else proc.md⟩
   let initVars : PredVarMap := proc.inputs.foldl (init := {}) fun s p =>
     if isConstrainedType ptMap p.type.val then s.insert p.name.text p.type.val else s
   let body' := match proc.body with

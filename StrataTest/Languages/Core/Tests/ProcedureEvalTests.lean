@@ -90,6 +90,9 @@ func Sequence.update : ∀[a]. ((s : (Sequence a)) (i : int) (v : a)) → (Seque
 func Sequence.contains : ∀[a]. ((s : (Sequence a)) (v : a)) → bool;
 func Sequence.take : ∀[a]. ((s : (Sequence a)) (n : int)) → (Sequence a);
 func Sequence.drop : ∀[a]. ((s : (Sequence a)) (n : int)) → (Sequence a);
+func readInt32 : ∀[a]. ((box : a)) → int;
+func readInt16 : ∀[a]. ((box : a)) → int;
+func readInt8 : ∀[a]. ((box : a)) → int;
 func Triggers.empty :  () → Triggers;
 func Triggers.addGroup :  ((g : TriggerGroup) (t : Triggers)) → Triggers;
 func TriggerGroup.empty :  () → TriggerGroup;

@@ -791,24 +791,6 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
   let (program, model) := (result.program, result.model)
   let diamondErrors := validateDiamondFieldAccesses model program
 
-  -- Temporary workaround: resolve constrained types on composite fields before
-  -- heap parameterization. This strips int32 → int on fields so the Box system
-  -- and equality handler work correctly. The constraint is lost on the heap
-  -- round-trip. Will be removed when Core Factory read functions are implemented
-  -- (see docs/design/constrained-types-in-heap/decisions.md D4).
-  let program := { program with types := program.types.map fun td =>
-    match td with
-    | .Composite ct => .Composite { ct with fields := ct.fields.map fun f =>
-        match f.type.val with
-        | .UserDefined name =>
-          match model.get name with
-          | .constrainedType cty => { f with type := cty.base }
-          | _ => f
-        | _ => f }
-    | other => other }
-  let result := resolve program (some model)
-  let (program, model) := (result.program, result.model)
-
   let program := heapParameterization model program
   let result := resolve program (some model)
   let (program, model) := (result.program, result.model)
@@ -916,8 +898,30 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
     }
     let exceptionResultDecl := Core.Decl.type (.data [exceptionResultDt]) .empty
 
+    -- Generate equality axioms for Factory read functions.
+    -- Only emit when the specific Box constructor exists.
+    -- emit: ∀ v: int. readIntN(BoxInt(v)) == v
+    -- This connects the opaque Factory function (which carries bound axioms)
+    -- to the Box constructor/destructor (which carries heap faithfulness).
+    let boxConstrs := program.types.foldl (fun acc td => match td with
+      | .Datatype dt => if dt.name.text == "Box" then
+          dt.constructors.map (·.name.text)
+        else acc
+      | _ => acc) ([] : List String)
+    let readFuncAxioms : List Core.Decl :=
+      [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].filterMap
+        fun (readName, constrName) =>
+          if boxConstrs.contains constrName then
+            let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
+            let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
+            let v : Core.Expression.Expr := .bvar () 0
+            let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
+            let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
+            some (Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr })
+          else none
+
     let program := {
-      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
+      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
     }
 
     -- dbg_trace "=== Generated Strata Core Program ==="

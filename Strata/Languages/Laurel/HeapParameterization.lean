@@ -341,20 +341,23 @@ where
         let readExpr := ⟨ .StaticCall "readField" [mkMd (.Identifier heapVar), selectTarget', mkMd (.StaticCall qualifiedName [])], md ⟩
         -- Unwrap Box: apply the appropriate destructor
         recordBoxConstructor model valTy.val
-        let unboxed := mkMd <| .StaticCall (boxDestructorName model valTy.val) [readExpr]
-        -- For constrained-type fields, assume the constraint holds on the read value.
-        -- This is sound: the value was checked at write time and the heap preserves it.
-        match valTy.val with
-        | .UserDefined name =>
-          match model.get name with
-          | .constrainedType ct =>
-            let freshVar ← freshVarName
-            let varDecl := ⟨.LocalVariable freshVar valTy (some unboxed), md⟩
-            let constraintExpr := substituteIdentifier ct.valueName freshVar ct.constraint
-            let constraintAssume := ⟨.Assume constraintExpr, md⟩
-            return ⟨ .Block [varDecl, constraintAssume, mkMd (.Identifier freshVar)] none, md ⟩
-          | _ => return unboxed
-        | _ => return unboxed
+        -- For constrained-type fields, use the Factory read function which carries
+        -- bound axioms. For other types, use the raw Box destructor.
+        -- Equality for constrained types comes from a program-level axiom
+        -- (readInt32(BoxInt(v)) == v) emitted by the translator.
+        let readFuncName? : Option Identifier := match valTy.val with
+          | .UserDefined name =>
+            match model.get name with
+            | .constrainedType _ =>
+              if name.text == "int32" then some "readInt32"
+              else if name.text == "int16" then some "readInt16"
+              else if name.text == "int8" then some "readInt8"
+              else none
+            | _ => none
+          | _ => none
+        match readFuncName? with
+        | some readFunc => return ⟨ .StaticCall readFunc [readExpr], md ⟩
+        | none => return mkMd <| .StaticCall (boxDestructorName model valTy.val) [readExpr]
     | .StaticCall callee args =>
         let args' ← args.mapM (recurse ·)
         let calleeReadsHeap ← readsHeap callee

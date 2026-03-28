@@ -567,6 +567,63 @@ def seqDropFunc : WFLFunc CoreLParams :=
               else #true))]
     ])
 
+/-- Read an int32-bounded integer from an opaque container.
+    The translator wires Box into the type parameter.
+    Axioms guarantee the result is in [-2147483648, 2147483647]. -/
+def readInt32Func : WFLFunc CoreLParams :=
+  polyUneval "readInt32" ["a"]
+    [("box", mty[%a])] mty[int]
+    (axioms := [
+      -- readInt32(box) >= -2147483648
+      esM[∀ (%a): -- %0 box
+        {((~readInt32 : %a → int) %0)}
+        (((~Int.Ge : int → int → bool)
+          ((~readInt32 : %a → int) %0))
+          #-2147483648)],
+      -- readInt32(box) <= 2147483647
+      esM[∀ (%a): -- %0 box
+        {((~readInt32 : %a → int) %0)}
+        (((~Int.Le : int → int → bool)
+          ((~readInt32 : %a → int) %0))
+          #2147483647)]
+    ])
+
+/-- Read an int8-bounded integer from an opaque container.
+    Axioms guarantee the result is in [-128, 127]. -/
+def readInt8Func : WFLFunc CoreLParams :=
+  polyUneval "readInt8" ["a"]
+    [("box", mty[%a])] mty[int]
+    (axioms := [
+      esM[∀ (%a):
+        {((~readInt8 : %a → int) %0)}
+        (((~Int.Ge : int → int → bool)
+          ((~readInt8 : %a → int) %0))
+          #-128)],
+      esM[∀ (%a):
+        {((~readInt8 : %a → int) %0)}
+        (((~Int.Le : int → int → bool)
+          ((~readInt8 : %a → int) %0))
+          #127)]
+    ])
+
+/-- Read an int16-bounded integer from an opaque container.
+    Axioms guarantee the result is in [-32768, 32767]. -/
+def readInt16Func : WFLFunc CoreLParams :=
+  polyUneval "readInt16" ["a"]
+    [("box", mty[%a])] mty[int]
+    (axioms := [
+      esM[∀ (%a):
+        {((~readInt16 : %a → int) %0)}
+        (((~Int.Ge : int → int → bool)
+          ((~readInt16 : %a → int) %0))
+          #-32768)],
+      esM[∀ (%a):
+        {((~readInt16 : %a → int) %0)}
+        (((~Int.Le : int → int → bool)
+          ((~readInt16 : %a → int) %0))
+          #32767)]
+    ])
+
 def emptyTriggersFunc : WFLFunc CoreLParams :=
   nullaryUneval "Triggers.empty" mty[Triggers]
 
@@ -690,6 +747,10 @@ def WFFactory : Lambda.WFLFactory CoreLParams :=
   seqContainsFunc,
   seqTakeFunc,
   seqDropFunc,
+
+  readInt32Func,
+  readInt16Func,
+  readInt8Func,
 
   emptyTriggersFunc,
   addTriggerGroupFunc,
@@ -815,6 +876,10 @@ def seqUpdateOp : Expression.Expr := seqUpdateFunc.opExpr
 def seqContainsOp : Expression.Expr := seqContainsFunc.opExpr
 def seqTakeOp : Expression.Expr := seqTakeFunc.opExpr
 def seqDropOp : Expression.Expr := seqDropFunc.opExpr
+
+def readInt32Op : Expression.Expr := readInt32Func.opExpr
+def readInt16Op : Expression.Expr := readInt16Func.opExpr
+def readInt8Op : Expression.Expr := readInt8Func.opExpr
 
 def mkTriggerGroup (ts : List Expression.Expr) : Expression.Expr :=
   ts.foldl (fun g t => .app () (.app () addTriggerOp t) g) emptyTriggerGroupOp

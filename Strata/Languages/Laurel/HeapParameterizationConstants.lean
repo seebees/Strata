@@ -64,6 +64,18 @@ function increment(heap: Heap): Heap {
   MkHeap(Heap..data!(heap), Heap..nextReference!(heap) + 1)
 };
 
+// Read functions for constrained integer types.
+// These are Core Factory functions with fixed bound axioms.
+// The translator wires Box into the type parameter.
+function readInt32(box: Box): int
+  external;
+
+function readInt16(box: Box): int
+  external;
+
+function readInt8(box: Box): int
+  external;
+
 #end
 
 /-- The Laurel Core prelude as a Laurel Program. -/

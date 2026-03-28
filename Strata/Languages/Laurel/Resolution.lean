@@ -208,6 +208,18 @@ private def targetTypeName (target : StmtExprMd) : ResolveM (Option String) := d
       | .UserDefined typRef => pure (some typRef.text)
       | _ => pure none
     | none => pure none
+  | .FieldSelect _innerTarget fieldName =>
+    -- For nested field access (e.g., obj.field1.field2), resolve the inner field's type
+    -- by searching all type scopes for the field name to find its declared type.
+    let fieldText := fieldName.text
+    for (_, typeScope) in s.typeScopes.toList do
+      match typeScope.get? fieldText with
+      | some (_, node) =>
+        match node.getType.val with
+        | .UserDefined typRef => return some typRef.text
+        | _ => pure ()
+      | none => pure ()
+    pure none
   | _ => pure none
 
 /-- Try to resolve a field name via a type scope lookup. Returns `some id` on success. -/
@@ -263,6 +275,9 @@ def resolveHighType (ty : HighTypeMd) : ResolveM HighTypeMd := do
     let kt' ← resolveHighType kt
     let vt' ← resolveHighType vt
     pure (.TMap kt' vt')
+  | .TSequence et =>
+    let et' ← resolveHighType et
+    pure (.TSequence et')
   | .Applied base args =>
     let base' ← resolveHighType base
     let args' ← args.mapM resolveHighType
@@ -567,6 +582,7 @@ private def collectHighType (map : Std.HashMap Nat AstNode) (ty : HighTypeMd)
   | .TMap kt vt =>
     let map := collectHighType map kt
     collectHighType map vt
+  | .TSequence et => collectHighType map et
   | .Applied base args =>
     let map := collectHighType map base
     args.foldl collectHighType map

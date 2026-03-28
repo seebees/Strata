@@ -26,6 +26,7 @@ def collectTypeRefs : HighTypeMd → List String
   | ⟨.UserDefined name, _⟩ => [name.text]
   | ⟨.TSet elem, _⟩ => collectTypeRefs elem
   | ⟨.TMap k v, _⟩ => collectTypeRefs k ++ collectTypeRefs v
+  | ⟨.TSequence elem, _⟩ => collectTypeRefs elem
   | ⟨.TTypedField vt, _⟩ => collectTypeRefs vt
   | ⟨.Applied base args, _⟩ =>
       collectTypeRefs base ++ args.flatMap collectTypeRefs

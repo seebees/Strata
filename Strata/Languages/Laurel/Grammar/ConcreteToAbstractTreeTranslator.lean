@@ -98,6 +98,9 @@ partial def translateHighType (arg : Arg) : TransM HighTypeMd := do
       let keyType ← translateHighType keyArg
       let valType ← translateHighType valArg
       return mkHighTypeMd (.TMap keyType valType) md
+    | q`Laurel.sequenceType, #[elemArg] =>
+      let elemType ← translateHighType elemArg
+      return mkHighTypeMd (.TSequence elemType) md
     | q`Laurel.compositeType, #[nameArg] =>
       let name ← translateIdent nameArg
       return mkHighTypeMd (.UserDefined name) md

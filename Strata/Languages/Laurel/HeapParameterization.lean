@@ -168,6 +168,22 @@ private def isDatatype (model : SemanticModel) (name : Identifier) : Bool :=
   | .datatypeDefinition _ => true
   | _ => false
 
+/-- Check whether a UserDefined type name refers to a Composite (not a constrained type or datatype) -/
+private def isComposite (model : SemanticModel) (name : Identifier) : Bool :=
+  match model.get name with
+  | .compositeType _ => true
+  | _ => false
+
+/-- Short suffix for a Sequence element type, used in Box constructor/destructor names. -/
+private def seqElementSuffix : HighType → String
+  | .TInt => "Int"
+  | .TBool => "Bool"
+  | .TString => "String"
+  | .TReal => "Real"
+  | .TFloat64 => "Float64"
+  | .UserDefined name => name.text
+  | _ => "Any"
+
 /-- Get the Box destructor name for a given Laurel HighType.
     For UserDefined datatypes, uses "Box..<datatypeName>Val!";
     for Composite types, uses "Box..compositeVal!". -/
@@ -178,6 +194,7 @@ def boxDestructorName (model : SemanticModel) (ty : HighType) : Identifier :=
   | .TFloat64 => "Box..float64Val!"
   | .TReal => "Box..realVal!"
   | .TString => "Box..stringVal!"
+  | .TSequence elementType => s!"Box..sequence{seqElementSuffix elementType.val}Val!"
   | .UserDefined name =>
       match name.uniqueId.bind model.refToDef.get? with
       | some (.constrainedType ct) =>
@@ -187,9 +204,7 @@ def boxDestructorName (model : SemanticModel) (ty : HighType) : Identifier :=
           | .TReal => "Box..realVal!"
           | .TString => "Box..stringVal!"
           | _ => "Box..compositeVal!"
-      | some (.compositeType _) =>
-          if name.text.startsWith "JArray" then "Box..sequenceVal!"
-          else "Box..compositeVal!"
+      | some (.compositeType _) => "Box..compositeVal!"
       | _ =>
         if isDatatype model name then s!"Box..{name.text}Val!"
         else "Box..compositeVal!"
@@ -206,6 +221,7 @@ def boxConstructorName (model : SemanticModel) (ty : HighType) : Identifier :=
   | .TFloat64 => "BoxFloat64"
   | .TReal => "BoxReal"
   | .TString => "BoxString"
+  | .TSequence elementType => s!"BoxSequence{seqElementSuffix elementType.val}"
   | .UserDefined name =>
       match name.uniqueId.bind model.refToDef.get? with
       | some (.constrainedType ct) =>
@@ -215,9 +231,7 @@ def boxConstructorName (model : SemanticModel) (ty : HighType) : Identifier :=
           | .TReal => "BoxReal"
           | .TString => "BoxString"
           | _ => "BoxComposite"
-      | some (.compositeType _) =>
-          if name.text.startsWith "JArray" then "BoxSequence"
-          else "BoxComposite"
+      | some (.compositeType _) => "BoxComposite"
       | _ =>
         if isDatatype model name then s!"Box..{name.text}"
         else "BoxComposite"
@@ -232,6 +246,9 @@ private def boxConstructorDef (model : SemanticModel) (ty : HighType) : Option D
   | .TReal => some { name := "BoxReal", args := [{ name := "realVal", type := ⟨.TReal, #[]⟩ }] }
   | .TFloat64 => some { name := "BoxFloat64", args := [{ name := "float64Val", type := ⟨.TFloat64, #[]⟩ }] }
   | .TString => some { name := "BoxString", args := [{ name := "stringVal", type := ⟨.TString, #[]⟩ }] }
+  | .TSequence elementType =>
+      let suffix := seqElementSuffix elementType.val
+      some { name := s!"BoxSequence{suffix}", args := [{ name := s!"sequence{suffix}Val", type := ⟨.TSequence elementType, #[]⟩ }] }
   | .UserDefined name =>
       match name.uniqueId.bind model.refToDef.get? with
       | some (.constrainedType ct) =>
@@ -242,9 +259,7 @@ private def boxConstructorDef (model : SemanticModel) (ty : HighType) : Option D
           | .TString => some { name := "BoxString", args := [{ name := "stringVal", type := ⟨.TString, #[]⟩ }] }
           | _ => some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
       | some (.compositeType _) =>
-          if name.text.startsWith "JArray"
-          then some { name := "BoxSequence", args := [{ name := "sequenceVal", type := ⟨.UserDefined name, #[]⟩ }] }
-          else some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
+          some { name := "BoxComposite", args := [{ name := "compositeVal", type := ⟨.UserDefined "Composite", #[]⟩ }] }
       | _ =>
         if isDatatype model name then
           some { name := s!"Box..{name.text}", args := [{ name := s!"{name.text}Val", type := ⟨.UserDefined name, #[]⟩ }] }
@@ -321,8 +336,9 @@ where
         let some qualifiedName := resolveQualifiedFieldName model fieldName
           | return ⟨ .Hole, md ⟩
 
+        let selectTarget' ← recurse selectTarget
         let valTy := (model.get fieldName).getType
-        let readExpr := ⟨ .StaticCall "readField" [mkMd (.Identifier heapVar), selectTarget, mkMd (.StaticCall qualifiedName [])], md ⟩
+        let readExpr := ⟨ .StaticCall "readField" [mkMd (.Identifier heapVar), selectTarget', mkMd (.StaticCall qualifiedName [])], md ⟩
         -- Unwrap Box: apply the appropriate destructor
         recordBoxConstructor model valTy.val
         return mkMd <| .StaticCall (boxDestructorName model valTy.val) [readExpr]
@@ -422,18 +438,22 @@ where
       | .Eq, [e1, _e2] =>
         let ty := (computeExprType model e1).val
         match ty with
-        | .UserDefined _ =>
-          let ref1 := mkMd (.StaticCall "Composite..ref!" [args'[0]!])
-          let ref2 := mkMd (.StaticCall "Composite..ref!" [args'[1]!])
-          return ⟨ .PrimitiveOp .Eq [ref1, ref2], md ⟩
+        | .UserDefined name =>
+          if isComposite model name then
+            let ref1 := mkMd (.StaticCall "Composite..ref!" [args'[0]!])
+            let ref2 := mkMd (.StaticCall "Composite..ref!" [args'[1]!])
+            return ⟨ .PrimitiveOp .Eq [ref1, ref2], md ⟩
+          else return ⟨ .PrimitiveOp op args', md ⟩
         | _ => return ⟨ .PrimitiveOp op args', md ⟩
       | .Neq, [e1, _e2] =>
         let ty := (computeExprType model e1).val
         match ty with
-        | .UserDefined _ =>
-          let ref1 := mkMd (.StaticCall "Composite..ref!" [args'[0]!])
-          let ref2 := mkMd (.StaticCall "Composite..ref!" [args'[1]!])
-          return ⟨ .PrimitiveOp .Neq [ref1, ref2], md ⟩
+        | .UserDefined name =>
+          if isComposite model name then
+            let ref1 := mkMd (.StaticCall "Composite..ref!" [args'[0]!])
+            let ref2 := mkMd (.StaticCall "Composite..ref!" [args'[1]!])
+            return ⟨ .PrimitiveOp .Neq [ref1, ref2], md ⟩
+          else return ⟨ .PrimitiveOp op args', md ⟩
         | _ => return ⟨ .PrimitiveOp op args', md ⟩
       | _, _ => return ⟨ .PrimitiveOp op args', md ⟩
     | .New _ => return exprMd
@@ -578,7 +598,7 @@ def heapParameterization (model: SemanticModel) (program : Program) : Program :=
     .Datatype { name := "Box", typeArgs := [], constructors := state2.usedBoxConstructors }
   { program with
     staticProcedures := heapConstants.staticProcedures ++ procs',
-    types := fieldDatatype :: boxDatatype :: heapConstants.types ++ types' }
+    types := fieldDatatype :: heapConstants.types ++ [boxDatatype] ++ types' }
 
 end Strata.Laurel
 

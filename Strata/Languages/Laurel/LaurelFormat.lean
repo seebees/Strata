@@ -55,6 +55,7 @@ def formatHighTypeVal : HighType → Format
   | .TTypedField valueType => "Field[" ++ formatHighType valueType ++ "]"
   | .TSet elementType => "Set[" ++ formatHighType elementType ++ "]"
   | .TMap keyType valueType => "Map[" ++ formatHighType keyType ++ ", " ++ formatHighType valueType ++ "]"
+  | .TSequence elementType => "Sequence[" ++ formatHighType elementType ++ "]"
   | .UserDefined ref => format ref
   | .Applied base args =>
       Format.text "(" ++ formatHighType base ++ " " ++

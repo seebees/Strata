@@ -54,6 +54,7 @@ private def fmtHighType : HighType → String
   | .TTypedField _ => "TTypedField"
   | .TSet _ => "TSet"
   | .TMap _ _ => "TMap"
+  | .TSequence _ => "TSequence"
   | .UserDefined name => s!"UserDefined({name})"
   | .Applied _ _ => "Applied"
   | .Pure _ => "Pure"

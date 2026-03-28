@@ -146,6 +146,8 @@ inductive HighType : Type where
   | TSet (elementType : WithMetadata HighType)
   /-- Map type. -/
   | TMap (keyType : WithMetadata HighType) (valueType : WithMetadata HighType)
+  /-- Sequence type, e.g. `Sequence int`. Maps to Core's parameterized Sequence type. -/
+  | TSequence (elementType : WithMetadata HighType)
   /-- A Identifier to a user-defined composite or constrained type by name. -/
   | UserDefined (name : Identifier)
   /-- A generic type application, e.g. `List<Int>`. -/
@@ -366,6 +368,7 @@ def highEq (a : HighTypeMd) (b : HighTypeMd) : Bool := match _a: a.val, _b: b.va
   | HighType.TTypedField t1, HighType.TTypedField t2 => highEq t1 t2
   | HighType.TSet t1, HighType.TSet t2 => highEq t1 t2
   | HighType.TMap k1 v1, HighType.TMap k2 v2 => highEq k1 k2 && highEq v1 v2
+  | HighType.TSequence t1, HighType.TSequence t2 => highEq t1 t2
   | HighType.UserDefined r1, HighType.UserDefined r2 => r1.text == r2.text
   | HighType.Applied b1 args1, HighType.Applied b2 args2 =>
       highEq b1 b2 && args1.length == args2.length && (args1.attach.zip args2 |>.all (fun (a1, a2) => highEq a1.1 a2))

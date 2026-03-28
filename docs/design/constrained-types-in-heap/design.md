@@ -12,19 +12,28 @@ are stripped to their base types, losing the constraint.
 ### The constrained type vocabulary
 
 Laurel provides a vocabulary of constrained types representing
-bounded integer ranges: `int8`, `int16`, `int32`, `int64`, `nat32`,
-and potentially others. These are mathematical facts about number
-ranges, not language-specific knowledge.
+bounded integer ranges: `int8`, `int16`, `int32`, `int64`, `nat32`.
+These are mathematical facts about number ranges, not language-
+specific knowledge.
+
+Each constrained type is paired with a Core read function that
+carries the constraint as fixed axioms:
+
+| Constrained type | Core read function | Axioms |
+|---|---|---|
+| int8 | readInt8(box) | result >= -128, result <= 127 |
+| int16 | readInt16(box) | result >= -32768, result <= 32767 |
+| int32 | readInt32(box) | result >= -2147483648, result <= 2147483647 |
+| int64 | readInt64(box) | result >= -2^63, result <= 2^63-1 |
+| nat32 | readNat32(box) | result >= 0, result <= 2147483647 |
+
+All read functions also have the axiom `result == Box..intVal!(box)`,
+tying the result to the actual heap value.
 
 Language compilers select from this vocabulary:
 - JVerify selects `int32` for Java `int`, `int8` for Java `byte`
 - A Rust backend would select `int32` for `i32`, `int8` for `i8`
-- A Python backend would not select any (Python integers are
-  unbounded)
-
-The constrained type elimination pass translates these into Core
-by generating constraint-checking functions (`int32$constraint`)
-and inserting checks at type boundaries.
+- A Python backend would not select any
 
 ### The heap round-trip
 
@@ -32,136 +41,111 @@ When a composite field has a constrained type, the value passes
 through three stages:
 
 1. **Write:** The value is boxed and stored in the heap.
-   `heap := updateField(heap, obj, field, BoxInt32(value))`
+   `heap := updateField(heap, obj, field, BoxInt(value))`
    The constrained type elimination checks `int32$constraint(value)`
-   at this point.
+   at this point (assert at constructor call).
 
-2. **Storage:** The heap holds the boxed value. The Box constructor
-   preserves the constrained type in its variant name.
+2. **Storage:** The heap holds the boxed value faithfully
+   (Core map axioms).
 
-3. **Read:** The value is unboxed from the heap.
-   `result := Box..int32Val!(readField(heap, obj, field))`
-   The accessor returns the value. The constraint needs to be
-   re-established.
+3. **Read:** The value is unboxed using the paired read function.
+   `result := readInt32(readField(heap, obj, field))`
+   The read function's axioms guarantee the result is in range.
 
-### The layered axiom approach
+### The layered architecture
 
-The constraint is re-established through a layered axiom chain,
-following the same architecture used throughout the system:
+No layer generates axioms. Each layer selects from what the layer
+below provides:
 
-**Core provides the foundation:**
-- Heap faithfulness: `select(update(m, k, v), k) == v`
-- Datatype accessor correctness: `Box..int32Val!(BoxInt32(v)) == v`
-- These are mathematical truths, proven or provable.
+- **Core** defines `readInt32`, `readInt8`, etc. with fixed axioms.
+  These are defined in the Factory alongside map and Sequence
+  axioms. The axioms are auditable and fixed.
 
-**Core provides constraint axioms on Box accessors:**
-For each constrained-type Box variant, Core provides an axiom:
-```
-forall box. Box..isBoxInt32(box) ==> int32$constraint(Box..int32Val!(box))
-```
-This axiom says: if a Box value IS a BoxInt32, then the extracted
-value satisfies the int32 constraint.
+- **Laurel** pairs each constrained type with its Core read
+  function. `int32` is paired with `readInt32`. The constrained
+  type elimination generates the write-side assert. The pairing
+  is fixed — you can't use `readInt32` with `int8`.
 
-This axiom is NOT a standalone mathematical truth. It is sound
-only under the invariant that BoxInt32 is always constructed with
-values satisfying `int32$constraint`. This invariant is maintained
-by the constrained type elimination pass (which inserts asserts
-at constructor call sites).
+- **Translator** calls the paired read function when translating
+  a constrained-type field read. It does not generate axioms —
+  it selects the predefined function.
 
-**Laurel exposes constrained types that map to these axioms:**
-The constrained type elimination generates BoxInt32 variants for
-int32 fields, and the translator generates the corresponding Core
-axioms. Laurel can only use axioms that Core provides.
+- **Compilers** select which constrained types to use for their
+  language's types. JVerify selects `int32` for Java `int`.
 
-**Compilers select from Laurel's vocabulary:**
-JVerify declares fields as `int32`. Laurel handles the rest.
+### Soundness
 
-### Soundness dependencies
+The read function axiom `readInt32(box) >= -2147483648` is sound
+under three conditions:
 
-The axiom `Box..isBoxInt32(box) ==> int32$constraint(Box..int32Val!(box))`
-is sound IF AND ONLY IF all three conditions hold:
+1. **Heap faithfulness.** The heap preserves values exactly.
+   (Core map axioms.)
 
-1. **Heap faithfulness.** The heap preserves values exactly. What
-   you write is what you read. This is a property of Core's map
-   axioms (`select(update(m, k, v), k) == v`). Languages with
-   undefined behavior on memory access (like C) may violate this.
-
-2. **Constructor invariant.** BoxInt32 is only ever constructed
-   with values satisfying `int32$constraint`. This is maintained
-   by the constrained type elimination pass, which inserts
-   `assert int32$constraint(value)` at every BoxInt32 constructor
-   call. If the pass has a bug, or if a program constructs BoxInt32
-   directly without going through the pass, the invariant breaks.
+2. **Constructor invariant.** BoxInt is only constructed with
+   values satisfying the constraint for the field's declared type.
+   (Maintained by constrained type elimination's write-side assert.)
 
 3. **No backdoor writes.** The language cannot modify heap values
-   without going through the normal write path (which includes
-   the constraint check). Languages with raw memory access,
-   pointer aliasing, or undefined behavior may violate this.
+   without going through the constraint-checked write path.
+   (Property of well-behaved languages: Java, Rust, etc.)
 
-For the languages we target (Java, Rust, JavaScript, Python),
-all three conditions hold. These languages have well-behaved heaps,
-all writes go through the programming language's own mechanisms,
-and the constrained type elimination processes all code paths.
+### Auditability
+
+For any generated program, the correctness can be audited:
+
+- **Core level:** Inspect the `readInt32` axioms — are they
+  mathematically consistent with the `int32` constraint?
+- **Translator output:** Inspect the Core program — is `readInt32`
+  only used for `int32` fields? Are the write-side asserts present?
+- **Compiler output:** Inspect the Laurel program — did the
+  compiler correctly select `int32` for the language's types?
+
+Each level is independently inspectable. The axioms are fixed and
+predefined, not generated. The trust surface is the Core read
+functions, which are a small, enumerable, auditable set.
 
 ### Provability
 
-If the translator and constrained type elimination pass were
-formally verified, we could prove:
-
-1. The constrained type elimination maintains the constructor
-   invariant: BoxInt32 is only constructed with int32-satisfying
-   values. (Property of the pass.)
-
-2. The generated axiom is consistent with the constructor
-   invariant. (Property of the translator.)
-
-3. The axiom, combined with heap faithfulness and the constructor
-   invariant, implies that accessor results satisfy the constraint.
-   (Logical consequence of 1 + 2 + Core map axioms.)
-
-This is the same verification structure as the instance method
-consistency proof (Decision 2 in instance-methods/decisions.md):
-a property that traces through multiple passes, provable if the
-passes are verified, trusted by testing and audit until then.
+If the translator were formally verified, we could prove:
+1. The translator only calls `readInt32` for fields declared as
+   `int32` (correct pairing).
+2. The constrained type elimination inserts asserts at all BoxInt
+   constructor calls for `int32` fields (constructor invariant).
+3. Combined with Core's map axioms and the read function axioms,
+   the constraint is preserved through the heap round-trip.
 
 ### Interaction with existing passes
 
-- **Heap parameterization:** Generates per-constrained-type Box
-  variants (BoxInt32, BoxInt16, etc.) instead of mapping all
-  constrained types to the base type's Box variant. The variant
-  name carries the constraint identity.
+- **Heap parameterization:** No changes to Box variants. Fields
+  with constrained types still use BoxInt (the base type's Box).
+  The constrained type stripping workaround is removed — the
+  field type stays `int32` through heap parameterization.
 
-- **Constrained type elimination:** Inserts asserts at BoxInt32
-  constructor calls (write side). Resolves constrained types in
-  datatype definitions. The constraint function `int32$constraint`
-  is generated as today.
+- **Constrained type elimination:** Continues to generate write-
+  side asserts. Resolves constrained types in datatype definitions.
+  No new assume or axiom generation.
 
-- **Translator:** Generates the Core axiom for each constrained-
-  type Box accessor. The axiom is: if the Box is the right variant,
-  the accessor result satisfies the constraint.
+- **Translator:** When translating a field read where the field
+  type was a constrained type, calls the paired Core read function
+  instead of the raw Box accessor. This is the only new behavior
+  in the translator.
 
-- **Modifies clause transformation:** No changes needed. The frame
-  condition preserves field values for unmodified objects.
+- **Core Factory:** New read functions (`readInt32`, etc.) defined
+  alongside existing map and Sequence functions.
 
 ### What gets removed
 
-Once this is implemented:
+1. The constrained type stripping workaround.
+2. Tests no longer need explicit preconditions for field value
+   ranges.
 
-1. The constrained type stripping workaround is removed from the
-   translator pipeline.
+### Adding new constrained types
 
-2. Tests that currently need explicit preconditions for field
-   value ranges no longer need them.
+To add a new constrained type (e.g., `int128` for Rust):
+1. Define the constrained type in Laurel's vocabulary
+2. Define the paired Core read function in the Factory with
+   fixed axioms
+3. Language compilers can then select it
 
-### Trust surface
-
-The trust surface is:
-- The Core axiom on each constrained-type Box accessor
-- The constructor invariant maintained by constrained type
-  elimination
-- The heap faithfulness property of Core's map model
-
-The axiom is generated mechanically, not hand-written. It follows
-a fixed pattern. It is auditable by inspecting the translator's
-axiom generation code. It is provable if the translator and
-constrained type elimination are formally verified.
+No translator changes needed — the translator already handles
+the pairing generically.

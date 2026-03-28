@@ -791,6 +791,24 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
   let (program, model) := (result.program, result.model)
   let diamondErrors := validateDiamondFieldAccesses model program
 
+  -- Temporary workaround: resolve constrained types on composite fields before
+  -- heap parameterization. This strips int32 → int on fields so the Box system
+  -- and equality handler work correctly. The constraint is lost on the heap
+  -- round-trip. Will be removed when Core Factory read functions are implemented
+  -- (see docs/design/constrained-types-in-heap/decisions.md D4).
+  let program := { program with types := program.types.map fun td =>
+    match td with
+    | .Composite ct => .Composite { ct with fields := ct.fields.map fun f =>
+        match f.type.val with
+        | .UserDefined name =>
+          match model.get name with
+          | .constrainedType cty => { f with type := cty.base }
+          | _ => f
+        | _ => f }
+    | other => other }
+  let result := resolve program (some model)
+  let (program, model) := (result.program, result.model)
+
   let program := heapParameterization model program
   let result := resolve program (some model)
   let (program, model) := (result.program, result.model)

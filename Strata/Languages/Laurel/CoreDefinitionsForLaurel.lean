@@ -45,6 +45,15 @@ function Sequence.length(s: Sequence int) : int
 function Sequence.select(s: Sequence int, i: int) : int
   external;
 
+function Sequence.selectInt32(s: Sequence int, i: int) : int
+  external;
+
+function Sequence.selectInt16(s: Sequence int, i: int) : int
+  external;
+
+function Sequence.selectInt8(s: Sequence int, i: int) : int
+  external;
+
 function Sequence.update(s: Sequence int, i: int, v: int) : int
   external;
 

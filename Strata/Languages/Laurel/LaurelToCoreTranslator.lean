@@ -940,9 +940,20 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
             let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
             some (Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr })
           else none
+    -- Identity axioms for read functions on raw int values.
+    -- Used for array element reads: readInt32(Sequence.select(...)) == Sequence.select(...).
+    -- Combined with the Factory bound axioms, this lets the prover conclude that
+    -- array elements of constrained types are bounded.
+    let readFuncIdentityAxioms : List Core.Decl :=
+      ["readInt32", "readInt16", "readInt8"].map fun readName =>
+        let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
+        let v : Core.Expression.Expr := .bvar () 0
+        let body : Core.Expression.Expr := .eq () (.app () readOp v) v
+        let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
+        Core.Decl.ax { name := readName ++ "_int_eq", e := axiomExpr }
 
     let program := {
-      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
+      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++ readFuncIdentityAxioms ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
     }
 
     -- dbg_trace "=== Generated Strata Core Program ==="

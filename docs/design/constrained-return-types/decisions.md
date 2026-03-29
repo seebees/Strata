@@ -30,34 +30,28 @@ Strata translates using proven machinery.
 `seqLengthFunc` in `Factory.lean` has this axiom. Language compilers
 only need to add the UPPER bound via their wrapper procedures.
 
-### D4: Functions with axioms are the right long-term mechanism
+### D4: Functions with axioms — implemented for array length
 
-**Status:** Revised — deferred pending Core investigation
+**Status:** Resolved
 
-We originally chose to emit `JArray.length` as a procedure with
-ensures because functions couldn't carry postconditions. This was
-a workaround, not the right design.
+`JArray.length` is no longer a procedure. The JVerify compiler now
+emits `Sequence.length(arr.$data)` directly in all contexts —
+contracts, postconditions, and statements. No procedure wrapper.
 
-Core functions carry properties via axioms (e.g., Sequence
-operations). Functions are pure and callable in all contexts
-(contracts, postconditions, statements). `JArray.length` as a
-function with axioms would eliminate the `pureContext` flag.
+Bounds come from two sources:
+- `Sequence.length >= 0` — Core Factory axiom (already existed)
+- `<= 2147483647` — from the `int32` return type, enforced by
+  constrained type elimination
 
-However, the Laurel-to-Core translator does not currently generate
-axioms from Laurel functions. Core function axioms are built into
-Core's Factory for mathematical operations. Extending the translator
-to generate axioms from Laurel is possible but requires
-investigation.
+The `pureContext` flag is no longer needed for array length. It
+was removed along with the `JArray.length` procedure definitions.
 
-For the immediate constrained-type-in-heap problem, we chose a
-different mechanism: the constrained type elimination pass generates
-assumes for datatype accessor reads. See
-`constrained-types-in-heap/decisions.md` D4.
+This follows the same pattern as `readInt32` for constrained types
+in the heap (see `constrained-types-in-heap/decisions.md` D4):
+use Core Factory functions with fixed axioms, let the constrained
+type machinery handle the rest.
 
-The `JArray.length` refactoring from procedure to function with
-axioms remains a future improvement. The `pureContext` flag stays
-for now. This is a two-way door — the compiler interface doesn't
-change, only Strata internals.
+Commit `055733ad` on `seebees/experimental-work`.
 
 ### D5: Different languages have different bounds
 

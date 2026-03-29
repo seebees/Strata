@@ -361,6 +361,85 @@ def seqSelectFunc : WFLFunc CoreLParams :=
   polyUneval "Sequence.select" ["a"]
     [("s", seqTy mty[%a]), ("i", mty[int])] mty[%a]
 
+/- Typed select: bounded selection from Sequence int, result in int32 range.
+   Axioms: bounds + equality with Sequence.select. -/
+def seqSelectInt32Func : WFLFunc CoreLParams :=
+  polyUneval "Sequence.selectInt32" []
+    [("s", seqTy mty[int]), ("i", mty[int])] mty[int]
+    (axioms := [
+      -- selectInt32(s, i) >= -2147483648
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt32 : (Sequence int) → int → int) %1) %0)}
+            (((~Int.Ge : int → int → bool)
+              (((~Sequence.selectInt32 : (Sequence int) → int → int) %1) %0))
+              #-2147483648))],
+      -- selectInt32(s, i) <= 2147483647
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt32 : (Sequence int) → int → int) %1) %0)}
+            (((~Int.Le : int → int → bool)
+              (((~Sequence.selectInt32 : (Sequence int) → int → int) %1) %0))
+              #2147483647))],
+      -- selectInt32(s, i) == Sequence.select(s, i)
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt32 : (Sequence int) → int → int) %1) %0)}
+            (((~Sequence.selectInt32 : (Sequence int) → int → int) %1) %0)
+            ==
+            (((~Sequence.select : (Sequence int) → int → int) %1) %0))]
+    ])
+
+/- Typed select: bounded selection from Sequence int, result in int16 range. -/
+def seqSelectInt16Func : WFLFunc CoreLParams :=
+  polyUneval "Sequence.selectInt16" []
+    [("s", seqTy mty[int]), ("i", mty[int])] mty[int]
+    (axioms := [
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt16 : (Sequence int) → int → int) %1) %0)}
+            (((~Int.Ge : int → int → bool)
+              (((~Sequence.selectInt16 : (Sequence int) → int → int) %1) %0))
+              #-32768))],
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt16 : (Sequence int) → int → int) %1) %0)}
+            (((~Int.Le : int → int → bool)
+              (((~Sequence.selectInt16 : (Sequence int) → int → int) %1) %0))
+              #32767))],
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt16 : (Sequence int) → int → int) %1) %0)}
+            (((~Sequence.selectInt16 : (Sequence int) → int → int) %1) %0)
+            ==
+            (((~Sequence.select : (Sequence int) → int → int) %1) %0))]
+    ])
+
+/- Typed select: bounded selection from Sequence int, result in int8 range. -/
+def seqSelectInt8Func : WFLFunc CoreLParams :=
+  polyUneval "Sequence.selectInt8" []
+    [("s", seqTy mty[int]), ("i", mty[int])] mty[int]
+    (axioms := [
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt8 : (Sequence int) → int → int) %1) %0)}
+            (((~Int.Ge : int → int → bool)
+              (((~Sequence.selectInt8 : (Sequence int) → int → int) %1) %0))
+              #-128))],
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt8 : (Sequence int) → int → int) %1) %0)}
+            (((~Int.Le : int → int → bool)
+              (((~Sequence.selectInt8 : (Sequence int) → int → int) %1) %0))
+              #127))],
+      esM[∀ (Sequence int):
+          (∀ (int):
+            {(((~Sequence.selectInt8 : (Sequence int) → int → int) %1) %0)}
+            (((~Sequence.selectInt8 : (Sequence int) → int → int) %1) %0)
+            ==
+            (((~Sequence.select : (Sequence int) → int → int) %1) %0))]
+    ])
+
 /- A `Sequence` build (snoc) function with type `∀a. Sequence a → a → Sequence a`.
    `build(s, v)` appends a single element `v` to the end of `s`. -/
 def seqBuildFunc : WFLFunc CoreLParams :=
@@ -742,6 +821,9 @@ def WFFactory : Lambda.WFLFactory CoreLParams :=
   seqEmptyFunc,
   seqAppendFunc,
   seqSelectFunc,
+  seqSelectInt32Func,
+  seqSelectInt16Func,
+  seqSelectInt8Func,
   seqBuildFunc,
   seqUpdateFunc,
   seqContainsFunc,

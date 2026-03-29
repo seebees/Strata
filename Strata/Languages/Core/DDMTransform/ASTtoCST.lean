@@ -417,17 +417,6 @@ def handleUnaryOps {M} [Inhabited M] (name : String) (arg : CoreDDM.Expr M)
   | "Bv64.Extract_7_0" => pure (.bvextract_7_0_64 default arg)
   | "Bv64.Extract_15_0" => pure (.bvextract_15_0_64 default arg)
   | "Bv64.Extract_31_0" => pure (.bvextract_31_0_64 default arg)
-  -- Factory read functions (uninterpreted, used in axioms for array element bounds)
-  | "readInt32" | "readInt16" | "readInt8" => do
-    let ctx ← get
-    let idx := match ctx.freeVarIndex? name with
-      | some idx => idx
-      | none =>
-        -- Will be registered below
-        ctx.allFreeVars.size
-    if ctx.freeVarIndex? name |>.isNone then
-      modify (·.addGlobalFreeVars #[name])
-    pure (.app default (.fvar default idx) arg)
   | _ => do
     ToCSTM.logError "handleUnaryOps" "unary op" name
     pure (.not default arg)
@@ -546,6 +535,8 @@ def handleBinaryOps {M} [Inhabited M] (name : String)
   | "select" => pure (.map_get default ty ty arg1 arg2)
   -- Sequence operations
   | "Sequence.select" => pure (.seq_select default ty arg1 arg2)
+  | "Sequence.selectInt32" | "Sequence.selectInt16" | "Sequence.selectInt8" =>
+    pure (.seq_select default ty arg1 arg2)
   | "Sequence.append" => pure (.seq_append default ty arg1 arg2)
   | "Sequence.build" => pure (.seq_build default ty arg1 arg2)
   | "Sequence.contains" => pure (.seq_contains default ty arg1 arg2)

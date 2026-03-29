@@ -130,6 +130,27 @@ def resolveInstanceCallName (model : SemanticModel) (callee : Identifier) : Opti
   | .instanceProcedure typeName _ => some (instanceProcCoreName typeName.text callee.text)
   | _ => none
 
+/-- Build the Core argument list for an InstanceCall in call-statement position.
+    Per D5 (instance-methods/decisions.md): the heap parameterization prepends $heap
+    to args, and the translator inserts target (self) after $heap.
+    Result: [$heap, target, otherArgs...] matching the procedure signature
+    ($heap_in, self, otherArgs...).
+    When no heap arg is present (functional instance methods), target goes first:
+    [target, otherArgs...] matching (self, otherArgs...). -/
+private def instanceCallArgs (coreTarget : Core.Expression.Expr)
+    (coreArgs : List Core.Expression.Expr)
+    (laurelArgs : List StmtExprMd) : List Core.Expression.Expr :=
+  -- Check if the heap parameterization injected $heap as the first Laurel arg
+  let hasHeapArg := match laurelArgs with
+    | ⟨.Identifier name, _⟩ :: _ => name.text == "$heap" || name.text == "$heap_in"
+    | _ => false
+  if hasHeapArg then
+    match coreArgs with
+    | heapArg :: rest => heapArg :: coreTarget :: rest
+    | [] => [coreTarget]
+  else
+    coreTarget :: coreArgs
+
 /-- Throw a hard diagnostic error, aborting the current translation -/
 def throwExprDiagnostic (d : DiagnosticModel): TranslateM Core.Expression.Expr := do
   emitDiagnostic d
@@ -440,7 +461,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                 let defaultExpr := defaultExprForType model ty
                 let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
                 let initStmt := Core.Statement.init ident coreType (some defaultExpr) md
-                let callStmt := Core.Statement.call [ident, resultIdent] coreName (coreTarget :: coreArgs) callMd
+                let callStmt := Core.Statement.call [ident, resultIdent] coreName (instanceCallArgs coreTarget coreArgs args) callMd
                 return [initStmt, callStmt] ++ (← exceptionPropagationCheck md)
           | none =>
               -- Unresolved instance call — havoc
@@ -480,7 +501,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                     let coreTarget ← translateExpr target
                     let coreArgs ← args.mapM (fun a => translateExpr a)
                     let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-                    return [Core.Statement.call [ident, resultIdent] coreName (coreTarget :: coreArgs) md] ++ (← exceptionPropagationCheck md)
+                    return [Core.Statement.call [ident, resultIdent] coreName (instanceCallArgs coreTarget coreArgs args) md] ++ (← exceptionPropagationCheck md)
               | none => return [Core.Statement.havoc ident md]
           | _ =>
               let coreExpr ← translateExpr value
@@ -507,7 +528,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                     | .Identifier name => some (⟨name.text, ()⟩)
                     | _ => none
                   let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-                  return [Core.Statement.call (lhsIdents ++ [resultIdent]) coreName (coreTarget :: coreArgs) value.md] ++ (← exceptionPropagationCheck value.md)
+                  return [Core.Statement.call (lhsIdents ++ [resultIdent]) coreName (instanceCallArgs coreTarget coreArgs args) value.md] ++ (← exceptionPropagationCheck value.md)
               | none =>
                   let havocStmts := targets.filterMap fun t =>
                     match t.val with
@@ -542,7 +563,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
             let coreTarget ← translateExpr target
             let coreArgs ← args.mapM (fun a => translateExpr a)
             let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-            return [Core.Statement.call [resultIdent] coreName (coreTarget :: coreArgs) md] ++ (← exceptionPropagationCheck md)
+            return [Core.Statement.call [resultIdent] coreName (instanceCallArgs coreTarget coreArgs args) md] ++ (← exceptionPropagationCheck md)
       | none => return []
   | .Return valueOpt =>
       match valueOpt, outputParams.head? with
@@ -560,7 +581,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                     let coreTarget ← translateExpr target
                     let coreArgs ← args.mapM (fun a => translateExpr a)
                     let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
-                    let callStmt := Core.Statement.call [ident, resultIdent] coreName (coreTarget :: coreArgs) value.md
+                    let callStmt := Core.Statement.call [ident, resultIdent] coreName (instanceCallArgs coreTarget coreArgs args) value.md
                     return [callStmt] ++ (← exceptionPropagationCheck value.md) ++ [.exit (some "$body") md]
               | none =>
                   let coreExpr ← translateExpr value

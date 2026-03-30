@@ -1,7 +1,7 @@
 # Instance Method Support: Investigation Notes
 
 **Date:** 2026-03-26
-**Status:** Investigated, not implemented. Needs more design work.
+**Status:** Resolved — see design.md for the implementation plan (all steps ✅).
 
 ## What We Found
 

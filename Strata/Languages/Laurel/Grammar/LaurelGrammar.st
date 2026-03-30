@@ -35,8 +35,8 @@ op varDecl (name: Ident, varType: Option OptionalType, assignment: Option Option
 
 op call(callee: StmtExpr, args: CommaSepBy StmtExpr): StmtExpr => callee "(" args ")";
 
-// Instance method call: target.method(args)
-op instanceCall(target: StmtExpr, callee: Ident, args: CommaSepBy StmtExpr): StmtExpr => target "." callee "(" args ")";
+// Instance method call: target..method(args)
+op instanceCall(target: StmtExpr, callee: Ident, args: CommaSepBy StmtExpr): StmtExpr => target ".." callee "(" args ")";
 
 // Instantiation
 op new(name: Ident): StmtExpr => "new " name;

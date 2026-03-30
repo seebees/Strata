@@ -277,3 +277,86 @@ The conclusion is `rfl` because both sites call the same function.
 `instanceProcCoreName` lives in a shared module (e.g., Laurel.lean
 or a new InstanceMethodNames.lean). The proof lives alongside the
 exception properties in a new `InstanceMethodProperties.lean`.
+
+
+---
+
+## Decision 8: Instance call source syntax cannot use `..`
+
+**Date:** 2026-03-30
+**Status:** Blocking — instance calls from Laurel source don't work
+
+### Problem
+
+The instance call grammar rule was added as:
+```
+op instanceCall(...): StmtExpr => target ".." callee "(" args ")";
+```
+
+This doesn't work because Laurel's identifier parser (`strataIsIdRest`
+in `DDM/Parser.lean` line 124) includes `.` as a valid identifier
+continuation character:
+
+```lean
+private def strataIsIdRest (c : Char) : Bool :=
+  c.isAlphanum || c == '_' || c == '\'' || c == '.' || c == '?' || c == '!' || c == '$'
+```
+
+When the tokenizer encounters `c..getCount()`, it consumes
+`c..getCount` as a single identifier (because `.` is valid in
+identifiers). The `..` token is registered in the token table,
+but the identifier is longer than the token, so the identifier
+wins (`isToken` check in `identFnAux`).
+
+This is why instance calls work through JVerify's Ion binary path
+(which constructs `InstanceCall` AST nodes directly, bypassing the
+parser) but fail from Laurel source text.
+
+### Root cause chain
+
+1. `c..getCount()` → tokenizer consumes `c..getCount` as one `Ident`
+2. Parser matches `call(identifier("c..getCount"), [])` → `StaticCall`
+3. Resolution fails: "c..getCount is not defined"
+4. Heap parameterization doesn't detect heap access (no callee)
+5. Translator emits function application to `c..getCount` (not found)
+6. Core type checker: "Cannot infer the type of this operation"
+
+### Why `..` was chosen (and why it's wrong for source syntax)
+
+Decision 3 chose `..` for Core qualified names (`Counter..increment`)
+because `.` was already used in identifiers (`Sequence.length`). This
+was correct for Core names — they're identifiers, and `..` inside an
+identifier is fine.
+
+But the instance call grammar rule uses `..` as an OPERATOR between
+two separate tokens (`target` and `callee`). The tokenizer can't
+distinguish `..` as an operator from `..` inside an identifier.
+
+### Options
+
+The separator must use characters NOT in `strataIsIdRest`. Characters
+not in `strataIsIdRest`: `@`, `-`, `>`, `<`, `:`, `+`, `*`, `/`, `=`,
+`^`, `~`, etc.
+
+Multi-character tokens work fine in Laurel (`&&`, `||`, `==`, `<=`,
+`>=`, `==>`, `:=`, etc.).
+
+Candidates:
+- `@` — single character, simple: `c@getCount()`
+- `->` — familiar from Rust/C: `c->getCount()`
+- `::` — familiar from C++: `c::getCount()`
+
+### Impact of changing the separator
+
+The change is isolated to 2 lines in Strata:
+1. `LaurelGrammar.st` — the grammar rule
+2. `LaurelFormat.lean` — the formatter
+
+NOT affected:
+- Core qualified names (`Counter..increment`) — these are identifiers,
+  not parsed through the instance call grammar
+- JVerify — constructs `InstanceCall` AST nodes via Ion, never writes
+  the separator character
+- Resolution, heap parameterization, translator — work on AST nodes,
+  not source text
+- Datatype destructors (`Box..intVal!`) — identifiers, not operators

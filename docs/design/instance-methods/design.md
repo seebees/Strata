@@ -366,9 +366,9 @@ without seeing the body.
 6. ✅ Translator: InstanceCall at call sites
 7. ✅ Update T7 test
 8. Edge case tests — **cannot test InstanceCall from Laurel source.**
-   The Laurel grammar has no syntax for instance calls (`obj.method(args)`).
-   InstanceCall nodes can only be constructed programmatically by JVerify.
-   Instance procedure DEFINITIONS are tested via T7. Instance CALLS
-   must be tested through JVerify end-to-end tests.
+   The Laurel grammar has `instanceCall` syntax (`target..callee(args)`)
+   but it doesn't work: the tokenizer consumes `target..callee` as a
+   single identifier because `.` is in `strataIsIdRest`. See Decision 8.
+   Instance CALLS are tested through JVerify end-to-end tests (Ion path).
 9. ✅ Consistency proof (IM1)
 10. ✅ Full test suite passes (516 tests, 488 build jobs)

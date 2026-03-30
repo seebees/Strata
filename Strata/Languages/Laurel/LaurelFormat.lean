@@ -131,7 +131,7 @@ def formatStmtExprVal (s : StmtExpr) : Format :=
   | .IsType target ty =>
       formatStmtExpr target ++ " is " ++ formatHighType ty
   | .InstanceCall target name args =>
-      formatStmtExpr target ++ ".." ++ format name ++ "(" ++
+      formatStmtExpr target ++ "~>" ++ format name ++ "(" ++
       Format.joinSep (args.map formatStmtExpr) ", " ++ ")"
   | .Forall param trigger body =>
       let trigFmt := match trigger with

@@ -1,6 +1,6 @@
 /-
-  Test: Instance call grammar fix (. → ..).
-  Verifies that c..getCount() parses as InstanceCall, not as
+  Test: Instance call grammar fix (. → ~>).
+  Verifies that c~>getCount() parses as InstanceCall, not as
   a dotted static call identifier.
 
   The test currently fails in the Core type checker (not the parser).
@@ -31,14 +31,14 @@ procedure test(): int
 {
   var c: Counter := new Counter;
   c#count := 42;
-  var x: int := c..getCount();
+  var x: int := c~>getCount();
   return x
 };
 "
 
 -- Instance calls fail in the Core type checker (known gap).
--- This test verifies the grammar parses correctly (.. not .).
--- The error message contains "c..getCount" proving it parsed as InstanceCall.
+-- This test verifies the grammar parses correctly (~> not .).
+-- The error message contains "c~>getCount" proving it parsed as InstanceCall.
 #eval do
   let result ← try
     testInputWithOffset "InstanceCall" instanceCallProgram 14 processLaurelFile
@@ -47,7 +47,7 @@ procedure test(): int
     let msg := toString e
     if "Type checking error".isPrefixOf msg || msg.length > 0 then
       -- The error is from the Core type checker, not the parser.
-      -- This proves the grammar parsed c..getCount() as InstanceCall.
+      -- This proves the grammar parsed c~>getCount() as InstanceCall.
       pure "expected failure: type checking error (instance call parsed correctly)"
     else
       throw e

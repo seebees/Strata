@@ -343,8 +343,18 @@ Multi-character tokens work fine in Laurel (`&&`, `||`, `==`, `<=`,
 
 Candidates:
 - `@` — single character, simple: `c@getCount()`
-- `->` — familiar from Rust/C: `c->getCount()`
+- `->` — familiar from Rust/C, but `-` is already the negation
+  operator in Laurel. Registering `->` as a token would work
+  (longest match wins over `-`), but risks subtle interactions.
+- `~>` — neither `~` nor `>` is used in Laurel grammar or in
+  `strataIsIdRest`. No conflicts.
 - `::` — familiar from C++: `c::getCount()`
+
+**Decision: `~>`**
+
+`~>` has zero conflicts with existing grammar. `->` was rejected
+because `-` is already the negation operator. `c~>getCount()` is
+the instance call syntax.
 
 ### Impact of changing the separator
 

@@ -946,7 +946,6 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
     }
 
     -- dbg_trace "=== Generated Strata Core Program ==="
-    -- dbg_trace (toString (Std.Format.pretty (Strata.Core.formatProgram program) 100))
     -- dbg_trace "================================="
     pure program
 

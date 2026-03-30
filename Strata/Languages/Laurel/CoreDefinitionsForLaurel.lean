@@ -60,6 +60,15 @@ function Sequence.update(s: Sequence int, i: int, v: int) : int
 function Sequence.build(i: int, v: int) : Sequence int
   external;
 
+// Bounded integer types — mathematical facts about number ranges.
+// Language compilers select from this vocabulary for their type mappings.
+// See docs/design/constrained-types-in-heap/decisions.md D1.
+constrained int8 = x: int where x >= -128 && x <= 127 witness 0
+constrained int16 = x: int where x >= -32768 && x <= 32767 witness 0
+constrained int32 = x: int where x >= -2147483648 && x <= 2147483647 witness 0
+constrained int64 = x: int where x >= -9223372036854775808 && x <= 9223372036854775807 witness 0
+constrained nat32 = x: int where x >= 0 && x <= 2147483647 witness 0
+
 #end
 
 /--

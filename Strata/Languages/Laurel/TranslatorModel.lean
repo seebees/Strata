@@ -189,40 +189,43 @@ partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
     | .External => false) ||
   proc.preconditions.any (fun pc => directlyWritesHeap pc.val)
 
-/-- Equation: Opaque + non-empty modifies → reads heap.
-    Axiom required: Strata's module system makes definitions opaque even to
-    the kernel for cross-expression definitional equality. We cannot write
-    a proof term that the kernel accepts. Validated by 30 differential tests. -/
-public axiom procReadsHeapDirectly_opaque_modifies
+/-- Opaque + non-empty modifies → reads heap. Proved inside the module. -/
+public theorem procReadsHeapDirectly_opaque_modifies
   (proc : Procedure) (postconds : List (WithMetadata StmtExpr))
   (impl : Option (WithMetadata StmtExpr))
   (modif : List (WithMetadata StmtExpr))
   (hBody : proc.body = .Opaque postconds impl modif)
   (hModif : !modif.isEmpty = true) :
-  procReadsHeapDirectly proc = true
+  procReadsHeapDirectly proc = true := by
+  simp [procReadsHeapDirectly, hBody]
+  left; cases modif with
+  | nil => simp at hModif
+  | cons _ _ => simp
 
-/-- Equation: Opaque + non-empty modifies → writes heap.
-    Axiom because Strata's `module` system prevents unfolding definitions
-    in proofs, even in the same file. Validated by differential tests. -/
-public axiom procWritesHeapDirectly_opaque_modifies
+/-- Opaque + non-empty modifies → writes heap. Proved inside the module. -/
+public theorem procWritesHeapDirectly_opaque_modifies
   (proc : Procedure) (postconds : List (WithMetadata StmtExpr))
   (impl : Option (WithMetadata StmtExpr))
   (modif : List (WithMetadata StmtExpr))
   (hBody : proc.body = .Opaque postconds impl modif)
   (hModif : !modif.isEmpty = true) :
-  procWritesHeapDirectly proc = true
+  procWritesHeapDirectly proc = true := by
+  simp [procWritesHeapDirectly, hBody]
+  left; cases modif with
+  | nil => simp at hModif
+  | cons _ _ => simp
 
-/-- Equation: External + no preconditions → doesn't read heap.
-    Axiom for same reason as above. -/
-public axiom procReadsHeapDirectly_external
+/-- External + no preconditions → doesn't read heap. Proved inside the module. -/
+public theorem procReadsHeapDirectly_external
   (proc : Procedure) (hBody : proc.body = .External) (hNoPrecond : proc.preconditions = []) :
-  procReadsHeapDirectly proc = false
+  procReadsHeapDirectly proc = false := by
+  simp [procReadsHeapDirectly, hBody, hNoPrecond]
 
-/-- Equation: External + no preconditions → doesn't write heap.
-    Axiom for same reason as above. -/
-public axiom procWritesHeapDirectly_external
+/-- External + no preconditions → doesn't write heap. Proved inside the module. -/
+public theorem procWritesHeapDirectly_external
   (proc : Procedure) (hBody : proc.body = .External) (hNoPrecond : proc.preconditions = []) :
-  procWritesHeapDirectly proc = false
+  procWritesHeapDirectly proc = false := by
+  simp [procWritesHeapDirectly, hBody, hNoPrecond]
 def heapAccessingProcNames (program : Program) : List String :=
   let direct := (nonExternalStaticProcs program).filter fun p =>
     procReadsHeapDirectly p || procWritesHeapDirectly p

@@ -126,18 +126,44 @@ def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
 
 /-! ## Model: heap threading -/
 
-/-- Does a procedure body directly access the heap (field read/write, new)? -/
-partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
+/-- Does a procedure body directly read the heap (field read)? -/
+partial def directlyReadsHeap (body : StmtExpr) : Bool :=
   match body with
   | .FieldSelect _ _ => true
+  | .Return (some v) => directlyReadsHeap v.val
+  | .Block stmts _ => stmts.any (fun s => directlyReadsHeap s.val)
+  | .IfThenElse c t e =>
+    directlyReadsHeap c.val || directlyReadsHeap t.val ||
+    (match e with | some e => directlyReadsHeap e.val | none => false)
+  | .While c _ _ body => directlyReadsHeap c.val || directlyReadsHeap body.val
+  | .LocalVariable _ _ (some init) => directlyReadsHeap init.val
+  | .Assign targets v =>
+    targets.any (fun t => directlyReadsHeap t.val) || directlyReadsHeap v.val
+  | .StaticCall _ args => args.any (fun a => directlyReadsHeap a.val)
+  | .InstanceCall target _ args =>
+    directlyReadsHeap target.val || args.any (fun a => directlyReadsHeap a.val)
+  | _ => false
+
+/-- Does a procedure body directly write the heap (field assign, new)? -/
+partial def directlyWritesHeap (body : StmtExpr) : Bool :=
+  match body with
   | .Assign [⟨.FieldSelect _ _, _⟩] _ => true
   | .New _ => true
-  | .Block stmts _ => stmts.any (fun s => directlyAccessesHeap s.val)
+  | .Return (some v) => directlyWritesHeap v.val
+  | .Block stmts _ => stmts.any (fun s => directlyWritesHeap s.val)
   | .IfThenElse c t e =>
-    directlyAccessesHeap c.val || directlyAccessesHeap t.val ||
-    (match e with | some e => directlyAccessesHeap e.val | none => false)
-  | .While c _ _ body => directlyAccessesHeap c.val || directlyAccessesHeap body.val
+    directlyWritesHeap c.val || directlyWritesHeap t.val ||
+    (match e with | some e => directlyWritesHeap e.val | none => false)
+  | .While c _ _ body => directlyWritesHeap c.val || directlyWritesHeap body.val
+  | .LocalVariable _ _ (some init) => directlyWritesHeap init.val
+  | .StaticCall _ args => args.any (fun a => directlyWritesHeap a.val)
+  | .InstanceCall target _ args =>
+    directlyWritesHeap target.val || args.any (fun a => directlyWritesHeap a.val)
   | _ => false
+
+/-- Does a procedure body directly access the heap (read or write)? -/
+partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
+  directlyReadsHeap body || directlyWritesHeap body
 
 /-- Names of procedures that should have $heap parameters -/
 def heapAccessingProcNames (program : Program) : List String :=

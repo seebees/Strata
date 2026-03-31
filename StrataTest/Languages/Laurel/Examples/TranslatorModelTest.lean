@@ -341,3 +341,91 @@ composite Box {
             ok := false
       if ok then
         IO.println s!"{name}: ✅ all signatures correct"
+
+  -- P4 heap analysis: model vs real translator
+  IO.println ""
+  IO.println "=== P4: Heap analysis (model vs real) ==="
+  for (name, input) in [
+    ("NoHeap", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+"),
+    ("FieldRead", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+}
+"),
+    ("FieldWrite", "
+composite Box {
+  var value: int
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+}
+"),
+    ("NewObject", "
+composite Box {
+  var value: int
+}
+procedure makeBox(): Box {
+  return new Box
+};
+"),
+    ("TransitiveRead", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+  procedure getValuePlusOne(self: Box): int {
+    return self~>getValue() + 1
+  };
+}
+")
+  ] do
+    let program ← parseLaurelString name input
+    let allProcs := program.staticProcedures ++
+      (program.types.flatMap fun (t : TypeDefinition) => match t with
+        | .Composite c => c.instanceProcedures
+        | _ => [])
+    -- Real translator's analysis
+    let realReaders := computeReadsHeap allProcs
+    let realWriters := computeWritesHeap allProcs
+    -- Model's analysis
+    let modelReaders := allProcs.filter fun (p : Procedure) =>
+      match p.body with
+      | .Transparent body => directlyReadsHeap body.val
+      | .Opaque _ (some body) _ => directlyReadsHeap body.val
+      | .Opaque _ _ modif => !modif.isEmpty
+      | _ => false
+    let modelReaderNames := modelReaders.map fun (p : Procedure) => p.name.text
+    -- Compare: model's direct readers should be subset of real readers
+    let mut ok := true
+    for n in modelReaderNames do
+      if !realReaders.any (·.text == n) then
+        IO.println s!"{name}: ❌ model says {n} reads heap, real disagrees"
+        ok := false
+    -- Check real readers that model misses (transitive)
+    let transitiveOnly := realReaders.filter fun (r : Identifier) =>
+      !modelReaderNames.contains r.text
+    if !transitiveOnly.isEmpty then
+      IO.println s!"{name}: ℹ️  transitive-only readers: {transitiveOnly.map fun (r : Identifier) => r.text}"
+    -- Check writers
+    let modelWriters := allProcs.filter fun (p : Procedure) =>
+      match p.body with
+      | .Transparent body => directlyWritesHeap body.val
+      | .Opaque _ _ modif => !modif.isEmpty
+      | _ => false
+    let modelWriterNames := modelWriters.map fun (p : Procedure) => p.name.text
+    for n in modelWriterNames do
+      if !realWriters.any (·.text == n) && !realReaders.any (·.text == n) then
+        IO.println s!"{name}: ❌ model says {n} writes heap, real disagrees"
+        ok := false
+    if ok then
+      IO.println s!"{name}: ✅ heap analysis consistent"

@@ -171,17 +171,25 @@ in the program — this is the well-formedness condition that the
 resolution pass guarantees.
 -/
 
-/-- FieldSelect always references readField (WF equation lemma needed) -/
-theorem fieldSelect_refs_readField (target : WithMetadata StmtExpr) (fieldId : Identifier)
-  (e : WithMetadata StmtExpr) (h : e.val = .FieldSelect target fieldId) :
-  "readField" ∈ referencedNamesInExprMd e := by
-  sorry -- needs WF equation lemma for referencedNamesInExprMd
+/-- Equation lemma: FieldSelect case (WF reduction — needs Lean 4 equation compiler support) -/
+@[simp] theorem referencedNamesInExprMd_fieldSelect (target : WithMetadata StmtExpr) (fieldId : Identifier) (md : MetaData) :
+  referencedNamesInExprMd ⟨.FieldSelect target fieldId, md⟩ = ["readField"] ++ referencedNamesInExprMd target := by
+  sorry
 
-/-- New always references increment (WF equation lemma needed) -/
-theorem new_refs_increment (className : Identifier)
-  (e : WithMetadata StmtExpr) (h : e.val = .New className) :
-  "increment" ∈ referencedNamesInExprMd e := by
-  sorry -- needs WF equation lemma for referencedNamesInExprMd
+/-- Equation lemma: New case -/
+@[simp] theorem referencedNamesInExprMd_new (className : Identifier) (md : MetaData) :
+  referencedNamesInExprMd ⟨.New className, md⟩ = ["increment"] := by
+  sorry
+
+/-- FieldSelect always references readField -/
+theorem fieldSelect_refs_readField (target : WithMetadata StmtExpr) (fieldId : Identifier) (md : MetaData) :
+  "readField" ∈ referencedNamesInExprMd ⟨.FieldSelect target fieldId, md⟩ := by
+  rw [referencedNamesInExprMd_fieldSelect]; simp
+
+/-- New always references increment -/
+theorem new_refs_increment (className : Identifier) (md : MetaData) :
+  "increment" ∈ referencedNamesInExprMd ⟨.New className, md⟩ := by
+  rw [referencedNamesInExprMd_new]; simp
 
 /-- A program is well-formed if every referenced name in every
     procedure body is a declared name -/

@@ -292,3 +292,52 @@ procedure sum(n: int): int
       IO.println s!"{name}: ✅ all {refs.length} referenced names declared"
     else
       IO.println s!"{name}: ❌ referenced but not declared: {missing}"
+
+  -- P4: Signature checks
+  IO.println ""
+  IO.println "=== P4: Heap threading (signature checks) ==="
+  for (name, input) in [
+    ("CompositeWithProc", compositeWithProc),
+    ("StaticProc", staticProc),
+    ("FieldReadWrite", "
+composite Box {
+  var value: int
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+}
+")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let withDefs := { program with
+        staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+        types := coreDefinitionsForLaurel.types ++ program.types
+      }
+      let instanceNames := (nonExternalInstanceProcs withDefs).map fun (t, p) =>
+        qualifiedName t (p : Procedure).name.text
+      let mut ok := true
+      for decl in core.decls do
+        let declName := decl.name.name
+        if instanceNames.contains declName then
+          let inputs := coreProcInputNames decl
+          let outputs := coreProcOutputNames decl
+          if inputs.contains "$heap_in" && !outputs.contains "$heap" then
+            IO.println s!"{name}: ❌ {declName} has $heap_in but no $heap output"
+            ok := false
+          if !outputs.contains "$result" then
+            IO.println s!"{name}: ❌ {declName} missing $result output"
+            ok := false
+          if !inputs.contains "self" then
+            IO.println s!"{name}: ❌ {declName} missing self input"
+            ok := false
+      if ok then
+        IO.println s!"{name}: ✅ all signatures correct"

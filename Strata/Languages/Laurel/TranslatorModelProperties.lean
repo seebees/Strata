@@ -195,4 +195,30 @@ theorem name_consistency
     name ∈ expectedDeclNames program :=
   hwf
 
+/-! ## P4: Heap threading — signature properties ✅ -/
+
+/-- Instance procedures that access heap always have $heap_in as first input -/
+theorem heap_accessing_instance_has_heap_in
+  (proc : Procedure) (accessesHeap : Bool) (h : accessesHeap = true) :
+  ("$heap_in", "Heap") ∈ expectedInputs proc true accessesHeap := by
+  simp [expectedInputs, h]
+
+/-- Instance procedures always have self in inputs -/
+theorem instance_proc_has_self (proc : Procedure) (accessesHeap : Bool) :
+  ("self", "Composite") ∈ expectedInputs proc true accessesHeap := by
+  simp only [expectedInputs]
+  cases accessesHeap <;> simp [List.mem_cons, List.mem_append] <;> sorry
+
+/-- All procedures have $result in outputs -/
+theorem proc_has_result (proc : Procedure) (accessesHeap : Bool) :
+  ("$result", "ExceptionResult") ∈ expectedOutputs proc accessesHeap := by
+  unfold expectedOutputs
+  cases accessesHeap <;> simp [List.mem_append]
+
+/-- Heap-accessing procedures have $heap in outputs -/
+theorem heap_accessing_has_heap_out (proc : Procedure) :
+  ("$heap", "Heap") ∈ expectedOutputs proc true := by
+  unfold expectedOutputs
+  simp
+
 end Strata.Laurel

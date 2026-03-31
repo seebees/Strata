@@ -218,5 +218,49 @@ def allReferencedNames (program : Program) : List String :=
     (fun (_, p) => referencedNamesInProc p)
   (staticRefs ++ instanceRefs).dedup
 
+/-! ## Procedure signature model
+
+For a given Laurel procedure, what should the Core procedure's
+inputs and outputs be?
+-/
+
+/-- Translate a Laurel type to its Core type name -/
+def coreTypeName (ty : HighType) : String :=
+  match ty with
+  | .TInt => "int"
+  | .TBool => "bool"
+  | .TString => "string"
+  | .TReal => "real"
+  | .TVoid => "bool"
+  | .THeap => "Heap"
+  | .UserDefined _ => "Composite"  -- all composites map to Composite
+  | _ => "Composite"
+
+/-- Does a procedure directly access the heap? -/
+def procAccessesHeapDirectly (proc : Procedure) : Bool :=
+  let bodyRefs := referencedNamesInProc proc
+  bodyRefs.contains "readField" || bodyRefs.contains "updateField" || bodyRefs.contains "increment"
+
+/-- Expected Core input parameters for a procedure -/
+@[expose] def expectedInputs (proc : Procedure) (isInstance : Bool) (accessesHeap : Bool) : List (String × String) :=
+  let heapParam := if accessesHeap then [("$heap_in", "Heap")] else []
+  let selfParam := if isInstance then
+    [("self", "Composite")]
+  else []
+  let userParams := proc.inputs.map fun p => (p.name.text, coreTypeName p.type.val)
+  -- Filter out self from user params if instance (it's already added)
+  let userParams := if isInstance then
+    userParams.filter (fun (n, _) => n != "self")
+  else userParams
+  heapParam ++ userParams
+
+/-- Expected Core output parameters for a procedure -/
+@[expose] def expectedOutputs (proc : Procedure) (accessesHeap : Bool) : List (String × String) :=
+  let heapOut := if accessesHeap then [("$heap", "Heap")] else []
+  let returnParam := match proc.outputs with
+    | [] => []
+    | _ => proc.outputs.map fun p => (p.name.text, coreTypeName p.type.val)
+  heapOut ++ returnParam ++ [("$result", "ExceptionResult")]
+
 end -- public section
 end Strata.Laurel

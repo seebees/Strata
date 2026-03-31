@@ -165,15 +165,45 @@ partial def directlyWritesHeap (body : StmtExpr) : Bool :=
 partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
   directlyReadsHeap body || directlyWritesHeap body
 
+/-- Does a procedure directly read the heap? Mirrors real analyzeProc. -/
+def procReadsHeapDirectly (proc : Procedure) : Bool :=
+  let bodyReads := match proc.body with
+    | .Transparent b => directlyReadsHeap b.val
+    | .Opaque postconds impl modif =>
+      if !modif.isEmpty then true
+      else
+        let postReads := postconds.any (fun pc => directlyReadsHeap pc.val)
+        let implReads := match impl with
+          | some e => directlyReadsHeap e.val
+          | none => false
+        postReads || implReads
+    | .Abstract postconds => postconds.any (fun pc => directlyReadsHeap pc.val)
+    | .External => false
+  let precondReads := proc.preconditions.any (fun pc => directlyReadsHeap pc.val)
+  bodyReads || precondReads
+
+/-- Does a procedure directly write the heap? Mirrors real analyzeProc. -/
+def procWritesHeapDirectly (proc : Procedure) : Bool :=
+  let bodyWrites := match proc.body with
+    | .Transparent b => directlyWritesHeap b.val
+    | .Opaque postconds impl modif =>
+      if !modif.isEmpty then true
+      else
+        let postWrites := postconds.any (fun pc => directlyWritesHeap pc.val)
+        let implWrites := match impl with
+          | some e => directlyWritesHeap e.val
+          | none => false
+        postWrites || implWrites
+    | .Abstract postconds => postconds.any (fun pc => directlyWritesHeap pc.val)
+    | .External => false
+  let precondWrites := proc.preconditions.any (fun pc => directlyWritesHeap pc.val)
+  bodyWrites || precondWrites
+
 /-- Names of procedures that should have $heap parameters -/
 def heapAccessingProcNames (program : Program) : List String :=
-  -- Direct heap access
-  let staticDirect := (nonExternalStaticProcs program).filter fun p =>
-    match p.body with
-    | .Transparent body => directlyAccessesHeap body.val
-    | .Opaque _ (some body) _ => directlyAccessesHeap body.val
-    | _ => false
-  staticDirect.map (·.name.text)
+  let direct := (nonExternalStaticProcs program).filter fun p =>
+    procReadsHeapDirectly p || procWritesHeapDirectly p
+  direct.map (·.name.text)
   -- TODO: transitive heap access through callees
 
 /-! ## Body translation model

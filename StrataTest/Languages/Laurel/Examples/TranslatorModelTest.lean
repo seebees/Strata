@@ -387,6 +387,38 @@ composite Box {
     return self~>getValue() + 1
   };
 }
+"),
+    ("OpaqueModifies", "
+composite Counter {
+  var count: int
+  procedure increment(self: Counter)
+    ensures self#count == old(self#count) + 1
+    modifies self
+  {
+    self#count := self#count + 1
+  };
+}
+"),
+    ("OpaqueNoModifies", "
+procedure pureCompute(x: int): int
+  ensures $result == x + 1
+{
+  return x + 1
+};
+"),
+    ("OpaqueFieldInPostcond", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int
+    ensures $result == self#value
+  {
+    return self#value
+  };
+}
+"),
+    ("ExternalProc", "
+procedure readField(heap: Heap, obj: Composite, field: Field): Box
+  external;
 ")
   ] do
     let program ← parseLaurelString name input
@@ -397,13 +429,8 @@ composite Box {
     -- Real translator's analysis
     let realReaders := computeReadsHeap allProcs
     let realWriters := computeWritesHeap allProcs
-    -- Model's analysis
-    let modelReaders := allProcs.filter fun (p : Procedure) =>
-      match p.body with
-      | .Transparent body => directlyReadsHeap body.val
-      | .Opaque _ (some body) _ => directlyReadsHeap body.val
-      | .Opaque _ _ modif => !modif.isEmpty
-      | _ => false
+    -- Model's analysis (uses procReadsHeapDirectly/procWritesHeapDirectly)
+    let modelReaders := allProcs.filter fun (p : Procedure) => procReadsHeapDirectly p
     let modelReaderNames := modelReaders.map fun (p : Procedure) => p.name.text
     -- Compare: model's direct readers should be subset of real readers
     let mut ok := true
@@ -417,11 +444,7 @@ composite Box {
     if !transitiveOnly.isEmpty then
       IO.println s!"{name}: ℹ️  transitive-only readers: {transitiveOnly.map fun (r : Identifier) => r.text}"
     -- Check writers
-    let modelWriters := allProcs.filter fun (p : Procedure) =>
-      match p.body with
-      | .Transparent body => directlyWritesHeap body.val
-      | .Opaque _ _ modif => !modif.isEmpty
-      | _ => false
+    let modelWriters := allProcs.filter fun (p : Procedure) => procWritesHeapDirectly p
     let modelWriterNames := modelWriters.map fun (p : Procedure) => p.name.text
     for n in modelWriterNames do
       if !realWriters.any (·.text == n) && !realReaders.any (·.text == n) then

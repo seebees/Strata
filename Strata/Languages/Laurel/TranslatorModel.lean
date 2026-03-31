@@ -49,7 +49,7 @@ def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
       |>.map fun p => (ct.name.text, p)
 
 /-- The qualified Core name for an instance procedure: Type..proc -/
-def qualifiedName (typeName procName : String) : String :=
+@[simp, expose] def qualifiedName (typeName procName : String) : String :=
   typeName ++ ".." ++ procName
 
 /-! ## Model: what Core declarations should exist -/
@@ -95,7 +95,7 @@ def expectedFunctionNames (program : Program) : List String :=
   heapOps ++ constraintNames ++ ancestorNames ++ staticNames ++ instanceNames ++ constantNames
 
 /-- Names of all Core datatype declarations the model expects -/
-def expectedDatatypeNames (program : Program) : List String :=
+@[expose] def expectedDatatypeNames (program : Program) : List String :=
   -- Always present
   let fixed := ["ExceptionResult", "Composite", "Heap"]
   -- Generated from program structure

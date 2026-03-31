@@ -203,11 +203,29 @@ theorem heap_accessing_instance_has_heap_in
   ("$heap_in", "Heap") ∈ expectedInputs proc true accessesHeap := by
   simp [expectedInputs, h]
 
+private theorem mem_append_left' {a : α} {l₁ l₂ : List α} (h : a ∈ l₁) : a ∈ l₁ ++ l₂ := by
+  induction l₁ with
+  | nil => contradiction
+  | cons x xs ih =>
+    cases h with
+    | head => exact List.Mem.head _
+    | tail _ h => exact List.Mem.tail _ (ih h)
+
+private theorem mem_append_right' {a : α} (l₁ : List α) {l₂ : List α} (h : a ∈ l₂) : a ∈ l₁ ++ l₂ := by
+  induction l₁ with
+  | nil => exact h
+  | cons x xs ih => exact List.Mem.tail _ (ih)
+
 /-- Instance procedures always have self in inputs -/
 theorem instance_proc_has_self (proc : Procedure) (accessesHeap : Bool) :
   ("self", "Composite") ∈ expectedInputs proc true accessesHeap := by
-  simp only [expectedInputs]
-  cases accessesHeap <;> simp [List.mem_cons, List.mem_append] <;> sorry
+  show ("self", "Composite") ∈
+    (if accessesHeap then [("$heap_in", "Heap")] else []) ++
+    [("self", "Composite")] ++
+    ((proc.inputs.map fun p => (p.name.text, coreTypeName p.type.val)).filter (fun (n, _) => n != "self"))
+  cases accessesHeap
+  · exact mem_append_left' (List.Mem.head _)
+  · exact mem_append_left' (mem_append_right' _ (List.Mem.head _))
 
 /-- All procedures have $result in outputs -/
 theorem proc_has_result (proc : Procedure) (accessesHeap : Bool) :

@@ -242,7 +242,7 @@ def procAccessesHeapDirectly (proc : Procedure) : Bool :=
   bodyRefs.contains "readField" || bodyRefs.contains "updateField" || bodyRefs.contains "increment"
 
 /-- Expected Core input parameters for a procedure -/
-@[expose] def expectedInputs (proc : Procedure) (isInstance : Bool) (accessesHeap : Bool) : List (String × String) :=
+@[reducible, expose] def expectedInputs (proc : Procedure) (isInstance : Bool) (accessesHeap : Bool) : List (String × String) :=
   let heapParam := if accessesHeap then [("$heap_in", "Heap")] else []
   let selfParam := if isInstance then
     [("self", "Composite")]
@@ -252,7 +252,7 @@ def procAccessesHeapDirectly (proc : Procedure) : Bool :=
   let userParams := if isInstance then
     userParams.filter (fun (n, _) => n != "self")
   else userParams
-  heapParam ++ userParams
+  heapParam ++ selfParam ++ userParams
 
 /-- Expected Core output parameters for a procedure -/
 @[expose] def expectedOutputs (proc : Procedure) (accessesHeap : Bool) : List (String × String) :=

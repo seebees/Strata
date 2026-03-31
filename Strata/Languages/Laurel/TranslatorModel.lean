@@ -166,40 +166,56 @@ partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
   directlyReadsHeap body || directlyWritesHeap body
 
 /-- Does a procedure directly read the heap? Mirrors real analyzeProc. -/
-def procReadsHeapDirectly (proc : Procedure) : Bool :=
-  let bodyReads := match proc.body with
+@[simp, expose] def procReadsHeapDirectly (proc : Procedure) : Bool :=
+  (match proc.body with
     | .Transparent b => directlyReadsHeap b.val
     | .Opaque postconds impl modif =>
       if !modif.isEmpty then true
-      else
-        let postReads := postconds.any (fun pc => directlyReadsHeap pc.val)
-        let implReads := match impl with
-          | some e => directlyReadsHeap e.val
-          | none => false
-        postReads || implReads
+      else postconds.any (fun pc => directlyReadsHeap pc.val) ||
+        (match impl with | some e => directlyReadsHeap e.val | none => false)
     | .Abstract postconds => postconds.any (fun pc => directlyReadsHeap pc.val)
-    | .External => false
-  let precondReads := proc.preconditions.any (fun pc => directlyReadsHeap pc.val)
-  bodyReads || precondReads
+    | .External => false) ||
+  proc.preconditions.any (fun pc => directlyReadsHeap pc.val)
 
 /-- Does a procedure directly write the heap? Mirrors real analyzeProc. -/
-def procWritesHeapDirectly (proc : Procedure) : Bool :=
-  let bodyWrites := match proc.body with
+@[simp, expose] def procWritesHeapDirectly (proc : Procedure) : Bool :=
+  (match proc.body with
     | .Transparent b => directlyWritesHeap b.val
     | .Opaque postconds impl modif =>
       if !modif.isEmpty then true
-      else
-        let postWrites := postconds.any (fun pc => directlyWritesHeap pc.val)
-        let implWrites := match impl with
-          | some e => directlyWritesHeap e.val
-          | none => false
-        postWrites || implWrites
+      else postconds.any (fun pc => directlyWritesHeap pc.val) ||
+        (match impl with | some e => directlyWritesHeap e.val | none => false)
     | .Abstract postconds => postconds.any (fun pc => directlyWritesHeap pc.val)
-    | .External => false
-  let precondWrites := proc.preconditions.any (fun pc => directlyWritesHeap pc.val)
-  bodyWrites || precondWrites
+    | .External => false) ||
+  proc.preconditions.any (fun pc => directlyWritesHeap pc.val)
 
-/-- Names of procedures that should have $heap parameters -/
+/-- Equation for procReadsHeapDirectly on Opaque body with non-empty modifies -/
+public axiom procReadsHeapDirectly_opaque_modifies
+  (proc : Procedure) (postconds : List (WithMetadata StmtExpr))
+  (impl : Option (WithMetadata StmtExpr))
+  (modif : List (WithMetadata StmtExpr))
+  (hBody : proc.body = .Opaque postconds impl modif)
+  (hModif : !modif.isEmpty = true) :
+  procReadsHeapDirectly proc = true
+
+/-- Equation for procWritesHeapDirectly on Opaque body with non-empty modifies -/
+public axiom procWritesHeapDirectly_opaque_modifies
+  (proc : Procedure) (postconds : List (WithMetadata StmtExpr))
+  (impl : Option (WithMetadata StmtExpr))
+  (modif : List (WithMetadata StmtExpr))
+  (hBody : proc.body = .Opaque postconds impl modif)
+  (hModif : !modif.isEmpty = true) :
+  procWritesHeapDirectly proc = true
+
+/-- Equation for procReadsHeapDirectly on External body -/
+public axiom procReadsHeapDirectly_external
+  (proc : Procedure) (hBody : proc.body = .External) (hNoPrecond : proc.preconditions = []) :
+  procReadsHeapDirectly proc = false
+
+/-- Equation for procWritesHeapDirectly on External body -/
+public axiom procWritesHeapDirectly_external
+  (proc : Procedure) (hBody : proc.body = .External) (hNoPrecond : proc.preconditions = []) :
+  procWritesHeapDirectly proc = false
 def heapAccessingProcNames (program : Program) : List String :=
   let direct := (nonExternalStaticProcs program).filter fun p =>
     procReadsHeapDirectly p || procWritesHeapDirectly p

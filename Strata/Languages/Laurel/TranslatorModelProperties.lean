@@ -271,4 +271,40 @@ theorem heap_false_implies_no_heap_out (proc : Procedure)
   · -- h : ("$heap", "Heap") ∈ [("$result", "ExceptionResult")]
     simp at h
 
+/-! ## Modifies clause properties -/
+
+/-- A non-empty modifies clause implies the procedure reads heap directly -/
+theorem modifies_implies_reads_heap (proc : Procedure)
+  (postconds : List (WithMetadata StmtExpr))
+  (impl : Option (WithMetadata StmtExpr))
+  (modif : List (WithMetadata StmtExpr))
+  (hBody : proc.body = .Opaque postconds impl modif)
+  (hModif : !modif.isEmpty = true) :
+  procReadsHeapDirectly proc = true :=
+  procReadsHeapDirectly_opaque_modifies proc postconds impl modif hBody hModif
+
+/-- A non-empty modifies clause implies the procedure writes heap directly -/
+theorem modifies_implies_writes_heap (proc : Procedure)
+  (postconds : List (WithMetadata StmtExpr))
+  (impl : Option (WithMetadata StmtExpr))
+  (modif : List (WithMetadata StmtExpr))
+  (hBody : proc.body = .Opaque postconds impl modif)
+  (hModif : !modif.isEmpty = true) :
+  procWritesHeapDirectly proc = true :=
+  procWritesHeapDirectly_opaque_modifies proc postconds impl modif hBody hModif
+
+/-- External procedures never read heap directly -/
+theorem external_no_reads_heap (proc : Procedure)
+  (hBody : proc.body = .External)
+  (hNoPrecond : proc.preconditions = []) :
+  procReadsHeapDirectly proc = false :=
+  procReadsHeapDirectly_external proc hBody hNoPrecond
+
+/-- External procedures never write heap directly -/
+theorem external_no_writes_heap (proc : Procedure)
+  (hBody : proc.body = .External)
+  (hNoPrecond : proc.preconditions = []) :
+  procWritesHeapDirectly proc = false :=
+  procWritesHeapDirectly_external proc hBody hNoPrecond
+
 end Strata.Laurel

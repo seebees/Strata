@@ -82,7 +82,123 @@ procedure add(x: int, y: int): int {
 };
 "
 
+/-- Extract input parameter names from a Core procedure declaration -/
+def coreProcInputNames (d : Core.Decl) : List String :=
+  match d with
+  | .proc p _ => p.header.inputs.map (·.1.name)
+  | _ => []
+
+/-- Extract output parameter names from a Core procedure declaration -/
+def coreProcOutputNames (d : Core.Decl) : List String :=
+  match d with
+  | .proc p _ => p.header.outputs.map (·.1.name)
+  | _ => []
+
+/-- Check structural properties of Core declarations -/
+def checkStructure (testName : String) (input : String) : IO Unit := do
+  let program ← parseLaurelString testName input
+  let (coreOpt, _) := Laurel.translate {} program
+  match coreOpt with
+  | none => IO.println s!"{testName}: ❌ Translation failed"
+  | some core =>
+    let mut ok := true
+    -- Check: every instance procedure has $heap_in in inputs and $heap in outputs
+    let withDefs := { program with
+      staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+      types := coreDefinitionsForLaurel.types ++ program.types
+    }
+    let instanceNames := (nonExternalInstanceProcs withDefs).map fun (t, p) =>
+      qualifiedName t p.name.text
+    for decl in core.decls do
+      let name := decl.name.name
+      if instanceNames.contains name then
+        let inputs := coreProcInputNames decl
+        let outputs := coreProcOutputNames decl
+        if !inputs.contains "$heap_in" then
+          IO.println s!"{testName}: ❌ {name} missing $heap_in in inputs: {inputs}"
+          ok := false
+        if !inputs.contains "self" then
+          IO.println s!"{testName}: ❌ {name} missing self in inputs: {inputs}"
+          ok := false
+        if !outputs.contains "$heap" then
+          IO.println s!"{testName}: ❌ {name} missing $heap in outputs: {outputs}"
+          ok := false
+        if !outputs.contains "$result" then
+          IO.println s!"{testName}: ❌ {name} missing $result in outputs: {outputs}"
+          ok := false
+    if ok then
+      IO.println s!"{testName} structure: ✅"
+
 #eval do
   compareNames "SimpleComposite" simpleComposite
   compareNames "CompositeWithProc" compositeWithProc
   compareNames "StaticProc" staticProc
+  compareNames "TwoComposites" "
+composite A {
+  var x: int
+}
+composite B {
+  var y: bool
+}
+"
+  compareNames "FunctionAndProc" "
+composite Box {
+  var value: int
+  function getValue(self: Box): int {
+    self#value
+  };
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+}
+"
+  compareNames "StaticFunction" "
+function double(x: int): int {
+  x + x
+};
+"
+  compareNames "ProcWithPostcondition" "
+composite Counter {
+  var count: int
+  procedure increment(self: Counter)
+    ensures self#count == old(self#count) + 1
+    modifies self
+  {
+    self#count := self#count + 1
+  };
+}
+"
+  compareNames "MultipleInstanceProcs" "
+composite Stack {
+  var size: int
+  procedure push(self: Stack)
+    modifies self
+  {
+    self#size := self#size + 1
+  };
+  procedure pop(self: Stack)
+    modifies self
+  {
+    self#size := self#size - 1
+  };
+}
+"
+  -- Structural checks
+  checkStructure "CompositeWithProc" compositeWithProc
+  checkStructure "MultipleInstanceProcs" "
+composite Stack {
+  var size: int
+  procedure push(self: Stack)
+    modifies self
+  {
+    self#size := self#size + 1
+  };
+  procedure pop(self: Stack)
+    modifies self
+  {
+    self#size := self#size - 1
+  };
+}
+"

@@ -239,4 +239,36 @@ theorem heap_accessing_has_heap_out (proc : Procedure) :
   unfold expectedOutputs
   simp
 
+/-! ## P4 completeness: heap flag ↔ heap parameters -/
+
+/-- accessesHeap = true → $heap_in in inputs -/
+theorem heap_true_implies_heap_in (proc : Procedure) (isInstance : Bool) :
+  ("$heap_in", "Heap") ∈ expectedInputs proc isInstance true := by
+  show ("$heap_in", "Heap") ∈
+    [("$heap_in", "Heap")] ++
+    (if isInstance then [("self", "Composite")] else []) ++
+    _
+  exact mem_append_left' (List.Mem.head _)
+
+/-- accessesHeap = true → $heap in outputs -/
+theorem heap_true_implies_heap_out (proc : Procedure) :
+  ("$heap", "Heap") ∈ expectedOutputs proc true := by
+  unfold expectedOutputs; simp
+
+/-- accessesHeap = false → $heap NOT in outputs -/
+theorem heap_false_implies_no_heap_out (proc : Procedure)
+  (hNoClash : ∀ p ∈ proc.outputs, ¬(p.name.text = "$heap" ∧ coreTypeName p.type.val = "Heap")) :
+  ("$heap", "Heap") ∉ expectedOutputs proc false := by
+  unfold expectedOutputs; dsimp
+  -- Goal: ("$heap", "Heap") ∉ proc.outputs.map (fun p => ...) ++ [("$result", "ExceptionResult")]
+  intro h
+  rw [List.mem_append] at h
+  rcases h with h | h
+  · -- h : ("$heap", "Heap") ∈ proc.outputs.map ...
+    rw [List.mem_map] at h
+    obtain ⟨p, hp, heq⟩ := h
+    exact hNoClash p hp ⟨congrArg Prod.fst heq, congrArg Prod.snd heq⟩
+  · -- h : ("$heap", "Heap") ∈ [("$result", "ExceptionResult")]
+    simp at h
+
 end Strata.Laurel

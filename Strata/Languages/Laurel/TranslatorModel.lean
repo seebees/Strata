@@ -257,9 +257,7 @@ def procAccessesHeapDirectly (proc : Procedure) : Bool :=
 /-- Expected Core output parameters for a procedure -/
 @[expose] def expectedOutputs (proc : Procedure) (accessesHeap : Bool) : List (String × String) :=
   let heapOut := if accessesHeap then [("$heap", "Heap")] else []
-  let returnParam := match proc.outputs with
-    | [] => []
-    | _ => proc.outputs.map fun p => (p.name.text, coreTypeName p.type.val)
+  let returnParam := proc.outputs.map fun p => (p.name.text, coreTypeName p.type.val)
   heapOut ++ returnParam ++ [("$result", "ExceptionResult")]
 
 end -- public section

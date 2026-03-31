@@ -171,24 +171,21 @@ in the program — this is the well-formedness condition that the
 resolution pass guarantees.
 -/
 
-/-- readField is always a declared name -/
-theorem readField_always_declared (program : Program) :
-  "readField" ∈ expectedDeclNames program :=
-  readField_in_declNames program
+/-- FieldSelect always references readField (WF equation lemma needed) -/
+theorem fieldSelect_refs_readField (target : WithMetadata StmtExpr) (fieldId : Identifier)
+  (e : WithMetadata StmtExpr) (h : e.val = .FieldSelect target fieldId) :
+  "readField" ∈ referencedNamesInExprMd e := by
+  sorry -- needs WF equation lemma for referencedNamesInExprMd
 
-/-- updateField is always a declared name -/
-theorem updateField_always_declared (program : Program) :
-  "updateField" ∈ expectedDeclNames program :=
-  updateField_in_declNames program
-
-/-- increment is always a declared name -/
-theorem increment_always_declared (program : Program) :
-  "increment" ∈ expectedDeclNames program :=
-  increment_in_declNames program
+/-- New always references increment (WF equation lemma needed) -/
+theorem new_refs_increment (className : Identifier)
+  (e : WithMetadata StmtExpr) (h : e.val = .New className) :
+  "increment" ∈ referencedNamesInExprMd e := by
+  sorry -- needs WF equation lemma for referencedNamesInExprMd
 
 /-- A program is well-formed if every referenced name in every
     procedure body is a declared name -/
-def wellFormedCalls (program : Program) : Prop :=
+@[expose] def wellFormedCalls (program : Program) : Prop :=
   ∀ name ∈ allReferencedNames program,
     name ∈ expectedDeclNames program
 

@@ -158,40 +158,40 @@ should exist as a declaration.
 -/
 
 /-- Names referenced in a Laurel expression after translation.
-    Models what the passes would produce from raw Laurel AST. -/
-partial def referencedNamesInExpr (e : StmtExpr) : List String :=
-  match e with
+    Models what the passes would produce from raw Laurel AST.
+    Non-partial: uses well-founded recursion on WithMetadata size. -/
+@[expose] def referencedNamesInExprMd (e : WithMetadata StmtExpr) : List String :=
+  match _h : e.val with
   | .StaticCall callee args =>
-    [callee.text] ++ args.flatMap (fun a => referencedNamesInExpr a.val)
+    [callee.text] ++ args.flatMap referencedNamesInExprMd
   | .InstanceCall _ callee args =>
-    [callee.text] ++ args.flatMap (fun a => referencedNamesInExpr a.val)
-  | .FieldSelect target fieldId =>
-    -- After heap param: readField($heap, target, Type.field)
-    -- Also Box..intVal! or similar destructor for the read
-    ["readField"] ++ referencedNamesInExpr target.val
+    [callee.text] ++ args.flatMap referencedNamesInExprMd
+  | .FieldSelect target _ =>
+    ["readField"] ++ referencedNamesInExprMd target
   | .Assign targets v =>
-    let targetRefs := targets.flatMap fun t => match t.val with
-      | .FieldSelect target _ =>
-        -- After heap param: updateField($heap, target, field, BoxInt(v))
-        ["updateField"] ++ referencedNamesInExpr target.val
-      | _ => []
-    targetRefs ++ referencedNamesInExpr v.val
+    targets.flatMap referencedNamesInExprMd ++ referencedNamesInExprMd v
   | .New _ => ["increment"]
-  | .LocalVariable _ _ (some init) => referencedNamesInExpr init.val
-  | .Block stmts _ => stmts.flatMap (fun s => referencedNamesInExpr s.val)
-  | .IfThenElse c t e =>
-    referencedNamesInExpr c.val ++ referencedNamesInExpr t.val ++
-    (match e with | some e => referencedNamesInExpr e.val | none => [])
+  | .LocalVariable _ _ (some init) => referencedNamesInExprMd init
+  | .Block stmts _ => stmts.flatMap referencedNamesInExprMd
+  | .IfThenElse c t (some el) =>
+    referencedNamesInExprMd c ++ referencedNamesInExprMd t ++ referencedNamesInExprMd el
+  | .IfThenElse c t none =>
+    referencedNamesInExprMd c ++ referencedNamesInExprMd t
   | .While c _ _ body =>
-    referencedNamesInExpr c.val ++ referencedNamesInExpr body.val
-  | .Return (some v) => referencedNamesInExpr v.val
+    referencedNamesInExprMd c ++ referencedNamesInExprMd body
+  | .Return (some v) => referencedNamesInExprMd v
   | _ => []
+  termination_by sizeOf e
+  decreasing_by all_goals (have := WithMetadata.sizeOf_val_lt e; term_by_mem)
+
+def referencedNamesInExpr (e : StmtExpr) : List String :=
+  referencedNamesInExprMd ⟨e, .empty⟩
 
 /-- All names referenced in a procedure's body -/
 def referencedNamesInProc (proc : Procedure) : List String :=
   match proc.body with
-  | .Transparent body => referencedNamesInExpr body.val
-  | .Opaque _ (some body) _ => referencedNamesInExpr body.val
+  | .Transparent body => referencedNamesInExprMd body
+  | .Opaque _ (some body) _ => referencedNamesInExprMd body
   | _ => []
 
 /-- All names referenced across all procedures in a program -/

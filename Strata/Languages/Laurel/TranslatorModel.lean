@@ -135,13 +135,32 @@ partial def directlyReadsHeap (body : StmtExpr) : Bool :=
   | .IfThenElse c t e =>
     directlyReadsHeap c.val || directlyReadsHeap t.val ||
     (match e with | some e => directlyReadsHeap e.val | none => false)
-  | .While c _ _ body => directlyReadsHeap c.val || directlyReadsHeap body.val
+  | .While c invs d body =>
+    directlyReadsHeap c.val || directlyReadsHeap body.val ||
+    invs.any (fun i => directlyReadsHeap i.val) ||
+    (match d with | some d => directlyReadsHeap d.val | none => false)
   | .LocalVariable _ _ (some init) => directlyReadsHeap init.val
   | .Assign targets v =>
     targets.any (fun t => directlyReadsHeap t.val) || directlyReadsHeap v.val
   | .StaticCall _ args => args.any (fun a => directlyReadsHeap a.val)
   | .InstanceCall target _ args =>
     directlyReadsHeap target.val || args.any (fun a => directlyReadsHeap a.val)
+  | .PrimitiveOp _ args => args.any (fun a => directlyReadsHeap a.val)
+  | .PureFieldUpdate t _ v => directlyReadsHeap t.val || directlyReadsHeap v.val
+  | .ReferenceEquals l r => directlyReadsHeap l.val || directlyReadsHeap r.val
+  | .AsType t _ => directlyReadsHeap t.val
+  | .IsType t _ => directlyReadsHeap t.val
+  | .Old v => directlyReadsHeap v.val
+  | .Fresh v => directlyReadsHeap v.val
+  | .Assigned n => directlyReadsHeap n.val
+  | .Assert c => directlyReadsHeap c.val
+  | .Assume c => directlyReadsHeap c.val
+  | .Forall _ trigger b =>
+    (match trigger with | some t => directlyReadsHeap t.val | none => false) || directlyReadsHeap b.val
+  | .Exists _ trigger b =>
+    (match trigger with | some t => directlyReadsHeap t.val | none => false) || directlyReadsHeap b.val
+  | .ProveBy v p => directlyReadsHeap v.val || directlyReadsHeap p.val
+  | .ContractOf _ f => directlyReadsHeap f.val
   | _ => false
 
 /-- Does a procedure body directly write the heap (field assign, new)? -/
@@ -154,11 +173,32 @@ partial def directlyWritesHeap (body : StmtExpr) : Bool :=
   | .IfThenElse c t e =>
     directlyWritesHeap c.val || directlyWritesHeap t.val ||
     (match e with | some e => directlyWritesHeap e.val | none => false)
-  | .While c _ _ body => directlyWritesHeap c.val || directlyWritesHeap body.val
+  | .While c invs d body =>
+    directlyWritesHeap c.val || directlyWritesHeap body.val ||
+    invs.any (fun i => directlyWritesHeap i.val) ||
+    (match d with | some d => directlyWritesHeap d.val | none => false)
   | .LocalVariable _ _ (some init) => directlyWritesHeap init.val
+  | .Assign targets v =>
+    targets.any (fun t => directlyWritesHeap t.val) || directlyWritesHeap v.val
   | .StaticCall _ args => args.any (fun a => directlyWritesHeap a.val)
   | .InstanceCall target _ args =>
     directlyWritesHeap target.val || args.any (fun a => directlyWritesHeap a.val)
+  | .PrimitiveOp _ args => args.any (fun a => directlyWritesHeap a.val)
+  | .PureFieldUpdate t _ v => directlyWritesHeap t.val || directlyWritesHeap v.val
+  | .ReferenceEquals l r => directlyWritesHeap l.val || directlyWritesHeap r.val
+  | .AsType t _ => directlyWritesHeap t.val
+  | .IsType t _ => directlyWritesHeap t.val
+  | .Old v => directlyWritesHeap v.val
+  | .Fresh v => directlyWritesHeap v.val
+  | .Assigned n => directlyWritesHeap n.val
+  | .Assert c => directlyWritesHeap c.val
+  | .Assume c => directlyWritesHeap c.val
+  | .Forall _ trigger b =>
+    (match trigger with | some t => directlyWritesHeap t.val | none => false) || directlyWritesHeap b.val
+  | .Exists _ trigger b =>
+    (match trigger with | some t => directlyWritesHeap t.val | none => false) || directlyWritesHeap b.val
+  | .ProveBy v p => directlyWritesHeap v.val || directlyWritesHeap p.val
+  | .ContractOf _ f => directlyWritesHeap f.val
   | _ => false
 
 /-- Does a procedure body directly access the heap (read or write)? -/
@@ -251,6 +291,21 @@ partial def calleesInExpr (body : StmtExpr) : List String :=
     targets.flatMap (fun t => calleesInExpr t.val) ++ calleesInExpr v.val
   | .FieldSelect target _ => calleesInExpr target.val
   | .PrimitiveOp _ args => args.flatMap (fun a => calleesInExpr a.val)
+  | .PureFieldUpdate t _ v => calleesInExpr t.val ++ calleesInExpr v.val
+  | .ReferenceEquals l r => calleesInExpr l.val ++ calleesInExpr r.val
+  | .AsType t _ => calleesInExpr t.val
+  | .IsType t _ => calleesInExpr t.val
+  | .Forall _ trigger b =>
+    (match trigger with | some t => calleesInExpr t.val | none => []) ++ calleesInExpr b.val
+  | .Exists _ trigger b =>
+    (match trigger with | some t => calleesInExpr t.val | none => []) ++ calleesInExpr b.val
+  | .Old v => calleesInExpr v.val
+  | .Fresh v => calleesInExpr v.val
+  | .Assigned n => calleesInExpr n.val
+  | .Assert c => calleesInExpr c.val
+  | .Assume c => calleesInExpr c.val
+  | .ProveBy v p => calleesInExpr v.val ++ calleesInExpr p.val
+  | .ContractOf _ f => calleesInExpr f.val
   | _ => []
 
 /-- Extract all callees from a procedure (body + postconditions + preconditions) -/
@@ -329,6 +384,21 @@ public theorem direct_subset_transitive
     · simp [heq]
       apply ih
       exact fixpointStep_preserves_mem info current n h hInfo
+
+/-- When converged, transitiveClose returns current regardless of remaining fuel -/
+public theorem transitiveClose_converged
+  (info : List (String × Bool × List String))
+  (fuel : Nat) (current : List String)
+  (hConverged : ((fixpointStep info current).length == current.length) = true) :
+  transitiveClose info (fuel + 1) current = current := by
+  simp [transitiveClose, hConverged]
+
+/-- transitiveClose is monotone in fuel: more fuel doesn't shrink the result -/
+public theorem transitiveClose_zero
+  (info : List (String × Bool × List String))
+  (current : List String) :
+  transitiveClose info 0 current = current := by
+  rfl
 
 /-! ## Body translation model
 

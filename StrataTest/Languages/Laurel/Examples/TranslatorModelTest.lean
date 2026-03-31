@@ -452,3 +452,90 @@ procedure readField(heap: Heap, obj: Composite, field: Field): Box
         ok := false
     if ok then
       IO.println s!"{name}: ✅ heap analysis consistent"
+
+  -- P4: Transitive heap closure (model vs real)
+  IO.println ""
+  IO.println "=== P4: Transitive heap closure (model vs real) ==="
+  for (name, input) in [
+    ("DirectOnly", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+}
+"),
+    ("OneHop", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+  procedure getValuePlusOne(self: Box): int {
+    return self~>getValue() + 1
+  };
+}
+"),
+    ("TwoHops", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+  procedure getValuePlusOne(self: Box): int {
+    return self~>getValue() + 1
+  };
+  procedure getValuePlusTwo(self: Box): int {
+    return self~>getValuePlusOne() + 1
+  };
+}
+"),
+    ("WriteChain", "
+composite Box {
+  var value: int
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+  procedure reset(self: Box)
+    modifies self
+  {
+    self~>setValue(0)
+  };
+}
+")
+  ] do
+    let program ← parseLaurelString name input
+    let allProcs := program.staticProcedures ++
+      (program.types.flatMap fun (t : TypeDefinition) => match t with
+        | .Composite c => c.instanceProcedures
+        | _ => [])
+    -- Real translator
+    let realReaders := (computeReadsHeap allProcs).map fun (r : Identifier) => r.text
+    let realWriters := (computeWritesHeap allProcs).map fun (r : Identifier) => r.text
+    -- Model's transitive analysis
+    let modelReaders := transitiveHeapReaders allProcs
+    let modelWriters := transitiveHeapWriters allProcs
+    let mut ok := true
+    -- Check: model readers ⊆ real readers
+    for n in modelReaders do
+      if !realReaders.contains n then
+        IO.println s!"{name}: ❌ model transitive reader {n} not in real"
+        ok := false
+    -- Check: real readers ⊆ model readers
+    for n in realReaders do
+      if !modelReaders.contains n then
+        IO.println s!"{name}: ❌ real reader {n} not in model transitive"
+        ok := false
+    -- Check writers
+    for n in modelWriters do
+      if !realWriters.contains n then
+        IO.println s!"{name}: ❌ model transitive writer {n} not in real"
+        ok := false
+    for n in realWriters do
+      if !modelWriters.contains n then
+        IO.println s!"{name}: ❌ real writer {n} not in model transitive"
+        ok := false
+    if ok then
+      IO.println s!"{name}: ✅ transitive closure matches (readers={modelReaders}, writers={modelWriters})"

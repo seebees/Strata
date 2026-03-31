@@ -230,7 +230,105 @@ def heapAccessingProcNames (program : Program) : List String :=
   let direct := (nonExternalStaticProcs program).filter fun p =>
     procReadsHeapDirectly p || procWritesHeapDirectly p
   direct.map (·.name.text)
-  -- TODO: transitive heap access through callees
+
+/-! ## Callee extraction and transitive heap closure -/
+
+/-- Extract callee names from a StmtExpr (StaticCall and InstanceCall) -/
+partial def calleesInExpr (body : StmtExpr) : List String :=
+  match body with
+  | .StaticCall callee args =>
+    [callee.text] ++ args.flatMap (fun a => calleesInExpr a.val)
+  | .InstanceCall _ callee args =>
+    [callee.text] ++ args.flatMap (fun a => calleesInExpr a.val)
+  | .Return (some v) => calleesInExpr v.val
+  | .Block stmts _ => stmts.flatMap (fun s => calleesInExpr s.val)
+  | .IfThenElse c t e =>
+    calleesInExpr c.val ++ calleesInExpr t.val ++
+    (match e with | some e => calleesInExpr e.val | none => [])
+  | .While c _ _ body => calleesInExpr c.val ++ calleesInExpr body.val
+  | .LocalVariable _ _ (some init) => calleesInExpr init.val
+  | .Assign targets v =>
+    targets.flatMap (fun t => calleesInExpr t.val) ++ calleesInExpr v.val
+  | .FieldSelect target _ => calleesInExpr target.val
+  | .PrimitiveOp _ args => args.flatMap (fun a => calleesInExpr a.val)
+  | _ => []
+
+/-- Extract all callees from a procedure (body + postconditions + preconditions) -/
+def procCallees (proc : Procedure) : List String :=
+  let bodyCallees := match proc.body with
+    | .Transparent b => calleesInExpr b.val
+    | .Opaque postconds impl _ =>
+      let postCallees := postconds.flatMap (fun pc => calleesInExpr pc.val)
+      let implCallees := match impl with
+        | some e => calleesInExpr e.val
+        | none => []
+      postCallees ++ implCallees
+    | .Abstract postconds => postconds.flatMap (fun pc => calleesInExpr pc.val)
+    | .External => []
+  let precondCallees := proc.preconditions.flatMap (fun pc => calleesInExpr pc.val)
+  bodyCallees ++ precondCallees
+
+/-- One step of transitive closure: add any proc that calls a known heap accessor -/
+def fixpointStep
+  (info : List (String × Bool × List String))  -- (name, directlyAccesses, callees)
+  (current : List String) : List String :=
+  info.filterMap fun (n, _, callees) =>
+    if current.contains n then some n
+    else if callees.any current.contains then some n
+    else none
+
+/-- Transitive heap closure with fuel -/
+def transitiveClose (info : List (String × Bool × List String)) (fuel : Nat) (current : List String) : List String :=
+  match fuel with
+  | 0 => current
+  | fuel' + 1 =>
+    let next := fixpointStep info current
+    if next.length == current.length then current else transitiveClose info fuel' next
+
+/-- Compute transitive heap readers for a list of procedures -/
+def transitiveHeapReaders (procs : List Procedure) : List String :=
+  let info := procs.map fun p => (p.name.text, procReadsHeapDirectly p, procCallees p)
+  let direct := info.filterMap fun (n, reads, _) => if reads then some n else none
+  transitiveClose info procs.length direct
+
+/-- Compute transitive heap writers for a list of procedures -/
+def transitiveHeapWriters (procs : List Procedure) : List String :=
+  let info := procs.map fun p => (p.name.text, procWritesHeapDirectly p, procCallees p)
+  let direct := info.filterMap fun (n, writes, _) => if writes then some n else none
+  transitiveClose info procs.length direct
+
+/-! ### Transitive closure properties -/
+
+/-- fixpointStep preserves membership for names that are in info -/
+public theorem fixpointStep_preserves_mem
+  (info : List (String × Bool × List String))
+  (current : List String) (n : String)
+  (hCurrent : n ∈ current)
+  (hInfo : n ∈ info.map (·.1)) :
+  n ∈ fixpointStep info current := by
+  simp only [fixpointStep]
+  rw [List.mem_filterMap]
+  obtain ⟨entry, hEntry, hName⟩ := List.mem_map.mp hInfo
+  refine ⟨entry, hEntry, ?_⟩
+  subst hName
+  simp [hCurrent]
+
+/-- Direct heap readers are in the transitive set -/
+public theorem direct_subset_transitive
+  (info : List (String × Bool × List String))
+  (fuel : Nat) (current : List String)
+  (n : String) (h : n ∈ current)
+  (hInfo : n ∈ info.map (·.1)) :
+  n ∈ transitiveClose info fuel current := by
+  induction fuel generalizing current with
+  | zero => exact h
+  | succ fuel' ih =>
+    simp only [transitiveClose]
+    by_cases heq : (fixpointStep info current).length == current.length
+    · simp [heq]; exact h
+    · simp [heq]
+      apply ih
+      exact fixpointStep_preserves_mem info current n h hInfo
 
 /-! ## Body translation model
 

@@ -177,6 +177,7 @@ partial def referencedNamesInExpr (e : StmtExpr) : List String :=
       | _ => []
     targetRefs ++ referencedNamesInExpr v.val
   | .New _ => ["increment"]
+  | .LocalVariable _ _ (some init) => referencedNamesInExpr init.val
   | .Block stmts _ => stmts.flatMap (fun s => referencedNamesInExpr s.val)
   | .IfThenElse c t e =>
     referencedNamesInExpr c.val ++ referencedNamesInExpr t.val ++

@@ -207,7 +207,78 @@ composite Stack {
   IO.println "=== P1: Name consistency (referenced ⊆ declared) ==="
   for (name, input) in [
     ("CompositeWithProc", compositeWithProc),
-    ("StaticProc", staticProc)
+    ("StaticProc", staticProc),
+    ("FieldReadWrite", "
+composite Box {
+  var value: int
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+}
+"),
+    ("NewObject", "
+composite Obj {
+  var x: int
+}
+procedure create(): Obj {
+  var o: Obj := new Obj;
+  return o
+};
+"),
+    ("StaticCallsStatic", "
+procedure helper(x: int): int {
+  return x + 1
+};
+procedure caller(x: int): int {
+  var y: int := helper(x);
+  return y
+};
+"),
+    ("InstanceCallsInstance", "
+composite Counter {
+  var count: int
+  procedure increment(self: Counter)
+    modifies self
+  {
+    self#count := self#count + 1
+  };
+  procedure addTwo(self: Counter)
+    modifies self
+  {
+    self~>increment();
+    self~>increment()
+  };
+}
+"),
+    ("IfElse", "
+procedure abs(x: int): int {
+  if (x < 0) {
+    return 0 - x
+  } else {
+    return x
+  }
+};
+"),
+    ("WhileLoop", "
+procedure sum(n: int): int
+  requires n >= 0
+{
+  var i: int := 0;
+  var s: int := 0;
+  while (i < n)
+    invariant i >= 0
+  {
+    s := s + i;
+    i := i + 1
+  };
+  return s
+};
+")
   ] do
     let program ← parseLaurelString name input
     let withDefs := { program with
@@ -218,6 +289,6 @@ composite Stack {
     let decls := expectedDeclNames withDefs
     let missing := refs.filter (fun n => !decls.contains n)
     if missing.isEmpty then
-      IO.println s!"{name}: ✅ all {refs.length} referenced names are declared"
+      IO.println s!"{name}: ✅ all {refs.length} referenced names declared"
     else
       IO.println s!"{name}: ❌ referenced but not declared: {missing}"

@@ -213,37 +213,48 @@ its properties (D4) give value independently.
 
 ## Open Questions
 
-### Q1: How to handle error cases?
+### Q1: What defines "valid" input? — Answered
 
-`translate` accumulates diagnostics and can produce `none` for
-the Core program. The model always succeeds (it describes
-correct behavior on valid input). The equivalence proof needs
-a precondition that the input is valid. What defines "valid"?
+The translator produces three kinds of errors:
+- **NotYetImplemented** (13 cases) — unsupported features
+- **StrataBug** (8 cases) — upstream pass invariant violations
+- **UserError** (3 cases) — malformed user code
 
-### Q2: How to handle the generated datatypes?
+"Valid input" = uses only supported Laurel features. This is
+defined by which `StmtExpr` variants the model handles. Lean's
+exhaustive pattern matching enforces this — the model must have
+a case for every variant it supports, and the `valid` predicate
+is the union of those cases.
 
-The Box, Heap, Field, TypeTag datatypes are generated based on
-what composites and field types exist in the program. The model
-needs to specify this generation precisely. Is there a clean
-way to describe it?
+StrataBug errors can't arise in the model because the model
+transforms directly (no upstream passes to violate invariants).
 
-### Q3: How to handle the multiple resolution passes?
+### Q2: How to handle the generated datatypes? — Answered
 
-`translate` runs `resolve` 6+ times. The model doesn't need
-resolution (it's a direct transformation). But the equivalence
-proof needs to show that the resolution passes produce the
-same result as the model's direct approach. How complex is this?
+The datatypes are generated declaratively from the program's
+structure:
+- `TypeTag`: one constructor per composite type
+- `Field`: one constructor per field across all composites
+- `Box`: one constructor per distinct field base type
+  (BoxInt for int fields, BoxBool for bool, BoxSequenceInt
+  for Sequence int, etc.)
+- `Composite`: always MkComposite(ref: int, typeTag: TypeTag)
+- `Heap`: always MkHeap(data: Map Composite (Map Field Box),
+  nextReference: int)
+- `ExceptionResult`: always Success | Failure
 
-### Q4: Incremental development
+The model describes this as a pure function over the program's
+type definitions. No state accumulation needed.
 
-When a new feature is added (e.g., `break`/`continue`), the
-model needs updating. How do we structure the model so that
-adding a new AST node case is localized? Can we use Lean's
-pattern matching exhaustiveness to ensure we don't forget cases?
+### Q3: Passes vs end-to-end — Deferred
 
-### Q5: What about the passes themselves?
+Model the end-to-end transformation. Don't model individual
+passes. Differential testing localizes bugs when needed.
 
-The model describes the end-to-end transformation. But the
-passes (heap parameterization, modifies clauses, etc.) have
-their own correctness properties. Should we model them
-separately, or is the end-to-end model sufficient?
+### Q4: New features — Not a concern
+
+New Java features (break/continue, switch, etc.) are desugared
+by JVerify into existing Laurel constructs (exit + labeled
+blocks, if/else chains). The Laurel AST is relatively stable.
+New Laurel AST nodes are rare. When they do occur, Lean's
+exhaustive pattern matching forces the model to be updated.

@@ -75,24 +75,63 @@ theorem exceptionResult_in_declNames (program : Program) :
   "ExceptionResult" ∈ expectedDeclNames program := by
   simp [expectedDeclNames, expectedDatatypeNames]
 
-/-! ## P3: Partition completeness
+/-! ## Helper lemmas for List.filter/map membership -/
 
-Every non-external procedure appears in either the procedure
-names or the function names list. -/
+private theorem List.mem_map_of_mem' {f : α → β} {a : α} {l : List α}
+  (h : a ∈ l) : f a ∈ l.map f := by
+  exact List.mem_map.mpr ⟨a, h, rfl⟩
+
+private theorem List.mem_filter_intro {p : α → Bool} {a : α} {l : List α}
+  (hm : a ∈ l) (hp : p a = true) : a ∈ l.filter p := by
+  exact List.mem_filter.mpr ⟨hm, hp⟩
+
+/-! ## P3: Partition completeness ✅ -/
 
 theorem static_proc_in_procs_or_funcs
   (program : Program) (proc : Procedure)
   (h : proc ∈ nonExternalStaticProcs program) :
   proc.name.text ∈ expectedProcedureNames program ∨
   proc.name.text ∈ expectedFunctionNames program := by
-  sorry -- needs helper lemmas for List.filter/map membership
+  by_cases hf : proc.isFunctional
+  · right; simp only [expectedFunctionNames]
+    have : proc ∈ (nonExternalStaticProcs program).filter (·.isFunctional) :=
+      List.mem_filter.mpr ⟨h, hf⟩
+    have : proc.name.text ∈ ((nonExternalStaticProcs program).filter (·.isFunctional)).map (·.name.text) :=
+      List.mem_map.mpr ⟨proc, ‹_›, rfl⟩
+    simp_all [List.mem_append]
+  · left; simp only [expectedProcedureNames]
+    have hff : proc.isFunctional = false := by cases hb : proc.isFunctional <;> simp_all
+    have hneg : (!proc.isFunctional) = true := by rw [hff]; rfl
+    have : proc ∈ (nonExternalStaticProcs program).filter (!·.isFunctional) :=
+      List.mem_filter.mpr ⟨h, hneg⟩
+    have : proc.name.text ∈ ((nonExternalStaticProcs program).filter (!·.isFunctional)).map (·.name.text) :=
+      List.mem_map.mpr ⟨proc, ‹_›, rfl⟩
+    simp_all [List.mem_append]
 
 theorem instance_proc_in_procs_or_funcs
   (program : Program) (typeName : String) (proc : Procedure)
   (h : (typeName, proc) ∈ nonExternalInstanceProcs program) :
   qualifiedName typeName proc.name.text ∈ expectedProcedureNames program ∨
   qualifiedName typeName proc.name.text ∈ expectedFunctionNames program := by
-  sorry -- needs helper lemmas for List.filter/map membership
+  by_cases hf : proc.isFunctional
+  · right; simp only [expectedFunctionNames]
+    have : (typeName, proc) ∈ (nonExternalInstanceProcs program).filter (·.2.isFunctional) :=
+      List.mem_filter.mpr ⟨h, hf⟩
+    have : qualifiedName typeName proc.name.text ∈
+        ((nonExternalInstanceProcs program).filter (·.2.isFunctional)).map
+          (fun (t, p) => qualifiedName t p.name.text) :=
+      List.mem_map.mpr ⟨(typeName, proc), ‹_›, rfl⟩
+    simp_all [List.mem_append]
+  · left; simp only [expectedProcedureNames]
+    have hff : proc.isFunctional = false := by cases hb : proc.isFunctional <;> simp_all
+    have hneg : (!proc.isFunctional) = true := by rw [hff]; rfl
+    have : (typeName, proc) ∈ (nonExternalInstanceProcs program).filter (!·.2.isFunctional) :=
+      List.mem_filter.mpr ⟨h, by simp [hneg]⟩
+    have : qualifiedName typeName proc.name.text ∈
+        ((nonExternalInstanceProcs program).filter (!·.2.isFunctional)).map
+          (fun (t, p) => qualifiedName t p.name.text) :=
+      List.mem_map.mpr ⟨(typeName, proc), ‹_›, rfl⟩
+    simp_all [List.mem_append]
 
 /-! ## P1: Subsumption — component names are in declNames ✅ -/
 

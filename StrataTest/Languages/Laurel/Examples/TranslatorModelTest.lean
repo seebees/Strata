@@ -202,3 +202,22 @@ composite Stack {
   };
 }
 "
+  -- Name consistency: referenced names ⊆ declared names
+  IO.println ""
+  IO.println "=== P1: Name consistency (referenced ⊆ declared) ==="
+  for (name, input) in [
+    ("CompositeWithProc", compositeWithProc),
+    ("StaticProc", staticProc)
+  ] do
+    let program ← parseLaurelString name input
+    let withDefs := { program with
+      staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+      types := coreDefinitionsForLaurel.types ++ program.types
+    }
+    let refs := allReferencedNames withDefs
+    let decls := expectedDeclNames withDefs
+    let missing := refs.filter (fun n => !decls.contains n)
+    if missing.isEmpty then
+      IO.println s!"{name}: ✅ all {refs.length} referenced names are declared"
+    else
+      IO.println s!"{name}: ❌ referenced but not declared: {missing}"

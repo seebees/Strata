@@ -150,5 +150,55 @@ def heapAccessingProcNames (program : Program) : List String :=
   staticDirect.map (·.name.text)
   -- TODO: transitive heap access through callees
 
+/-! ## Body translation model
+
+The model extracts names referenced in procedure bodies.
+This enables P1 (name consistency): every referenced name
+should exist as a declaration.
+-/
+
+/-- Names referenced in a Laurel expression after translation.
+    Models what the passes would produce from raw Laurel AST. -/
+partial def referencedNamesInExpr (e : StmtExpr) : List String :=
+  match e with
+  | .StaticCall callee args =>
+    [callee.text] ++ args.flatMap (fun a => referencedNamesInExpr a.val)
+  | .InstanceCall _ callee args =>
+    [callee.text] ++ args.flatMap (fun a => referencedNamesInExpr a.val)
+  | .FieldSelect target fieldId =>
+    -- After heap param: readField($heap, target, Type.field)
+    -- Also Box..intVal! or similar destructor for the read
+    ["readField"] ++ referencedNamesInExpr target.val
+  | .Assign targets v =>
+    let targetRefs := targets.flatMap fun t => match t.val with
+      | .FieldSelect target _ =>
+        -- After heap param: updateField($heap, target, field, BoxInt(v))
+        ["updateField"] ++ referencedNamesInExpr target.val
+      | _ => []
+    targetRefs ++ referencedNamesInExpr v.val
+  | .New _ => ["increment"]
+  | .Block stmts _ => stmts.flatMap (fun s => referencedNamesInExpr s.val)
+  | .IfThenElse c t e =>
+    referencedNamesInExpr c.val ++ referencedNamesInExpr t.val ++
+    (match e with | some e => referencedNamesInExpr e.val | none => [])
+  | .While c _ _ body =>
+    referencedNamesInExpr c.val ++ referencedNamesInExpr body.val
+  | .Return (some v) => referencedNamesInExpr v.val
+  | _ => []
+
+/-- All names referenced in a procedure's body -/
+def referencedNamesInProc (proc : Procedure) : List String :=
+  match proc.body with
+  | .Transparent body => referencedNamesInExpr body.val
+  | .Opaque _ (some body) _ => referencedNamesInExpr body.val
+  | _ => []
+
+/-- All names referenced across all procedures in a program -/
+def allReferencedNames (program : Program) : List String :=
+  let staticRefs := (nonExternalStaticProcs program).flatMap referencedNamesInProc
+  let instanceRefs := (nonExternalInstanceProcs program).flatMap
+    (fun (_, p) => referencedNamesInProc p)
+  (staticRefs ++ instanceRefs).dedup
+
 end -- public section
 end Strata.Laurel

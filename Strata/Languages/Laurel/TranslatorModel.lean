@@ -55,7 +55,7 @@ def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
 /-! ## Model: what Core declarations should exist -/
 
 /-- Names of all Core procedure declarations the model expects -/
-def expectedProcedureNames (program : Program) : List String :=
+@[expose] def expectedProcedureNames (program : Program) : List String :=
   -- Static procedures (non-functional only — functional become functions)
   let staticProcs := (nonExternalStaticProcs program).filter (!·.isFunctional)
   let staticNames := staticProcs.map (·.name.text)
@@ -71,7 +71,7 @@ def expectedProcedureNames (program : Program) : List String :=
   staticNames ++ instanceNames ++ witnessNames
 
 /-- Names of all Core function declarations the model expects -/
-def expectedFunctionNames (program : Program) : List String :=
+@[expose] def expectedFunctionNames (program : Program) : List String :=
   -- Static functions (isFunctional)
   let staticFuncs := (nonExternalStaticProcs program).filter (·.isFunctional)
   let staticNames := staticFuncs.map (·.name.text)
@@ -107,7 +107,7 @@ def expectedFunctionNames (program : Program) : List String :=
   fixed ++ generated ++ placeholder ++ userDatatypes
 
 /-- Names of axioms the model expects -/
-def expectedAxiomNames (program : Program) : List String :=
+@[expose] def expectedAxiomNames (program : Program) : List String :=
   -- Axioms are generated when BoxInt exists in the Box datatype.
   -- BoxInt exists when there are int fields AND procedures that access the heap.
   let fields := allFields program
@@ -118,7 +118,7 @@ def expectedAxiomNames (program : Program) : List String :=
   else []
 
 /-- All expected Core declaration names (union of procedures, functions, datatypes, axioms) -/
-def expectedDeclNames (program : Program) : List String :=
+@[expose] def expectedDeclNames (program : Program) : List String :=
   expectedProcedureNames program ++
   expectedFunctionNames program ++
   expectedDatatypeNames program ++

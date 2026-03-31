@@ -190,9 +190,9 @@ partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
   proc.preconditions.any (fun pc => directlyWritesHeap pc.val)
 
 /-- Equation: Opaque + non-empty modifies → reads heap.
-    Axiom because Strata's `module` system prevents tactic-based unfolding.
-    The proof would be: match proc with | ⟨...⟩ => cases (!modif.isEmpty); rfl / contradiction.
-    Validated by 30 differential tests. -/
+    Axiom required: Strata's module system makes definitions opaque even to
+    the kernel for cross-expression definitional equality. We cannot write
+    a proof term that the kernel accepts. Validated by 30 differential tests. -/
 public axiom procReadsHeapDirectly_opaque_modifies
   (proc : Procedure) (postconds : List (WithMetadata StmtExpr))
   (impl : Option (WithMetadata StmtExpr))

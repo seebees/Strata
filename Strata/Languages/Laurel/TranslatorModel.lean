@@ -4,7 +4,7 @@
 -/
 module
 
-import Strata.Languages.Laurel.Laurel
+public import Strata.Languages.Laurel.Laurel
 
 /-!
 # Translator Functional Model
@@ -15,7 +15,9 @@ what Core program a given Laurel program should produce.
 See `docs/design/translator-model/` for design decisions.
 -/
 
-namespace Strata.Laurel.TranslatorModel
+namespace Strata.Laurel
+
+public section
 
 /-! ## Helpers: extract structure from a Laurel program -/
 
@@ -87,7 +89,7 @@ def expectedFunctionNames (program : Program) : List String :=
   -- Ancestor functions (one per composite + ancestorsPerType)
   let composites := allComposites program
   let ancestorNames := composites.map fun ct => "ancestorsFor" ++ ct.name.text
-  let ancestorNames := ancestorNames ++ ["ancestorsPerType"]
+  let ancestorNames := if composites.isEmpty then [] else ancestorNames ++ ["ancestorsPerType"]
   -- Constants
   let constantNames := program.constants.map (·.name.text)
   heapOps ++ constraintNames ++ ancestorNames ++ staticNames ++ instanceNames ++ constantNames
@@ -104,11 +106,23 @@ def expectedDatatypeNames (program : Program) : List String :=
   let placeholder := ["NotSupportedYet", "Float64IsNotSupportedYet"]
   fixed ++ generated ++ placeholder ++ userDatatypes
 
-/-- All expected Core declaration names (union of procedures, functions, datatypes) -/
+/-- Names of axioms the model expects -/
+def expectedAxiomNames (program : Program) : List String :=
+  -- Axioms are generated when BoxInt exists in the Box datatype.
+  -- BoxInt exists when there are int fields AND procedures that access the heap.
+  let fields := allFields program
+  let hasIntField := fields.any fun (_, f) => match f.type.val with | .TInt => true | _ => false
+  let hasProcs := !(nonExternalStaticProcs program).isEmpty ||
+                  !(nonExternalInstanceProcs program).isEmpty
+  if hasIntField && hasProcs then ["readInt32_eq", "readInt16_eq", "readInt8_eq"]
+  else []
+
+/-- All expected Core declaration names (union of procedures, functions, datatypes, axioms) -/
 def expectedDeclNames (program : Program) : List String :=
   expectedProcedureNames program ++
   expectedFunctionNames program ++
-  expectedDatatypeNames program
+  expectedDatatypeNames program ++
+  expectedAxiomNames program
 
 /-! ## Model: heap threading -/
 
@@ -136,4 +150,5 @@ def heapAccessingProcNames (program : Program) : List String :=
   staticDirect.map (·.name.text)
   -- TODO: transitive heap access through callees
 
-end Strata.Laurel.TranslatorModel
+end -- public section
+end Strata.Laurel

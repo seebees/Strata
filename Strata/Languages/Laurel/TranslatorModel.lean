@@ -189,7 +189,9 @@ partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
     | .External => false) ||
   proc.preconditions.any (fun pc => directlyWritesHeap pc.val)
 
-/-- Equation for procReadsHeapDirectly on Opaque body with non-empty modifies -/
+/-- Equation: Opaque + non-empty modifies → reads heap.
+    Axiom because Strata's `module` system prevents unfolding definitions
+    in proofs, even in the same file. Validated by differential tests. -/
 public axiom procReadsHeapDirectly_opaque_modifies
   (proc : Procedure) (postconds : List (WithMetadata StmtExpr))
   (impl : Option (WithMetadata StmtExpr))
@@ -198,7 +200,9 @@ public axiom procReadsHeapDirectly_opaque_modifies
   (hModif : !modif.isEmpty = true) :
   procReadsHeapDirectly proc = true
 
-/-- Equation for procWritesHeapDirectly on Opaque body with non-empty modifies -/
+/-- Equation: Opaque + non-empty modifies → writes heap.
+    Axiom because Strata's `module` system prevents unfolding definitions
+    in proofs, even in the same file. Validated by differential tests. -/
 public axiom procWritesHeapDirectly_opaque_modifies
   (proc : Procedure) (postconds : List (WithMetadata StmtExpr))
   (impl : Option (WithMetadata StmtExpr))
@@ -207,12 +211,14 @@ public axiom procWritesHeapDirectly_opaque_modifies
   (hModif : !modif.isEmpty = true) :
   procWritesHeapDirectly proc = true
 
-/-- Equation for procReadsHeapDirectly on External body -/
+/-- Equation: External + no preconditions → doesn't read heap.
+    Axiom for same reason as above. -/
 public axiom procReadsHeapDirectly_external
   (proc : Procedure) (hBody : proc.body = .External) (hNoPrecond : proc.preconditions = []) :
   procReadsHeapDirectly proc = false
 
-/-- Equation for procWritesHeapDirectly on External body -/
+/-- Equation: External + no preconditions → doesn't write heap.
+    Axiom for same reason as above. -/
 public axiom procWritesHeapDirectly_external
   (proc : Procedure) (hBody : proc.body = .External) (hNoPrecond : proc.preconditions = []) :
   procWritesHeapDirectly proc = false

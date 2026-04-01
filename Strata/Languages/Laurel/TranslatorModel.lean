@@ -957,4 +957,73 @@ public partial def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :
     .exist () name.text none (translateExprModel body.val)
   | _ => .const () (.boolConst true)
 
+/-! ## Statement translation model -/
+
+/-- The exception propagation check: if $result is Failure, exit $body -/
+public def modelExceptionPropagation : Core.Statement :=
+  let resultIdent : Core.Expression.Ident := ⟨"$result", ()⟩
+  let isFailureCheck : Core.Expression.Expr :=
+    .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
+  Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some "$body") .empty] [] .empty
+
+/-- Translate a Laurel statement to Core statements -/
+public partial def translateStmtModel
+  (isFunction : String → Bool)
+  (outputParams : List String)
+  (stmt : StmtExpr) : Core.Statements :=
+  match stmt with
+  | .Return (some v) =>
+    match outputParams.head? with
+    | some outName =>
+      let coreExpr := translateExprModel v.val
+      [Core.Statement.set ⟨outName, ()⟩ coreExpr .empty,
+       Imperative.Stmt.exit (some "$body") .empty]
+    | none => []
+  | .Return none => [Imperative.Stmt.exit (some "$body") .empty]
+  | .Block stmts _ =>
+    stmts.flatMap fun s => translateStmtModel isFunction outputParams s.val
+  | .LocalVariable id ty (some init) =>
+    match init.val with
+    | .StaticCall callee args =>
+      if isFunction callee.text then
+        let coreExpr := translateExprModel init.val
+        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some coreExpr) .empty]
+      else
+        let coreArgs := args.map fun a => translateExprModel a.val
+        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty,
+         Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
+         modelExceptionPropagation]
+    | _ =>
+      let coreExpr := translateExprModel init.val
+      [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some coreExpr) .empty]
+  | .LocalVariable id _ none =>
+    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty]
+  | .Assign [⟨.Identifier targetId, _⟩] value =>
+    match value.val with
+    | .StaticCall callee args =>
+      if isFunction callee.text then
+        let coreExpr := translateExprModel value.val
+        [Core.Statement.set ⟨targetId.text, ()⟩ coreExpr .empty]
+      else
+        let coreArgs := args.map fun a => translateExprModel a.val
+        [Core.Statement.call [⟨targetId.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
+         modelExceptionPropagation]
+    | _ =>
+      let coreExpr := translateExprModel value.val
+      [Core.Statement.set ⟨targetId.text, ()⟩ coreExpr .empty]
+  | .IfThenElse cond thenB elseB =>
+    let bcond := translateExprModel cond.val
+    let bthen := translateStmtModel isFunction outputParams thenB.val
+    let belse := match elseB with
+      | some e => translateStmtModel isFunction outputParams e.val
+      | none => []
+    [Imperative.Stmt.ite bcond bthen belse .empty]
+  | .StaticCall callee args =>
+    if isFunction callee.text then []
+    else
+      let coreArgs := args.map fun a => translateExprModel a.val
+      [Core.Statement.call [⟨"$result", ()⟩] callee.text coreArgs .empty,
+       modelExceptionPropagation]
+  | _ => []
+
 end Strata.Laurel

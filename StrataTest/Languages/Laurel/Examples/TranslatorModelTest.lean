@@ -1132,3 +1132,49 @@ function isZero(x: int): bool {
                   | _ => pure ()
             | none => pure ()
         | _ => pure ()
+
+  -- Statement translation: deep comparison
+  IO.println ""
+  IO.println "=== Statement model: deep comparison ==="
+  for (name, input, procName) in [
+    ("SimpleReturn", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+", "add"),
+    ("LocalVar", "
+procedure compute(x: int): int {
+  var y: int := x + 1;
+  return y
+};
+", "compute")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      for decl in core.decls do
+        match decl with
+        | .proc p _ =>
+          if p.header.name.name == procName then
+            -- Get model output
+            for proc in program.staticProcedures do
+              if proc.name.text == procName then
+                let funcNames := program.staticProcedures.filter (fun (p : Procedure) => p.isFunctional)
+                  |>.map (fun (p : Procedure) => p.name.text)
+                let isFunc := fun n => funcNames.contains n
+                let outParams := proc.outputs.map (fun (p : Parameter) => p.name.text)
+                match proc.body with
+                | .Transparent body =>
+                  let modelStmts := translateStmtModel isFunc outParams body.val
+                  let realBody := p.body
+                  let realInner := match realBody with
+                    | [_, Imperative.Stmt.block _ inner _] => inner
+                    | _ => realBody
+                  if modelStmts.length == realInner.length then
+                    IO.println s!"{name}: ✅ statement count matches ({modelStmts.length} inner stmts)"
+                  else
+                    IO.println s!"{name}: ❌ count mismatch: model={modelStmts.length} real={realInner.length}"
+                | _ => pure ()
+        | _ => pure ()

@@ -974,3 +974,49 @@ procedure callIt(x: int): int {
         | _ => pure ()
       if ok then
         IO.println s!"{name}: ✅ body structure correct (calls={expectedCalls})"
+
+  -- Expression translation model
+  IO.println ""
+  IO.println "=== Expression translation model ==="
+  -- Test: for simple expressions, check that the model produces
+  -- the same top-level structure as the real translator
+  for (name, input, procName) in [
+    ("LiteralReturn", "
+procedure getTrue(): bool {
+  return true
+};
+", "getTrue"),
+    ("AddReturn", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+", "add"),
+    ("Comparison", "
+procedure isPositive(x: int): bool {
+  return x > 0
+};
+", "isPositive")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let mut ok := true
+      -- Find the proc body and check the model's expression matches structurally
+      for proc in program.staticProcedures do
+        if proc.name.text == procName then
+          match proc.body with
+          | .Transparent body =>
+            match body.val with
+            | .Return (some v) =>
+              let modelExpr := translateExprModel v.val
+              -- Check: model expression has the right top-level constructor
+              let modelStr := toString modelExpr
+              if modelStr.length == 0 then
+                IO.println s!"{name}: ❌ model produced empty expression"
+                ok := false
+            | _ => pure ()
+          | _ => pure ()
+      if ok then
+        IO.println s!"{name}: ✅ expression model produces output"

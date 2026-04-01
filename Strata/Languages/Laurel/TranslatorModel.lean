@@ -868,3 +868,46 @@ public def classifyDecls (program : Program) : List (String × DeclClass) :=
   types ++ axioms ++ funcs ++ procs
 
 end Strata.Laurel
+
+/-! ## Expression translation model
+
+Maps Laurel expressions to Core expressions. This is a pure function
+(no monad, no SemanticModel) that captures the structural translation.
+-/
+
+namespace Strata.Laurel
+
+/-- Translate a Laurel literal/identifier/op to a Core expression -/
+public partial def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
+  match expr with
+  | .LiteralBool b => .const () (.boolConst b)
+  | .LiteralInt i => .const () (.intConst i)
+  | .LiteralString s => .const () (.strConst s)
+  | .LiteralDecimal _ => .const () (.realConst 0)  -- simplified: decimal conversion not modeled
+  | .Identifier name => .fvar () ⟨name.text, ()⟩ none
+  | .PrimitiveOp .Eq [e1, e2] =>
+    .eq () (translateExprModel e1.val) (translateExprModel e2.val)
+  | .PrimitiveOp .Not [e] =>
+    .app () (.op () ⟨"not", ()⟩ none) (translateExprModel e.val)
+  | .PrimitiveOp op [e1, e2] =>
+    let opName := match op with
+      | .Add => "+" | .Sub => "-" | .Mul => "*"
+      | .Lt => "<" | .Leq => "<=" | .Gt => ">" | .Geq => ">="
+      | .And => "and" | .Or => "or"
+      | _ => "op"
+    .app () (.app () (.op () ⟨opName, ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val)
+  | .StaticCall callee args =>
+    args.foldl (fun acc a => .app () acc (translateExprModel a.val))
+      (.op () ⟨callee.text, ()⟩ none)
+  | .InstanceCall _ callee args =>
+    args.foldl (fun acc a => .app () acc (translateExprModel a.val))
+      (.op () ⟨callee.text, ()⟩ none)
+  | .IfThenElse cond thenB (some elseB) =>
+    .ite () (translateExprModel cond.val) (translateExprModel thenB.val) (translateExprModel elseB.val)
+  | .Forall ⟨name, _⟩ _ body =>
+    .all () name.text none (translateExprModel body.val)
+  | .Exists ⟨name, _⟩ _ body =>
+    .exist () name.text none (translateExprModel body.val)
+  | _ => .const () (.boolConst true)
+
+end Strata.Laurel

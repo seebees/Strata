@@ -720,5 +720,43 @@ def procAccessesHeapDirectly (proc : Procedure) : Bool :=
   let returnParam := proc.outputs.map fun p => (p.name.text, coreTypeName p.type.val)
   heapOut ++ returnParam ++ [("$result", "ExceptionResult")]
 
+/-! ## P7: Frame condition model -/
+
+/-- Does a procedure have $heap in its outputs? -/
+@[simp, expose] def hasHeapOutput (proc : Procedure) : Bool :=
+  proc.outputs.any (fun p => p.name.text == "$heap")
+
+/-- The structure of a frame condition -/
+inductive FrameConditionShape where
+  | fullFrame        -- everything preserved (no modifies, but has $heap)
+  | partialFrame (modifiedExprs : Nat)  -- some objects excluded
+  | noFrame          -- no $heap output, no frame needed
+
+/-- Predict what frame condition shape a procedure should have -/
+@[expose] def expectedFrameShape (proc : Procedure) : FrameConditionShape :=
+  if !hasHeapOutput proc then .noFrame
+  else match proc.body with
+    | .Opaque _ _ modif =>
+      if modif.isEmpty then .fullFrame
+      else .partialFrame modif.length
+    | _ => .fullFrame  -- transparent/abstract with $heap get full frame
+
+/-- A procedure with $heap output always gets a frame condition -/
+public theorem heap_output_implies_frame (proc : Procedure)
+  (hHeap : hasHeapOutput proc = true) :
+  expectedFrameShape proc ≠ .noFrame := by
+  have hNeg : !hasHeapOutput proc = false := by rw [hHeap]; rfl
+  simp [expectedFrameShape, hHeap]
+  split <;> (try split) <;> simp_all
+
+-- TODO: modifies_implies_partial_frame — prove once we understand simp's normalization
+
+/-- A procedure without $heap output needs no frame -/
+public theorem no_heap_no_frame (proc : Procedure)
+  (hNoHeap : hasHeapOutput proc = false) :
+  expectedFrameShape proc = .noFrame := by
+  have hNeg : !hasHeapOutput proc = true := by rw [hNoHeap]; rfl
+  simp_all [expectedFrameShape]
+
 end -- public section
 end Strata.Laurel

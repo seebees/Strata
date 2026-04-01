@@ -749,7 +749,28 @@ public theorem heap_output_implies_frame (proc : Procedure)
   simp [expectedFrameShape, hHeap]
   split <;> (try split) <;> simp_all
 
--- TODO: modifies_implies_partial_frame — prove once we understand simp's normalization
+-- TODO: modifies_implies_partial_frame (simp normalizes
+-- FrameConditionShape ≠ in a way that makes the proof tricky)
+
+/-- A procedure with modifies clause gets a partial frame -/
+public theorem modifies_implies_partial_frame (proc : Procedure)
+  (postconds : List (WithMetadata StmtExpr))
+  (impl : Option (WithMetadata StmtExpr))
+  (modif : List (WithMetadata StmtExpr))
+  (hBody : proc.body = .Opaque postconds impl modif)
+  (hModif : !modif.isEmpty = true)
+  (hHeap : hasHeapOutput proc = true) :
+  expectedFrameShape proc ≠ .noFrame ∧ expectedFrameShape proc ≠ .fullFrame := by
+  constructor
+  · exact heap_output_implies_frame proc hHeap
+  · -- Need: expectedFrameShape proc ≠ .fullFrame
+    -- Use same approach as heap_output_implies_frame but for fullFrame
+    have hNeg : !hasHeapOutput proc = false := by rw [hHeap]; rfl
+    simp [expectedFrameShape, hNeg, hBody]
+    cases modif with
+    | nil => simp at hModif
+    | cons h t =>
+      split <;> simp_all
 
 /-- A procedure without $heap output needs no frame -/
 public theorem no_heap_no_frame (proc : Procedure)

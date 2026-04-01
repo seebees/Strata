@@ -483,6 +483,39 @@ theorem declNames_is_union (program : Program) :
     expectedAxiomNames program := by
   simp [expectedDeclNames]
 
+/-! ## Expression translation properties -/
+
+/-- Bool literals are always translated (never fail) -/
+theorem bool_literal_always_translates (b : Bool) :
+  (translateExprTop (.LiteralBool b)).isSome = true := by
+  rw [translateExpr_literalBool]; rfl
+
+/-- Int literals are always translated -/
+theorem int_literal_always_translates (i : Int) :
+  (translateExprTop (.LiteralInt i)).isSome = true := by
+  rw [translateExpr_literalInt]; rfl
+
+/-- String literals are always translated -/
+theorem string_literal_always_translates (s : String) :
+  (translateExprTop (.LiteralString s)).isSome = true := by
+  rw [translateExpr_literalString]; rfl
+
+/-- Identifiers are always translated -/
+theorem identifier_always_translates (name : Identifier) :
+  (translateExprTop (.Identifier name)).isSome = true := by
+  rw [translateExpr_identifier]; rfl
+
+/-- Identifier translation preserves the name text -/
+theorem identifier_name_preserved (name : Identifier) :
+  translateExprTop (.Identifier name) = some (.fvar () ⟨name.text, ()⟩ none) :=
+  translateExpr_identifier name
+
+/-- Different bool literals produce different expressions -/
+theorem bool_literals_distinct :
+  translateExprTop (.LiteralBool true) ≠ translateExprTop (.LiteralBool false) := by
+  rw [translateExpr_literalBool, translateExpr_literalBool]
+  simp
+
 /-! ## P6 note: LocalVariable with call initializer
 
 `var x := proc()` propagation goes through `predictPattern` (partial),

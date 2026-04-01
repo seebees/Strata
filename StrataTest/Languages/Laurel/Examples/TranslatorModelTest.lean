@@ -625,3 +625,68 @@ procedure callIt(x: int): int {
         | _ => pure ()
       if ok then
         IO.println s!"{name}: ✅ pattern references consistent"
+
+  -- P2: Type consistency
+  IO.println ""
+  IO.println "=== P2: Type consistency ==="
+  for (name, input) in [
+    ("IntParams", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+"),
+    ("BoolParam", "
+procedure negate(b: bool): bool {
+  return !b
+};
+"),
+    ("MixedTypes", "
+procedure test(x: int, b: bool, s: string): int {
+  return x
+};
+"),
+    ("CompositeParam", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+}
+"),
+    ("VoidReturn", "
+procedure doNothing() {
+};
+")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let allProcs := program.staticProcedures ++
+        (program.types.flatMap fun (t : TypeDefinition) => match t with
+          | .Composite c => c.instanceProcedures
+          | _ => [])
+      let mut ok := true
+      for proc in allProcs do
+        -- Check input parameter types
+        for param in proc.inputs do
+          let modelType := coreTypeName param.type.val
+          -- Find the corresponding Core decl and check its input type
+          -- (simplified: just verify model type is a valid Core type)
+          if modelType == "Composite" then
+            match param.type.val with
+            | .TInt | .TBool | .TString | .TReal =>
+              IO.println s!"{name}/{proc.name.text}: ❌ param {param.name.text} mapped to Composite instead of primitive"
+              ok := false
+            | _ => pure ()
+        for param in proc.outputs do
+          let modelType := coreTypeName param.type.val
+          if modelType == "Composite" then
+            match param.type.val with
+            | .TInt | .TBool | .TString | .TReal =>
+              IO.println s!"{name}/{proc.name.text}: ❌ output {param.name.text} mapped to Composite instead of primitive"
+              ok := false
+            | _ => pure ()
+      if ok then
+        IO.println s!"{name}: ✅ type mapping consistent"

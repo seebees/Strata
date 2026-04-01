@@ -374,4 +374,26 @@ theorem assign_instance_proc_call_propagates
     by rw [referencedNames_callWithPropagation]; simp,
     by rw [referencedNames_callWithPropagation]; simp⟩
 
+/-! ## P2: Type consistency -/
+
+theorem int_not_composite : coreTypeName .TInt ≠ "Composite" := by
+  rw [coreTypeName_int]; decide
+
+theorem bool_not_composite : coreTypeName .TBool ≠ "Composite" := by
+  rw [coreTypeName_bool]; decide
+
+theorem string_not_composite : coreTypeName .TString ≠ "Composite" := by
+  rw [coreTypeName_string]; decide
+
+theorem real_not_composite : coreTypeName .TReal ≠ "Composite" := by
+  rw [coreTypeName_real]; decide
+
+theorem heap_is_heap : coreTypeName .THeap = "Heap" := coreTypeName_heap
+
+theorem userDefined_is_composite (name : Identifier) :
+  coreTypeName (.UserDefined name) = "Composite" := by
+  simp [coreTypeName]
+
+theorem void_maps_to_bool : coreTypeName .TVoid = "bool" := coreTypeName_void
+
 end Strata.Laurel

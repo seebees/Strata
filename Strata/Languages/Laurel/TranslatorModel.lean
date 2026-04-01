@@ -668,17 +668,33 @@ For a given Laurel procedure, what should the Core procedure's
 inputs and outputs be?
 -/
 
-/-- Translate a Laurel type to its Core type name -/
-def coreTypeName (ty : HighType) : String :=
+/-- Translate a Laurel type to its Core type name.
+    Mirrors `translateType` in LaurelToCoreTranslator.lean.
+    Note: UserDefined types need the SemanticModel to distinguish
+    composites from datatypes. Without the model, we conservatively
+    map all UserDefined to "Composite". -/
+@[expose] def coreTypeName (ty : HighType) : String :=
   match ty with
   | .TInt => "int"
   | .TBool => "bool"
   | .TString => "string"
   | .TReal => "real"
-  | .TVoid => "bool"
+  | .TVoid => "bool"  -- void maps to bool (placeholder)
   | .THeap => "Heap"
-  | .UserDefined _ => "Composite"  -- all composites map to Composite
-  | _ => "Composite"
+  | .TTypedField _ => "Field"
+  | .TCore s => s
+  | .Unknown => "Any"
+  | .UserDefined _ => "Composite"  -- conservative: needs SemanticModel for datatypes
+  | _ => "Composite"  -- TSet, TMap, TSequence need recursive translation
+
+/-- Core type name properties -/
+
+public theorem coreTypeName_int : coreTypeName .TInt = "int" := by simp [coreTypeName]
+public theorem coreTypeName_bool : coreTypeName .TBool = "bool" := by simp [coreTypeName]
+public theorem coreTypeName_string : coreTypeName .TString = "string" := by simp [coreTypeName]
+public theorem coreTypeName_real : coreTypeName .TReal = "real" := by simp [coreTypeName]
+public theorem coreTypeName_void : coreTypeName .TVoid = "bool" := by simp [coreTypeName]
+public theorem coreTypeName_heap : coreTypeName .THeap = "Heap" := by simp [coreTypeName]
 
 /-- Does a procedure directly access the heap? -/
 def procAccessesHeapDirectly (proc : Procedure) : Bool :=

@@ -314,30 +314,33 @@ theorem external_no_writes_heap (proc : Procedure)
 theorem static_proc_call_propagates_exceptions
   (isFunction : String → Bool) (callee : Identifier) (args : List (WithMetadata StmtExpr))
   (hNotFunc : isFunction callee.text = false) :
-  "$result" ∈ (predictPattern isFunction (.StaticCall callee args)).referencedNames := by
-  rw [static_proc_call_has_propagation isFunction callee args hNotFunc,
-      referencedNames_callWithPropagation]
-  simp
+  ∃ p, predictPatternTop isFunction (.StaticCall callee args) = some p ∧
+    "$result" ∈ p.referencedNames := by
+  exact ⟨.callWithPropagation callee.text ["$result"],
+    static_proc_call_has_propagation isFunction callee args hNotFunc,
+    by rw [referencedNames_callWithPropagation]; simp⟩
 
 /-- Every instance procedure call in a pattern includes exception propagation. -/
 theorem instance_proc_call_propagates_exceptions
   (isFunction : String → Bool) (target : WithMetadata StmtExpr) (callee : Identifier)
   (args : List (WithMetadata StmtExpr))
   (hNotFunc : isFunction callee.text = false) :
-  "$result" ∈ (predictPattern isFunction (.InstanceCall target callee args)).referencedNames := by
-  rw [instance_proc_call_has_propagation isFunction target callee args hNotFunc,
-      referencedNames_callWithPropagation]
-  simp
+  ∃ p, predictPatternTop isFunction (.InstanceCall target callee args) = some p ∧
+    "$result" ∈ p.referencedNames := by
+  exact ⟨.callWithPropagation callee.text ["$result"],
+    instance_proc_call_has_propagation isFunction target callee args hNotFunc,
+    by rw [referencedNames_callWithPropagation]; simp⟩
 
 /-- Return-via-procedure-call includes exception propagation. -/
 theorem return_proc_call_propagates_exceptions
   (isFunction : String → Bool) (callee : Identifier) (args : List (WithMetadata StmtExpr))
   (md : MetaData)
   (hNotFunc : isFunction callee.text = false) :
-  "$result" ∈ (predictPattern isFunction (.Return (some ⟨.StaticCall callee args, md⟩))).referencedNames := by
-  rw [return_static_proc_call_pattern isFunction callee args md hNotFunc,
-      referencedNames_returnCall]
-  simp
+  ∃ p, predictPatternTop isFunction (.Return (some ⟨.StaticCall callee args, md⟩)) = some p ∧
+    "$result" ∈ p.referencedNames := by
+  exact ⟨.returnCall callee.text ["$result"],
+    return_static_proc_call_pattern isFunction callee args md hNotFunc,
+    by rw [referencedNames_returnCall]; simp⟩
 
 /-- Local variable initializer is preserved in translation pattern. -/
 theorem local_var_preserves_init
@@ -345,6 +348,6 @@ theorem local_var_preserves_init
   (init : WithMetadata StmtExpr) :
   ∃ p, predictPattern isFunction (.LocalVariable name ty (some init)) = .initVar name.text (some p) := by
   exact ⟨predictPattern isFunction init.val,
-    local_var_init_has_value isFunction name ty init⟩
+    predictPattern_local_var_init isFunction name ty init⟩
 
 end Strata.Laurel

@@ -402,6 +402,45 @@ public theorem transitiveClose_zero
   transitiveClose info 0 current = current := by
   rfl
 
+/-- transitiveClose result always contains the initial set -/
+public theorem transitiveClose_contains_initial
+  (info : List (String × Bool × List String))
+  (fuel : Nat) (current : List String)
+  (n : String) (h : n ∈ current)
+  (hInfo : n ∈ info.map (·.1)) :
+  n ∈ transitiveClose info fuel current :=
+  direct_subset_transitive info fuel current n h hInfo
+
+/-- fixpointStep result is a subset of info names -/
+public theorem fixpointStep_subset_info
+  (info : List (String × Bool × List String))
+  (current : List String) (n : String)
+  (h : n ∈ fixpointStep info current) :
+  n ∈ info.map (·.1) := by
+  simp only [fixpointStep] at h
+  rw [List.mem_filterMap] at h
+  obtain ⟨entry, hEntry, hSome⟩ := h
+  have : n = entry.1 := by
+    split at hSome <;> simp_all
+  subst this
+  exact List.mem_map.mpr ⟨entry, hEntry, rfl⟩
+
+/-- transitiveClose result is always a subset of info names -/
+public theorem transitiveClose_subset_info
+  (info : List (String × Bool × List String))
+  (fuel : Nat) (current : List String)
+  (hCurrent : ∀ n ∈ current, n ∈ info.map (·.1))
+  (n : String) (h : n ∈ transitiveClose info fuel current) :
+  n ∈ info.map (·.1) := by
+  induction fuel generalizing current with
+  | zero => exact hCurrent n h
+  | succ fuel' ih =>
+    simp only [transitiveClose] at h
+    by_cases heq : ((fixpointStep info current).length == current.length) = true
+    · simp [heq] at h; exact hCurrent n h
+    · simp [heq] at h
+      exact ih (fixpointStep info current) (fun m hm => fixpointStep_subset_info info current m hm) h
+
 /-! ## Body translation model: translation patterns
 
 The model describes what Core statements each Laurel statement produces.

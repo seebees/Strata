@@ -472,6 +472,17 @@ theorem type_mapping_injective_bool_string : coreTypeName .TBool ≠ coreTypeNam
 theorem type_mapping_injective_int_real : coreTypeName .TInt ≠ coreTypeName .TReal := by
   rw [coreTypeName_int, coreTypeName_real]; decide
 
+/-! ## DeclNames partition exactness -/
+
+/-- expectedDeclNames is exactly the union of procs, funcs, datatypes, axioms -/
+theorem declNames_is_union (program : Program) :
+  expectedDeclNames program =
+    expectedProcedureNames program ++
+    expectedFunctionNames program ++
+    expectedDatatypeNames program ++
+    expectedAxiomNames program := by
+  simp [expectedDeclNames]
+
 /-! ## P6 note: LocalVariable with call initializer
 
 `var x := proc()` propagation goes through `predictPattern` (partial),

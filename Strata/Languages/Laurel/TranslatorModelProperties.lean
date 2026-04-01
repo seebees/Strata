@@ -436,4 +436,49 @@ theorem userDefined_is_composite (name : Identifier) :
 
 theorem void_maps_to_bool : coreTypeName .TVoid = "bool" := coreTypeName_void
 
+/-! ## End-to-end: heap analysis → signature -/
+
+/-- If a procedure reads heap directly, its expected inputs include $heap_in -/
+theorem reads_heap_implies_heap_in_signature
+  (proc : Procedure) (isInstance : Bool)
+  (hReads : procReadsHeapDirectly proc = true) :
+  ("$heap_in", "Heap") ∈ expectedInputs proc isInstance true :=
+  heap_true_implies_heap_in proc isInstance
+
+/-- If a procedure writes heap directly, its expected outputs include $heap -/
+theorem writes_heap_implies_heap_out_signature
+  (proc : Procedure)
+  (hWrites : procWritesHeapDirectly proc = true) :
+  ("$heap", "Heap") ∈ expectedOutputs proc true :=
+  heap_true_implies_heap_out proc
+
+/-- Every procedure's expected outputs include $result (exception support) -/
+theorem every_proc_has_result
+  (proc : Procedure) (accessesHeap : Bool) :
+  ("$result", "ExceptionResult") ∈ expectedOutputs proc accessesHeap :=
+  proc_has_result proc accessesHeap
+
+/-! ## Type mapping injectivity on primitives -/
+
+theorem type_mapping_injective_int_bool : coreTypeName .TInt ≠ coreTypeName .TBool := by
+  rw [coreTypeName_int, coreTypeName_bool]; decide
+
+theorem type_mapping_injective_int_string : coreTypeName .TInt ≠ coreTypeName .TString := by
+  rw [coreTypeName_int, coreTypeName_string]; decide
+
+theorem type_mapping_injective_bool_string : coreTypeName .TBool ≠ coreTypeName .TString := by
+  rw [coreTypeName_bool, coreTypeName_string]; decide
+
+theorem type_mapping_injective_int_real : coreTypeName .TInt ≠ coreTypeName .TReal := by
+  rw [coreTypeName_int, coreTypeName_real]; decide
+
+/-! ## P6 note: LocalVariable with call initializer
+
+`var x := proc()` propagation goes through `predictPattern` (partial),
+not `predictPatternTop`. The call inside the initializer produces
+`callWithPropagation`, but proving this requires the `partial` function
+equation axiom `predictPattern_local_var_init`. The property is validated
+by differential tests (ProcCall test case).
+-/
+
 end Strata.Laurel

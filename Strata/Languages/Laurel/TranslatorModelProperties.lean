@@ -350,4 +350,28 @@ theorem local_var_preserves_init
   exact ⟨predictPattern isFunction init.val,
     predictPattern_local_var_init isFunction name ty init⟩
 
+/-- Assignment from static proc call propagates exceptions and captures output -/
+theorem assign_static_proc_call_propagates
+  (isFunction : String → Bool) (targetId : Identifier) (targetMd : MetaData)
+  (callee : Identifier) (args : List (WithMetadata StmtExpr)) (valueMd : MetaData)
+  (hNotFunc : isFunction callee.text = false) :
+  ∃ p, predictPatternTop isFunction (.Assign [⟨.Identifier targetId, targetMd⟩] ⟨.StaticCall callee args, valueMd⟩) = some p ∧
+    "$result" ∈ p.referencedNames ∧ targetId.text ∈ p.referencedNames := by
+  exact ⟨.callWithPropagation callee.text [targetId.text, "$result"],
+    assign_static_proc_call_pattern isFunction targetId targetMd callee args valueMd hNotFunc,
+    by rw [referencedNames_callWithPropagation]; simp,
+    by rw [referencedNames_callWithPropagation]; simp⟩
+
+/-- Assignment from instance proc call propagates exceptions and captures output -/
+theorem assign_instance_proc_call_propagates
+  (isFunction : String → Bool) (targetId : Identifier) (targetMd : MetaData)
+  (target : WithMetadata StmtExpr) (callee : Identifier) (args : List (WithMetadata StmtExpr)) (valueMd : MetaData)
+  (hNotFunc : isFunction callee.text = false) :
+  ∃ p, predictPatternTop isFunction (.Assign [⟨.Identifier targetId, targetMd⟩] ⟨.InstanceCall target callee args, valueMd⟩) = some p ∧
+    "$result" ∈ p.referencedNames ∧ targetId.text ∈ p.referencedNames := by
+  exact ⟨.callWithPropagation callee.text [targetId.text, "$result"],
+    assign_instance_proc_call_pattern isFunction targetId targetMd target callee args valueMd hNotFunc,
+    by rw [referencedNames_callWithPropagation]; simp,
+    by rw [referencedNames_callWithPropagation]; simp⟩
+
 end Strata.Laurel

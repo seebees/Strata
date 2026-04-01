@@ -441,6 +441,15 @@ def predictPatternTop (isFunction : String → Bool) (expr : StmtExpr) : Option 
       else some (.returnCall callee.text ["$result"])
     | _ => none  -- needs recursion
   | .LocalVariable name _ none => some (.initVar name.text none)
+  | .Assign [⟨.Identifier targetId, _⟩] value =>
+    match value.val with
+    | .StaticCall callee _ =>
+      if isFunction callee.text then none
+      else some (.callWithPropagation callee.text [targetId.text, "$result"])
+    | .InstanceCall _ callee _ =>
+      if isFunction callee.text then none
+      else some (.callWithPropagation callee.text [targetId.text, "$result"])
+    | _ => none  -- pure assignment, needs recursion for RHS
   | .Return none => some .skip
   | .LiteralBool _ | .LiteralInt _ | .LiteralString _ | .LiteralDecimal _ => some (.expr [])
   | .Identifier name => some (.expr [name.text])
@@ -531,6 +540,24 @@ public theorem local_var_no_init
   predictPatternTop isFunction (.LocalVariable name ty none) =
     some (.initVar name.text none) := by
   simp [predictPatternTop]
+
+/-- Assignment from static procedure call produces callWithPropagation with target variable -/
+public theorem assign_static_proc_call_pattern
+  (isFunction : String → Bool) (targetId : Identifier) (targetMd : MetaData)
+  (callee : Identifier) (args : List (WithMetadata StmtExpr)) (valueMd : MetaData)
+  (hNotFunc : isFunction callee.text = false) :
+  predictPatternTop isFunction (.Assign [⟨.Identifier targetId, targetMd⟩] ⟨.StaticCall callee args, valueMd⟩) =
+    some (.callWithPropagation callee.text [targetId.text, "$result"]) := by
+  simp [predictPatternTop, hNotFunc]
+
+/-- Assignment from instance procedure call produces callWithPropagation with target variable -/
+public theorem assign_instance_proc_call_pattern
+  (isFunction : String → Bool) (targetId : Identifier) (targetMd : MetaData)
+  (target : WithMetadata StmtExpr) (callee : Identifier) (args : List (WithMetadata StmtExpr)) (valueMd : MetaData)
+  (hNotFunc : isFunction callee.text = false) :
+  predictPatternTop isFunction (.Assign [⟨.Identifier targetId, targetMd⟩] ⟨.InstanceCall target callee args, valueMd⟩) =
+    some (.callWithPropagation callee.text [targetId.text, "$result"]) := by
+  simp [predictPatternTop, hNotFunc]
 
 /-- All names referenced by a translation pattern -/
 @[simp] def TranslationPattern.referencedNames : TranslationPattern → List String

@@ -805,11 +805,27 @@ def modelExceptionResultDecl : Core.Decl :=
 /-- Build the declaration list structure (names and order only).
     This is the first step toward a full translateModel. -/
 public def modelDeclNames (program : Program) : List String :=
-  -- Same order as translateLaurelToCore
   let withDefs := { program with
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
     types := coreDefinitionsForLaurel.types ++ program.types
   }
   expectedDeclNames withDefs
+
+/-- Classify each expected declaration by kind -/
+public inductive DeclClass where
+  | datatype | axiomDecl | constant | function | procedure
+  deriving Repr, BEq
+
+/-- Predict the declaration class for each name -/
+public def classifyDecls (program : Program) : List (String × DeclClass) :=
+  let withDefs := { program with
+    staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+    types := coreDefinitionsForLaurel.types ++ program.types
+  }
+  let procs := expectedProcedureNames withDefs |>.map (·, .procedure)
+  let funcs := expectedFunctionNames withDefs |>.map (·, .function)
+  let types := expectedDatatypeNames withDefs |>.map (·, .datatype)
+  let axioms := expectedAxiomNames withDefs |>.map (·, .axiomDecl)
+  types ++ axioms ++ funcs ++ procs
 
 end Strata.Laurel

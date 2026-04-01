@@ -767,3 +767,39 @@ composite B {
           IO.println s!"{name}: ❌ model has, real missing: {missing.take 5}"
         if !extra.isEmpty then
           IO.println s!"{name}: ❌ real has, model missing: {extra.take 5}"
+
+  -- translateModel: declaration kinds
+  IO.println ""
+  IO.println "=== translateModel: decl kinds vs real ==="
+  for (name, input) in [
+    ("SimpleComposite", simpleComposite),
+    ("CompositeWithProc", compositeWithProc),
+    ("StaticProc", staticProc)
+  ] do
+    let program ← parseLaurelString name input
+    let modelClassified := classifyDecls program
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let mut ok := true
+      for decl in core.decls do
+        let declName := decl.name.name
+        let realKind : DeclClass := match decl with
+          | .type _ _ => .datatype
+          | .ax _ _ => .axiomDecl
+          | .proc _ _ => .procedure
+          | .func _ _ => .function
+          | _ => .constant
+        -- Look up in model
+        let mut found := false
+        for (mn, mk) in modelClassified do
+          if mn == declName && mk != realKind then
+            IO.println s!"{name}: ❌ {declName} kind mismatch: model={repr mk} real={repr realKind}"
+            ok := false
+            found := true
+          else if mn == declName then
+            found := true
+        pure ()
+      if ok then
+        IO.println s!"{name}: ✅ all decl kinds match"

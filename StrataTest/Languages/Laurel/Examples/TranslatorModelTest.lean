@@ -690,3 +690,55 @@ procedure doNothing() {
             | _ => pure ()
       if ok then
         IO.println s!"{name}: ✅ type mapping consistent"
+
+  -- P3: No duplicate declaration names
+  IO.println ""
+  IO.println "=== P3: No duplicate declarations ==="
+  for (name, input) in [
+    ("SimpleComposite", simpleComposite),
+    ("CompositeWithProc", compositeWithProc),
+    ("StaticProc", staticProc),
+    ("FuncAndProc", "
+procedure myProc(x: int) {
+};
+function myFunc(x: int): int {
+  return x
+};
+"),
+    ("TwoComposites", "
+composite A {
+  var x: int
+  procedure getX(self: A): int {
+    return self#x
+  };
+}
+composite B {
+  var y: int
+  procedure getY(self: B): int {
+    return self#y
+  };
+}
+")
+  ] do
+    let program ← parseLaurelString name input
+    let withDefs := { program with
+      staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+      types := coreDefinitionsForLaurel.types ++ program.types
+    }
+    let names := expectedDeclNames withDefs
+    let duplicates := names.filter fun n => names.count n > 1
+    -- Also check real translator
+    let (coreOpt, _) := Laurel.translate {} program
+    let realDups := match coreOpt with
+      | some core =>
+        let realNames := coreDeclNames core
+        realNames.filter fun n => realNames.count n > 1
+      | none => []
+    if duplicates.isEmpty then
+      IO.println s!"{name}: ✅ no duplicate names ({names.length} decls)"
+    else if !realDups.isEmpty then
+      let unique_dups := duplicates.eraseDups
+      IO.println s!"{name}: ⚠️  model duplicates: {unique_dups.take 3} (real also has duplicates)"
+    else
+      let unique_dups := duplicates.eraseDups
+      IO.println s!"{name}: ❌ model duplicates: {unique_dups.take 3} (real has none)"

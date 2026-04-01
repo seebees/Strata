@@ -85,7 +85,47 @@ private theorem List.mem_filter_intro {p : α → Bool} {a : α} {l : List α}
   (hm : a ∈ l) (hp : p a = true) : a ∈ l.filter p := by
   exact List.mem_filter.mpr ⟨hm, hp⟩
 
-/-! ## P3: Partition completeness ✅ -/
+/-! ## P3: Partition completeness -/
+
+/-- isFunctional and !isFunctional partition: no proc is in both filters -/
+theorem functional_partition_disjoint
+  (procs : List Procedure) (proc : Procedure) :
+  ¬(proc ∈ procs.filter (·.isFunctional) ∧ proc ∈ procs.filter (!·.isFunctional)) := by
+  intro ⟨h1, h2⟩
+  have := (List.mem_filter.mp h1).2
+  have := (List.mem_filter.mp h2).2
+  simp_all
+
+/-- isFunctional and !isFunctional partition: every proc is in one filter -/
+theorem functional_partition_complete
+  (procs : List Procedure) (proc : Procedure)
+  (h : proc ∈ procs) :
+  proc ∈ procs.filter (·.isFunctional) ∨ proc ∈ procs.filter (!·.isFunctional) := by
+  by_cases hf : proc.isFunctional
+  · left; exact List.mem_filter.mpr ⟨h, hf⟩
+  · right
+    have : (!proc.isFunctional) = true := by simp [hf]
+    exact List.mem_filter.mpr ⟨h, this⟩
+
+/-- Instance proc partition: disjoint -/
+theorem instance_functional_partition_disjoint
+  (procs : List (String × Procedure)) (entry : String × Procedure) :
+  ¬(entry ∈ procs.filter (·.2.isFunctional) ∧ entry ∈ procs.filter (!·.2.isFunctional)) := by
+  intro ⟨h1, h2⟩
+  have := (List.mem_filter.mp h1).2
+  have := (List.mem_filter.mp h2).2
+  simp_all
+
+/-- Instance proc partition: complete -/
+theorem instance_functional_partition_complete
+  (procs : List (String × Procedure)) (entry : String × Procedure)
+  (h : entry ∈ procs) :
+  entry ∈ procs.filter (·.2.isFunctional) ∨ entry ∈ procs.filter (!·.2.isFunctional) := by
+  by_cases hf : entry.2.isFunctional
+  · left; exact List.mem_filter.mpr ⟨h, hf⟩
+  · right
+    have : (!entry.2.isFunctional) = true := by simp [hf]
+    exact List.mem_filter.mpr ⟨h, this⟩
 
 theorem static_proc_in_procs_or_funcs
   (program : Program) (proc : Procedure)

@@ -102,8 +102,8 @@ def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
   let generated := ["TypeTag", "Field", "Box"]
   -- User-defined datatypes (passed through)
   let userDatatypes := (allDatatypes program).map (·.name.text)
-  -- NotSupportedYet placeholder
-  let placeholder := ["NotSupportedYet", "Float64IsNotSupportedYet"]
+  -- NotSupportedYet placeholder (Float64IsNotSupportedYet comes from coreDefinitionsForLaurel)
+  let placeholder := ["NotSupportedYet"]
   fixed ++ generated ++ placeholder ++ userDatatypes
 
 /-- Names of axioms the model expects -/

@@ -917,3 +917,60 @@ composite Box {
                 ok := false
       if ok then
         IO.println s!"{name}: ✅ parameter names match model"
+
+  -- translateModel: body structure
+  IO.println ""
+  IO.println "=== translateModel: body structure ==="
+
+  -- Helper: extract call targets from Core statements
+  let rec extractCalls (stmts : Core.Statements) : List String :=
+    stmts.flatMap fun (s : Core.Statement) => match s with
+      | .cmd (Core.CmdExt.call _ pname _ _) => [pname]
+      | .ite _ thenB elseB _ => extractCalls thenB ++ extractCalls elseB
+      | .block _ body _ => extractCalls body
+      | _ => []
+
+  let rec hasExceptionPropagation (stmts : Core.Statements) : Bool :=
+    stmts.any fun (s : Core.Statement) => match s with
+      | .cmd (Core.CmdExt.cmd (Imperative.Cmd.assume _ _ _)) => true
+      | .ite _ _ _ _ => true
+      | .block _ body _ => hasExceptionPropagation body
+      | _ => false
+
+  for (name, input, procName, expectedCalls) in [
+    ("ReturnExpr", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+", "add", ([] : List String)),
+    ("ProcCall", "
+procedure identity(x: int): int {
+  return x
+};
+procedure callIt(x: int): int {
+  var y: int := identity(x);
+  return y
+};
+", "callIt", ["identity"])
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let mut ok := true
+      for decl in core.decls do
+        match decl with
+        | .proc p _ =>
+          if p.header.name.name == procName then
+            let callTargets := extractCalls p.body
+            for ec in expectedCalls do
+              if !callTargets.contains ec then
+                IO.println s!"{name}/{procName}: ❌ expected call to '{ec}' not found in {callTargets}"
+                ok := false
+            if !callTargets.isEmpty && !hasExceptionPropagation p.body then
+              IO.println s!"{name}/{procName}: ❌ has calls but no exception propagation"
+              ok := false
+        | _ => pure ()
+      if ok then
+        IO.println s!"{name}: ✅ body structure correct (calls={expectedCalls})"

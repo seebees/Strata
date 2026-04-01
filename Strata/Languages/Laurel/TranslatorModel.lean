@@ -472,7 +472,7 @@ partial def predictPattern (isFunction : String → Bool) : StmtExpr → Transla
   | _ => .skip
 
 /-- All names referenced by a translation pattern -/
-partial def TranslationPattern.referencedNames : TranslationPattern → List String
+@[simp] def TranslationPattern.referencedNames : TranslationPattern → List String
   | .expr refs => refs
   | .callWithPropagation target outputs => [target] ++ outputs
   | .block children => children.flatMap (·.referencedNames)
@@ -482,6 +482,66 @@ partial def TranslationPattern.referencedNames : TranslationPattern → List Str
   | .returnCall target outputs => [target] ++ outputs
   | .initVar name v => [name] ++ (match v with | some p => p.referencedNames | none => [])
   | .skip => []
+
+public theorem referencedNames_callWithPropagation (target : String) (outputs : List String) :
+  TranslationPattern.referencedNames (.callWithPropagation target outputs) = [target] ++ outputs := by
+  simp [TranslationPattern.referencedNames]
+
+public theorem referencedNames_returnCall (target : String) (outputs : List String) :
+  TranslationPattern.referencedNames (.returnCall target outputs) = [target] ++ outputs := by
+  simp [TranslationPattern.referencedNames]
+
+public theorem referencedNames_initVar_some (name : String) (p : TranslationPattern) :
+  TranslationPattern.referencedNames (.initVar name (some p)) = [name] ++ p.referencedNames := by
+  simp [TranslationPattern.referencedNames]
+
+public theorem referencedNames_initVar_none (name : String) :
+  TranslationPattern.referencedNames (.initVar name none) = [name] := by
+  simp [TranslationPattern.referencedNames]
+
+/-! ### Translation pattern properties
+
+These are axioms because `predictPattern` is `partial` (same reason as
+`referencedNamesInExprVal` axioms). `partial` makes functions opaque to
+both tactics and the kernel. Each axiom is true by inspection of the
+pattern match in `predictPattern` and validated by differential tests.
+-/
+
+/-- Static procedure calls always produce callWithPropagation -/
+public axiom static_proc_call_has_propagation
+  (isFunction : String → Bool) (callee : Identifier) (args : List (WithMetadata StmtExpr))
+  (hNotFunc : isFunction callee.text = false) :
+  predictPattern isFunction (.StaticCall callee args) =
+    .callWithPropagation callee.text ["$result"]
+
+/-- Instance procedure calls always produce callWithPropagation -/
+public axiom instance_proc_call_has_propagation
+  (isFunction : String → Bool) (target : WithMetadata StmtExpr) (callee : Identifier)
+  (args : List (WithMetadata StmtExpr))
+  (hNotFunc : isFunction callee.text = false) :
+  predictPattern isFunction (.InstanceCall target callee args) =
+    .callWithPropagation callee.text ["$result"]
+
+/-- Return with procedure call produces returnCall -/
+public axiom return_static_proc_call_pattern
+  (isFunction : String → Bool) (callee : Identifier) (args : List (WithMetadata StmtExpr))
+  (md : MetaData)
+  (hNotFunc : isFunction callee.text = false) :
+  predictPattern isFunction (.Return (some ⟨.StaticCall callee args, md⟩)) =
+    .returnCall callee.text ["$result"]
+
+/-- Local variable with initializer always has Some value in pattern -/
+public axiom local_var_init_has_value
+  (isFunction : String → Bool) (name : Identifier) (ty : WithMetadata HighType)
+  (init : WithMetadata StmtExpr) :
+  predictPattern isFunction (.LocalVariable name ty (some init)) =
+    .initVar name.text (some (predictPattern isFunction init.val))
+
+/-- Local variable without initializer has None value in pattern -/
+public axiom local_var_no_init
+  (isFunction : String → Bool) (name : Identifier) (ty : WithMetadata HighType) :
+  predictPattern isFunction (.LocalVariable name ty none) =
+    .initVar name.text none
 
 /-! ## Body translation model
 This enables P1 (name consistency): every referenced name

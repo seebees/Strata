@@ -539,3 +539,89 @@ composite Box {
         ok := false
     if ok then
       IO.println s!"{name}: ✅ transitive closure matches (readers={modelReaders}, writers={modelWriters})"
+
+  -- Body translation patterns
+  IO.println ""
+  IO.println "=== Body translation patterns ==="
+  for (name, input) in [
+    ("ReturnExpr", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+"),
+    ("ReturnFieldRead", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+}
+"),
+    ("AssignField", "
+composite Box {
+  var value: int
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+}
+"),
+    ("IfElseReturn", "
+procedure max(a: int, b: int): int {
+  if (a > b) { return a } else { return b }
+};
+"),
+    ("LocalVarInit", "
+procedure compute(x: int): int {
+  var y: int := x + 1;
+  return y
+};
+"),
+    ("ProcCallInReturn", "
+procedure identity(x: int): int {
+  return x
+};
+procedure callIt(x: int): int {
+  return identity(x)
+};
+")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      -- For each non-external proc, compare pattern's referenced names against Core
+      let allProcs := program.staticProcedures ++
+        (program.types.flatMap fun (t : TypeDefinition) => match t with
+          | .Composite c => c.instanceProcedures
+          | _ => [])
+      let funcNames := allProcs.filter (fun (p : Procedure) => p.isFunctional) |>.map (fun (p : Procedure) => p.name.text)
+      let isFunc := fun n => funcNames.contains n
+      let mut ok := true
+      for proc in allProcs do
+        match proc.body with
+        | .Transparent body =>
+          let pattern := predictPattern isFunc body.val
+          let patternRefs := pattern.referencedNames
+          -- Collect parameter + local variable names
+          let paramNames := proc.inputs.map (fun (p : Parameter) => p.name.text) ++
+                           proc.outputs.map (fun (p : Parameter) => p.name.text)
+          let localNames := patternRefs.filter fun r =>
+            -- Names that appear as initVar targets are local declarations
+            match pattern with
+            | .block children => children.any fun c => match c with
+              | .initVar n _ => n == r
+              | _ => false
+            | _ => false
+          let knownNames := paramNames ++ localNames
+          let coreNames := coreDeclNames core
+          for r in patternRefs do
+            if !knownNames.contains r && !coreNames.contains r &&
+               r != "$result" && !r.startsWith "$" then
+              IO.println s!"{name}/{proc.name.text}: ❌ pattern ref '{r}' not in Core decls, params, or locals"
+              ok := false
+        | _ => pure ()
+      if ok then
+        IO.println s!"{name}: ✅ pattern references consistent"

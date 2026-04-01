@@ -400,9 +400,90 @@ public theorem transitiveClose_zero
   transitiveClose info 0 current = current := by
   rfl
 
-/-! ## Body translation model
+/-! ## Body translation model: translation patterns
 
-The model extracts names referenced in procedure bodies.
+The model describes what Core statements each Laurel statement produces.
+Rather than modeling the exact Core AST, we model the *pattern* —
+what kind of Core statement(s) each Laurel construct generates.
+-/
+
+/-- The pattern of Core statements a Laurel statement translates to -/
+inductive TranslationPattern where
+  | expr (refs : List String)
+  | callWithPropagation (target : String) (outputs : List String)
+  | block (children : List TranslationPattern)
+  | ite (cond thenBranch elseBranch : TranslationPattern)
+  | loop (cond body : TranslationPattern)
+  | returnExpr (value : TranslationPattern)
+  | returnCall (target : String) (outputs : List String)
+  | initVar (name : String) (value : Option TranslationPattern)
+  | skip
+  deriving Inhabited
+
+/-- Predict the translation pattern for a Laurel statement -/
+partial def predictPattern (isFunction : String → Bool) : StmtExpr → TranslationPattern
+  | .LiteralBool _ | .LiteralInt _ | .LiteralString _ | .LiteralDecimal _ => .expr []
+  | .Identifier name => .expr [name.text]
+  | .PrimitiveOp _ args =>
+    .expr (args.flatMap fun a => match predictPattern isFunction a.val with
+      | .expr refs => refs | _ => [])
+  | .FieldSelect target _ =>
+    .expr (["readField"] ++ match predictPattern isFunction target.val with
+      | .expr refs => refs | _ => [])
+  | .StaticCall callee args =>
+    if isFunction callee.text then
+      .expr ([callee.text] ++ args.flatMap fun a => match predictPattern isFunction a.val with
+        | .expr refs => refs | _ => [])
+    else .callWithPropagation callee.text ["$result"]
+  | .InstanceCall _ callee args =>
+    if isFunction callee.text then
+      .expr ([callee.text] ++ args.flatMap fun a => match predictPattern isFunction a.val with
+        | .expr refs => refs | _ => [])
+    else .callWithPropagation callee.text ["$result"]
+  | .Block stmts _ => .block (stmts.map fun s => predictPattern isFunction s.val)
+  | .IfThenElse cond thenB elseB =>
+    .ite (predictPattern isFunction cond.val)
+         (predictPattern isFunction thenB.val)
+         (match elseB with | some e => predictPattern isFunction e.val | none => .skip)
+  | .While cond _ _ body =>
+    .loop (predictPattern isFunction cond.val) (predictPattern isFunction body.val)
+  | .Return (some v) =>
+    match v.val with
+    | .StaticCall callee _ =>
+      if isFunction callee.text then .returnExpr (predictPattern isFunction v.val)
+      else .returnCall callee.text ["$result"]
+    | .InstanceCall _ callee _ =>
+      if isFunction callee.text then .returnExpr (predictPattern isFunction v.val)
+      else .returnCall callee.text ["$result"]
+    | _ => .returnExpr (predictPattern isFunction v.val)
+  | .Return none => .skip
+  | .LocalVariable name _ init =>
+    .initVar name.text (init.map fun i => predictPattern isFunction i.val)
+  | .Assign [⟨.Identifier targetId, _⟩] value =>
+    match value.val with
+    | .StaticCall callee _ =>
+      if isFunction callee.text then .expr [targetId.text]
+      else .callWithPropagation callee.text [targetId.text, "$result"]
+    | .InstanceCall _ callee _ =>
+      if isFunction callee.text then .expr [targetId.text]
+      else .callWithPropagation callee.text [targetId.text, "$result"]
+    | _ => .expr [targetId.text]
+  | .New className => .expr ["increment", className.text]
+  | _ => .skip
+
+/-- All names referenced by a translation pattern -/
+partial def TranslationPattern.referencedNames : TranslationPattern → List String
+  | .expr refs => refs
+  | .callWithPropagation target outputs => [target] ++ outputs
+  | .block children => children.flatMap (·.referencedNames)
+  | .ite c t e => c.referencedNames ++ t.referencedNames ++ e.referencedNames
+  | .loop c b => c.referencedNames ++ b.referencedNames
+  | .returnExpr v => v.referencedNames
+  | .returnCall target outputs => [target] ++ outputs
+  | .initVar name v => [name] ++ (match v with | some p => p.referencedNames | none => [])
+  | .skip => []
+
+/-! ## Body translation model
 This enables P1 (name consistency): every referenced name
 should exist as a declaration.
 -/

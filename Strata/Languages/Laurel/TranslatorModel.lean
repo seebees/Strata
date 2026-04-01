@@ -1026,4 +1026,61 @@ public partial def translateStmtModel
        modelExceptionPropagation]
   | _ => []
 
+/-! ## Procedure and program assembly model -/
+
+/-- Translate a Laurel parameter to Core (name, type) pair -/
+public def translateParamModel (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
+  (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName p.type.val) [])
+
+/-- Assemble a Laurel procedure into a Core procedure declaration -/
+public partial def translateProcModel
+  (isFunction : String → Bool)
+  (proc : Procedure) : Core.Decl :=
+  let inputs := proc.inputs.map translateParamModel
+  let outputs := proc.outputs.map translateParamModel
+  let resultOutput : Lambda.Identifier Unit × Lambda.LMonoTy :=
+    (⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])
+  let header : Core.Procedure.Header := {
+    name := ⟨proc.name.text, ()⟩
+    typeArgs := []
+    inputs := inputs
+    outputs := outputs ++ [resultOutput]
+  }
+  let outParams := proc.outputs.map (fun (p : Parameter) => p.name.text)
+  let bodyStmts : Core.Statements := match proc.body with
+    | .Transparent bodyExpr => translateStmtModel isFunction outParams bodyExpr.val
+    | .Opaque _ (some impl) _ => translateStmtModel isFunction outParams impl.val
+    | _ => []
+  let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
+  let setResult := Core.Statement.set ⟨"$result", ()⟩ successCtor .empty
+  let body := [setResult, Imperative.Stmt.block "$body" bodyStmts .empty]
+  let spec : Core.Procedure.Spec := { modifies := [], preconditions := [], postconditions := [] }
+  .proc { header, spec, body }
+
+/-- Assemble a full Core.Program from a Laurel Program -/
+public partial def translateProgramModel (program : Program) : Core.Program :=
+  let withDefs := { program with
+    staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+    types := coreDefinitionsForLaurel.types ++ program.types
+  }
+  let allProcs := withDefs.staticProcedures.filter (fun p => !p.body.isExternal)
+  let funcNames := allProcs.filter (·.isFunctional) |>.map (·.name.text)
+  let isFunc := fun n => funcNames.contains n
+  let (_, procProcs) := allProcs.partition (·.isFunctional)
+  -- Procedure declarations
+  let procDecls := procProcs.map (translateProcModel isFunc)
+  -- Instance procedure declarations
+  let instanceProcs := withDefs.types.foldl (fun acc td =>
+    match td with
+    | .Composite ct => acc ++ ct.instanceProcedures.filter (!·.body.isExternal)
+      |>.map fun proc => { proc with
+        name := { proc.name with text := qualifiedName ct.name.text proc.name.text } }
+    | _ => acc) ([] : List Procedure)
+  let (_, instanceProcProcs) := instanceProcs.partition (·.isFunctional)
+  let instanceProcDecls := instanceProcProcs.map (translateProcModel isFunc)
+  -- ExceptionResult datatype
+  let exceptionResultDecl := modelExceptionResultDecl
+  -- Assemble (simplified — datatypes and functions not yet modeled)
+  { decls := [exceptionResultDecl] ++ procDecls ++ instanceProcDecls }
+
 end Strata.Laurel

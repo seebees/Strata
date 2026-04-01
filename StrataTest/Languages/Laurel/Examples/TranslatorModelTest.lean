@@ -1178,3 +1178,52 @@ procedure compute(x: int): int {
                     IO.println s!"{name}: ❌ count mismatch: model={modelStmts.length} real={realInner.length}"
                 | _ => pure ()
         | _ => pure ()
+
+  -- Full translateProgramModel comparison
+  IO.println ""
+  IO.println "=== translateProgramModel vs real ==="
+  for (name, input) in [
+    ("SimpleProc", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+")
+  ] do
+    let program ← parseLaurelString name input
+    let modelProgram := translateProgramModel program
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      -- Compare procedure declarations
+      let modelProcs := modelProgram.decls.filterMap fun (d : Core.Decl) => match d with
+        | .proc p _ => some p.header.name.name | _ => none
+      let realProcs := core.decls.filterMap fun (d : Core.Decl) => match d with
+        | .proc p _ => some p.header.name.name | _ => none
+      let mut ok := true
+      -- Check model procs are in real
+      for mp in modelProcs do
+        if !realProcs.contains mp then
+          IO.println s!"{name}: ❌ model proc '{mp}' not in real"
+          ok := false
+      -- Check real procs are in model
+      for rp in realProcs do
+        if !modelProcs.contains rp then
+          IO.println s!"{name}: ℹ️  real proc '{rp}' not in model (expected — builtins)"
+      -- Compare body structure for matching procs
+      for modelDecl in modelProgram.decls do
+        match modelDecl with
+        | .proc mp _ =>
+          for realDecl in core.decls do
+            match realDecl with
+            | .proc rp _ =>
+              if mp.header.name.name == rp.header.name.name then
+                if mp.body.length == rp.body.length then
+                  IO.println s!"{name}/{mp.header.name.name}: ✅ body length matches ({mp.body.length})"
+                else
+                  IO.println s!"{name}/{mp.header.name.name}: ❌ body length: model={mp.body.length} real={rp.body.length}"
+                  ok := false
+            | _ => pure ()
+        | _ => pure ()
+      if ok then
+        IO.println s!"{name}: ✅ program model matches"

@@ -888,12 +888,12 @@ public partial def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :
   | .PrimitiveOp .Eq [e1, e2] =>
     .eq () (translateExprModel e1.val) (translateExprModel e2.val)
   | .PrimitiveOp .Not [e] =>
-    .app () (.op () ⟨"not", ()⟩ none) (translateExprModel e.val)
+    .app () (.op () ⟨"Bool.Not", ()⟩ none) (translateExprModel e.val)
   | .PrimitiveOp op [e1, e2] =>
     let opName := match op with
-      | .Add => "+" | .Sub => "-" | .Mul => "*"
-      | .Lt => "<" | .Leq => "<=" | .Gt => ">" | .Geq => ">="
-      | .And => "and" | .Or => "or"
+      | .Add => "Int.Add" | .Sub => "Int.Sub" | .Mul => "Int.Mul"
+      | .Lt => "Int.Lt" | .Leq => "Int.Le" | .Gt => "Int.Gt" | .Geq => "Int.Ge"
+      | .And => "Bool.And" | .Or => "Bool.Or"
       | _ => "op"
     .app () (.app () (.op () ⟨opName, ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val)
   | .StaticCall callee args =>
@@ -904,6 +904,8 @@ public partial def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :
       (.op () ⟨callee.text, ()⟩ none)
   | .IfThenElse cond thenB (some elseB) =>
     .ite () (translateExprModel cond.val) (translateExprModel thenB.val) (translateExprModel elseB.val)
+  | .Block [single] _ => translateExprModel single.val
+  | .Return (some v) => translateExprModel v.val
   | .Forall ⟨name, _⟩ _ body =>
     .all () name.text none (translateExprModel body.val)
   | .Exists ⟨name, _⟩ _ body =>

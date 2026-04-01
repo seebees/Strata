@@ -1020,3 +1020,56 @@ procedure isPositive(x: int): bool {
           | _ => pure ()
       if ok then
         IO.println s!"{name}: ✅ expression model produces output"
+
+  -- Expression translation: deep comparison
+  IO.println ""
+  IO.println "=== Expression model: deep comparison ==="
+  for (name, input, procName) in [
+    ("LitTrue", "
+function getTrue(): bool {
+  true
+};
+", "getTrue"),
+    ("LitInt", "
+function getFive(): int {
+  5
+};
+", "getFive"),
+    ("AddExpr", "
+function add(x: int, y: int): int {
+  x + y
+};
+", "add")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      -- Find the Core function and get its body expression
+      let mut ok := true
+      for decl in core.decls do
+        match decl with
+        | .func f _ =>
+          if f.name.name == procName then
+            match f.body with
+            | some realExpr =>
+              for proc in program.staticProcedures do
+                if proc.name.text == procName then
+                  match proc.body with
+                  | .Transparent body =>
+                    let modelExpr := translateExprModel body.val
+                    -- Compare after erasing types
+                    let realErased := toString (realExpr.eraseTypes)
+                    let modelErased := toString (modelExpr.eraseTypes)
+                    if realErased == modelErased then
+                      IO.println s!"{name}: ✅ expressions match (erased types)"
+                    else
+                      IO.println s!"{name}: ❌ mismatch (erased types)"
+                      IO.println s!"  real:  {realErased.take 80}"
+                      IO.println s!"  model: {modelErased.take 80}"
+                      ok := false
+                  | _ => pure ()
+            | none => pure ()
+        | _ => pure ()
+      pure ()

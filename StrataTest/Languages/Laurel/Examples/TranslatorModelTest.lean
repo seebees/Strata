@@ -803,3 +803,117 @@ composite B {
         pure ()
       if ok then
         IO.println s!"{name}: ✅ all decl kinds match"
+
+  -- translateModel: procedure headers (inputs/outputs)
+  IO.println ""
+  IO.println "=== translateModel: procedure headers vs real ==="
+  for (name, input) in [
+    ("StaticProcNoHeap", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+"),
+    ("FieldReadProc", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int {
+    return self#value
+  };
+}
+"),
+    ("FieldWriteProc", "
+composite Box {
+  var value: int
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+}
+")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let mut ok := true
+      -- Check each Core procedure's inputs/outputs against model
+      for decl in core.decls do
+        match decl with
+        | .proc p _ =>
+          let coreInputNames := coreProcInputNames decl
+          let coreOutputNames := coreProcOutputNames decl
+          -- Check $result is always last output
+          match coreOutputNames.getLast? with
+          | some n =>
+            if n != "$result" then
+              IO.println s!"{name}/{p.header.name.name}: ❌ last output is '{n}', expected '$result'"
+              ok := false
+          | none =>
+            IO.println s!"{name}/{p.header.name.name}: ❌ no outputs"
+            ok := false
+          let hasHeapIn := coreInputNames.any (· == "$heap_in")
+          let hasHeapOut := coreOutputNames.any (· == "$heap")
+          if hasHeapIn && !hasHeapOut then
+            IO.println s!"{name}/{p.header.name.name}: ❌ has $heap_in but no $heap output"
+            ok := false
+        | _ => pure ()
+      if ok then
+        IO.println s!"{name}: ✅ all procedure headers correct"
+
+  -- translateModel: detailed parameter comparison
+  IO.println ""
+  IO.println "=== translateModel: parameter names vs model ==="
+  for (name, input) in [
+    ("StaticProcNoHeap", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+"),
+    ("FieldWriteProc", "
+composite Box {
+  var value: int
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+}
+")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let allProcs := program.staticProcedures ++
+        (program.types.flatMap fun (t : TypeDefinition) => match t with
+          | .Composite c => c.instanceProcedures
+          | _ => [])
+      let mut ok := true
+      for proc in allProcs do
+        -- Find the corresponding Core decl
+        let coreName := if allProcs.length == program.staticProcedures.length then proc.name.text
+          else proc.name.text  -- simplified: works for single-composite cases
+        for decl in core.decls do
+          if decl.name.name.endsWith proc.name.text then
+            let realInputs := coreProcInputNames decl
+            let realOutputs := coreProcOutputNames decl
+            -- Model prediction
+            let isInstance := !program.types.isEmpty && proc.inputs.any (fun (p : Parameter) => p.name.text == "self")
+            let accessesHeap := realInputs.contains "$heap_in"
+            let modelInputs := (expectedInputs proc isInstance accessesHeap).map Prod.fst
+            let modelOutputs := (expectedOutputs proc accessesHeap).map Prod.fst
+            -- Compare input names
+            for mi in modelInputs do
+              if !realInputs.contains mi then
+                IO.println s!"{name}/{proc.name.text}: ❌ model input '{mi}' not in real inputs {realInputs}"
+                ok := false
+            -- Compare output names
+            for mo in modelOutputs do
+              if !realOutputs.contains mo then
+                IO.println s!"{name}/{proc.name.text}: ❌ model output '{mo}' not in real outputs {realOutputs}"
+                ok := false
+      if ok then
+        IO.println s!"{name}: ✅ parameter names match model"

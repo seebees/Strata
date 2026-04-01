@@ -1073,3 +1073,62 @@ function add(x: int, y: int): int {
             | none => pure ()
         | _ => pure ()
       pure ()
+
+  -- More deep expression comparisons
+  for (name, input, procName) in [
+    ("BoolNot", "
+function negate(b: bool): bool {
+  !b
+};
+", "negate"),
+    ("Comparison", "
+function isPos(x: int): bool {
+  x > 0
+};
+", "isPos"),
+    ("IfThenElse", "
+function max(a: int, b: int): int {
+  if (a > b) a else b
+};
+", "max"),
+    ("FuncCall", "
+function identity(x: int): int {
+  x
+};
+function callId(x: int): int {
+  identity(x)
+};
+", "callId"),
+    ("Equality", "
+function isZero(x: int): bool {
+  x == 0
+};
+", "isZero")
+  ] do
+    let program ← parseLaurelString name input
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      for decl in core.decls do
+        match decl with
+        | .func f _ =>
+          if f.name.name == procName then
+            match f.body with
+            | some realExpr =>
+              for proc in program.staticProcedures do
+                if proc.name.text == procName then
+                  match proc.body with
+                  | .Transparent body =>
+                    let modelExpr := translateExprModel body.val
+                    let realErased := toString (realExpr.eraseTypes)
+                    let modelErased := toString (modelExpr.eraseTypes)
+                    if realErased == modelErased then
+                      IO.println s!"{name}: ✅ match"
+                    else
+                      IO.println s!"{name}: ❌ mismatch"
+                      IO.println s!"  real:  {realErased.take 100}"
+                      IO.println s!"  model: {modelErased.take 100}"
+                  | _ => pure ()
+            | none => pure ()
+        | _ => pure ()

@@ -5,6 +5,8 @@
 module
 
 public import Strata.Languages.Laurel.Laurel
+public import Strata.Languages.Core.Program
+public import Strata.Languages.Laurel.CoreDefinitionsForLaurel
 
 /-!
 # Translator Functional Model
@@ -780,4 +782,34 @@ public theorem no_heap_no_frame (proc : Procedure)
   simp_all [expectedFrameShape]
 
 end -- public section
+
+/-! ## Full translator model
+
+`translateModel` produces a `Core.Program` from a Laurel `Program`.
+This is the executable specification — when it disagrees with `translate`,
+we investigate who is right.
+-/
+
+/-- Build the ExceptionResult datatype declaration -/
+def modelExceptionResultDecl : Core.Decl :=
+  Core.Decl.type (.data [{
+    name := "ExceptionResult"
+    typeArgs := []
+    constrs := [
+      { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
+      { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
+    ]
+    constrs_ne := by decide
+  }]) .empty
+
+/-- Build the declaration list structure (names and order only).
+    This is the first step toward a full translateModel. -/
+public def modelDeclNames (program : Program) : List String :=
+  -- Same order as translateLaurelToCore
+  let withDefs := { program with
+    staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+    types := coreDefinitionsForLaurel.types ++ program.types
+  }
+  expectedDeclNames withDefs
+
 end Strata.Laurel

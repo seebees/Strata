@@ -742,3 +742,28 @@ composite B {
     else
       let unique_dups := duplicates.eraseDups
       IO.println s!"{name}: ❌ model duplicates: {unique_dups.take 3} (real has none)"
+
+  -- translateModel: declaration name order
+  IO.println ""
+  IO.println "=== translateModel: decl names vs real ==="
+  for (name, input) in [
+    ("SimpleComposite", simpleComposite),
+    ("CompositeWithProc", compositeWithProc),
+    ("StaticProc", staticProc)
+  ] do
+    let program ← parseLaurelString name input
+    let modelNames := modelDeclNames program
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let realNames := coreDeclNames core
+      let missing := modelNames.filter (fun n => !realNames.contains n)
+      let extra := realNames.filter (fun n => !modelNames.contains n)
+      if missing.isEmpty && extra.isEmpty then
+        IO.println s!"{name}: ✅ names match ({modelNames.length} decls)"
+      else
+        if !missing.isEmpty then
+          IO.println s!"{name}: ❌ model has, real missing: {missing.take 5}"
+        if !extra.isEmpty then
+          IO.println s!"{name}: ❌ real has, model missing: {extra.take 5}"

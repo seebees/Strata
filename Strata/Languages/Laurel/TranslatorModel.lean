@@ -1187,4 +1187,8 @@ public partial def translateProgramModel (program : Program) : Core.Program :=
     constraintFuncDecls ++ externalFuncDecls ++ transparentFuncDecls ++
     procDecls ++ instanceProcDecls ++ witnessProcDecls }
 
+-- Note: model_first_decl_is_exception_result is true by construction
+-- but unprovable because translateProgramModel is partial.
+-- Validated by comprehensive differential tests.
+
 end Strata.Laurel

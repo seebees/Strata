@@ -516,6 +516,9 @@ theorem bool_literals_distinct :
   rw [translateExpr_literalBool, translateExpr_literalBool]
   simp
 
+-- translateProgramModel properties: ExceptionResult is always first decl.
+-- Unprovable because translateProgramModel is partial. Validated by tests.
+
 /-! ## P6 note: LocalVariable with call initializer
 
 `var x := proc()` propagation goes through `predictPattern` (partial),

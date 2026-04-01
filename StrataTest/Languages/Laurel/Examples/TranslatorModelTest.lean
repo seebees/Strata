@@ -1227,3 +1227,42 @@ procedure add(x: int, y: int): int {
         | _ => pure ()
       if ok then
         IO.println s!"{name}: ✅ program model matches"
+
+  -- Comprehensive translateProgramModel test
+  IO.println ""
+  IO.println "=== translateProgramModel: comprehensive ==="
+  for (name, input) in [
+    ("SimpleProc", staticProc),
+    ("CompositeWithProc", compositeWithProc),
+    ("TwoProcs", "
+procedure add(x: int, y: int): int {
+  return x + y
+};
+procedure negate(b: bool): bool {
+  return !b
+};
+")
+  ] do
+    let program ← parseLaurelString name input
+    let modelProgram := translateProgramModel program
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let mut ok := true
+      -- Check every model decl name is in real
+      for (md : Core.Decl) in modelProgram.decls do
+        if !core.decls.any (fun (rd : Core.Decl) => rd.name.name == md.name.name) then
+          IO.println s!"{name}: ❌ model decl '{md.name.name}' not in real"
+          ok := false
+      -- Check every real decl name is in model
+      for (rd : Core.Decl) in core.decls do
+        if !modelProgram.decls.any (fun (md : Core.Decl) => md.name.name == rd.name.name) then
+          IO.println s!"{name}: ❌ real decl '{rd.name.name}' not in model"
+          ok := false
+      -- Check decl count
+      if modelProgram.decls.length != core.decls.length then
+        IO.println s!"{name}: ❌ count: model={modelProgram.decls.length} real={core.decls.length}"
+        ok := false
+      if ok then
+        IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"

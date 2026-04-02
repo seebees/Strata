@@ -1266,3 +1266,711 @@ procedure negate(b: bool): bool {
         ok := false
       if ok then
         IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+
+  -- Additional differential tests for uncovered patterns
+  IO.println ""
+  IO.println "=== Additional patterns ==="
+
+  -- Multiple fields with read/write
+  for (name, input) in [
+    ("MultiField", "
+composite Point {
+  var x: int
+  var y: int
+  procedure getX(self: Point): int {
+    return self#x
+  };
+  procedure setY(self: Point, v: int)
+    modifies self
+  {
+    self#y := v
+  };
+}
+"),
+    -- Instance method calls (self~>method())
+    ("InstanceCall", "
+composite Counter {
+  var count: int
+  procedure increment(self: Counter)
+    modifies self
+  {
+    self#count := self#count + 1
+  };
+  procedure addThree(self: Counter)
+    modifies self
+  {
+    self~>increment();
+    self~>increment();
+    self~>increment()
+  };
+}
+"),
+    -- Postconditions (Opaque bodies)
+    ("OpaquePostcond", "
+composite Box {
+  var value: int
+  procedure getValue(self: Box): int
+    ensures $result == self#value
+  {
+    return self#value
+  };
+}
+"),
+    -- Heap-modifying with modifies clause
+    ("ModifiesClause", "
+composite Cell {
+  var data: int
+  procedure setData(self: Cell, v: int)
+    ensures self#data == v
+    modifies self
+  {
+    self#data := v
+  };
+}
+"),
+    -- Nested control flow
+    ("NestedControlFlow", "
+procedure search(n: int): int
+  requires n >= 0
+{
+  var i: int := 0;
+  var found: int := 0;
+  while (i < n)
+    invariant i >= 0
+  {
+    if (i == 5) {
+      found := 1
+    } else {
+      found := 0
+    };
+    i := i + 1
+  };
+  return found
+};
+"),
+    -- Multiple composites
+    ("TwoCompositesFull", "
+composite A {
+  var x: int
+  procedure getX(self: A): int {
+    return self#x
+  };
+}
+composite B {
+  var y: int
+  procedure getY(self: B): int {
+    return self#y
+  };
+}
+")
+  ] do
+    -- Name comparison
+    let actual ← translateNames name input
+    let expected ← modelNames name input
+    let missing := expected.filter (fun n => !actual.contains n)
+    let extra := actual.filter (fun n => !expected.contains n)
+    if missing.isEmpty && extra.isEmpty then
+      IO.println s!"{name}: ✅ names match ({actual.length} decls)"
+    else
+      if !missing.isEmpty then
+        IO.println s!"{name}: ❌ model expects, translate missing: {missing}"
+      if !extra.isEmpty then
+        IO.println s!"{name}: ❌ translate has, model missing: {extra}"
+
+  -- translateProgramModel comprehensive for new patterns
+  IO.println ""
+  IO.println "=== translateProgramModel: new patterns ==="
+  for (name, input) in [
+    ("MultiField", "
+composite Point {
+  var x: int
+  var y: int
+  procedure getX(self: Point): int {
+    return self#x
+  };
+  procedure setY(self: Point, v: int)
+    modifies self
+  {
+    self#y := v
+  };
+}
+"),
+    ("NestedControlFlow", "
+procedure search(n: int): int
+  requires n >= 0
+{
+  var i: int := 0;
+  var found: int := 0;
+  while (i < n)
+    invariant i >= 0
+  {
+    if (i == 5) {
+      found := 1
+    } else {
+      found := 0
+    };
+    i := i + 1
+  };
+  return found
+};
+"),
+    ("TwoCompositesFull", "
+composite A {
+  var x: int
+  procedure getX(self: A): int {
+    return self#x
+  };
+}
+composite B {
+  var y: int
+  procedure getY(self: B): int {
+    return self#y
+  };
+}
+")
+  ] do
+    let program ← parseLaurelString name input
+    let modelProgram := translateProgramModel program
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let mut ok := true
+      for (md : Core.Decl) in modelProgram.decls do
+        if !core.decls.any (fun (rd : Core.Decl) => rd.name.name == md.name.name) then
+          IO.println s!"{name}: ❌ model decl '{md.name.name}' not in real"
+          ok := false
+      for (rd : Core.Decl) in core.decls do
+        if !modelProgram.decls.any (fun (md : Core.Decl) => md.name.name == rd.name.name) then
+          IO.println s!"{name}: ❌ real decl '{rd.name.name}' not in model"
+          ok := false
+      if modelProgram.decls.length != core.decls.length then
+        IO.println s!"{name}: ❌ count: model={modelProgram.decls.length} real={core.decls.length}"
+        ok := false
+      if ok then
+        IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+
+  -- Stress tests: harder patterns
+  IO.println ""
+  IO.println "=== Stress tests: harder patterns ==="
+
+  -- Helper for comprehensive comparison
+  let comprehensiveCompare := fun (name : String) (input : String) => do
+    let program ← parseLaurelString name input
+    let modelProgram := translateProgramModel program
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let modelNames := modelProgram.decls.map fun (d : Core.Decl) => d.name.name
+      let realNames := core.decls.map fun (d : Core.Decl) => d.name.name
+      let missing := realNames.filter (fun n => !modelNames.contains n)
+      let extra := modelNames.filter (fun n => !realNames.contains n)
+      if missing.isEmpty && extra.isEmpty && modelProgram.decls.length == core.decls.length then
+        IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+      else
+        if !missing.isEmpty then
+          IO.println s!"{name}: ❌ real has, model missing: {missing}"
+        if !extra.isEmpty then
+          IO.println s!"{name}: ❌ model has, real missing: {extra}"
+        if modelProgram.decls.length != core.decls.length then
+          IO.println s!"{name}: ❌ count: model={modelProgram.decls.length} real={core.decls.length}"
+
+  -- 1. Static proc calling static proc (transitive heap through statics)
+  comprehensiveCompare "StaticCallsStatic" "
+procedure helper(x: int): int {
+  return x + 1
+};
+procedure caller(x: int): int {
+  var y: int := helper(x);
+  return y
+};
+"
+
+  -- 2. Static function calling static function
+  comprehensiveCompare "FuncCallsFunc" "
+function double(x: int): int {
+  x + x
+};
+function quadruple(x: int): int {
+  double(double(x))
+};
+"
+
+  -- 3. Mix of functions and procedures
+  comprehensiveCompare "FuncAndProcMix" "
+function square(x: int): int {
+  x * x
+};
+procedure compute(x: int): int {
+  var s: int := square(x);
+  return s + 1
+};
+"
+
+  -- 4. Instance function (isFunctional on instance)
+  comprehensiveCompare "InstanceFunction" "
+composite Box {
+  var value: int
+  function getValue(self: Box): int {
+    self#value
+  };
+}
+"
+
+  -- 5. Instance proc + instance function on same composite
+  comprehensiveCompare "InstanceMixed" "
+composite Box {
+  var value: int
+  function getValue(self: Box): int {
+    self#value
+  };
+  procedure setValue(self: Box, v: int)
+    modifies self
+  {
+    self#value := v
+  };
+}
+"
+
+  -- 6. Static proc that creates a new object
+  comprehensiveCompare "NewInStaticProc" "
+composite Obj {
+  var x: int
+}
+procedure create(): Obj {
+  var o: Obj := new Obj;
+  return o
+};
+"
+
+  -- 7. Constrained type usage (int32 field)
+  comprehensiveCompare "ConstrainedField" "
+composite Sensor {
+  var reading: int32
+  procedure getReading(self: Sensor): int {
+    return self#reading
+  };
+}
+"
+
+  -- 8. Multiple composites with instance procs calling each other's statics
+  comprehensiveCompare "CrossComposite" "
+composite A {
+  var x: int
+  procedure getX(self: A): int {
+    return self#x
+  };
+}
+composite B {
+  var y: int
+  procedure getY(self: B): int {
+    return self#y
+  };
+}
+procedure sumBoth(a: A, b: B): int {
+  var ax: int := a~>getX();
+  var by_: int := b~>getY();
+  return ax + by_
+};
+"
+
+  -- 9. Procedure with precondition
+  comprehensiveCompare "WithPrecondition" "
+procedure safeDivide(x: int, y: int): int
+  requires y != 0
+{
+  return x
+};
+"
+
+  -- 10. While loop with invariant and decreases
+  comprehensiveCompare "WhileWithInvariant" "
+procedure countdown(n: int): int
+  requires n >= 0
+{
+  var i: int := n;
+  var sum: int := 0;
+  while (i > 0)
+    invariant i >= 0
+    invariant sum >= 0
+  {
+    sum := sum + i;
+    i := i - 1
+  };
+  return sum
+};
+"
+
+  -- 11. Deeply nested control flow
+  comprehensiveCompare "DeepNesting" "
+procedure classify(x: int): int {
+  var result: int := 0;
+  if (x > 0) {
+    if (x > 100) {
+      result := 3
+    } else {
+      if (x > 10) {
+        result := 2
+      } else {
+        result := 1
+      }
+    }
+  } else {
+    result := 0
+  };
+  return result
+};
+"
+
+  -- 12. Boolean operations
+  comprehensiveCompare "BoolOps" "
+function bothTrue(a: bool, b: bool): bool {
+  a && b
+};
+function eitherTrue(a: bool, b: bool): bool {
+  a || b
+};
+function negate(a: bool): bool {
+  !a
+};
+"
+
+  -- 13. Empty composite (no fields, no procs)
+  comprehensiveCompare "EmptyComposite" "
+composite Empty {
+}
+"
+
+  -- 14. Composite with bool field
+  comprehensiveCompare "BoolField" "
+composite Flag {
+  var active: bool
+  procedure isActive(self: Flag): bool {
+    return self#active
+  };
+}
+"
+
+  -- 15. Multiple field types on one composite
+  comprehensiveCompare "MultiTypeFields" "
+composite Record {
+  var count: int
+  var name: string
+  var active: bool
+}
+"
+
+  -- 16. Procedure that does nothing (void)
+  comprehensiveCompare "VoidProc" "
+procedure noop() {
+};
+"
+
+  -- 17. Chained instance calls
+  comprehensiveCompare "ChainedInstance" "
+composite Counter {
+  var count: int
+  procedure increment(self: Counter)
+    modifies self
+  {
+    self#count := self#count + 1
+  };
+  procedure addFive(self: Counter)
+    modifies self
+  {
+    self~>increment();
+    self~>increment();
+    self~>increment();
+    self~>increment();
+    self~>increment()
+  };
+}
+"
+
+  -- 18. User-defined datatype (simple, no IsType)
+  comprehensiveCompare "UserDatatype" "
+datatype Color {
+  Red(),
+  Green(),
+  Blue()
+}
+"
+
+  -- 19. Forall/Exists in postcondition
+  comprehensiveCompare "QuantifiedPostcond" "
+composite Arr {
+  var size: int
+  procedure clear(self: Arr)
+    ensures self#size == 0
+    modifies self
+  {
+    self#size := 0
+  };
+}
+"
+
+  -- 20. Constants
+  comprehensiveCompare "WithConstant" "
+function maxSize(): int {
+  100
+};
+procedure check(x: int): bool {
+  return x < maxSize()
+};
+"
+
+  -- Round 2: Edge cases and harder patterns
+  IO.println ""
+  IO.println "=== Round 2: Edge cases ==="
+
+#eval do
+  -- Helper for comprehensive comparison (duplicated for second #eval block)
+  let comprehensiveCompare := fun (name : String) (input : String) => do
+    let program ← parseLaurelString name input
+    let modelProgram := translateProgramModel program
+    let (coreOpt, _) := Laurel.translate {} program
+    match coreOpt with
+    | none => IO.println s!"{name}: ❌ Translation failed"
+    | some core =>
+      let modelNames := modelProgram.decls.map fun (d : Core.Decl) => d.name.name
+      let realNames := core.decls.map fun (d : Core.Decl) => d.name.name
+      let missing := realNames.filter (fun n => !modelNames.contains n)
+      let extra := modelNames.filter (fun n => !realNames.contains n)
+      if missing.isEmpty && extra.isEmpty && modelProgram.decls.length == core.decls.length then
+        IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+      else
+        if !missing.isEmpty then
+          IO.println s!"{name}: ❌ real has, model missing: {missing}"
+        if !extra.isEmpty then
+          IO.println s!"{name}: ❌ model has, real missing: {extra}"
+        if modelProgram.decls.length != core.decls.length then
+          IO.println s!"{name}: ❌ count: model={modelProgram.decls.length} real={core.decls.length}"
+
+  -- 21. Composite extending composite (type hierarchy)
+  comprehensiveCompare "Inheritance" "
+composite Animal {
+  var age: int
+}
+composite Dog extends Animal {
+  var name: string
+}
+"
+
+  -- 22. Instance proc on child type
+  comprehensiveCompare "InheritanceWithProc" "
+composite Shape {
+  var x: int
+}
+composite Circle extends Shape {
+  var radius: int
+  procedure getRadius(self: Circle): int {
+    return self#radius
+  };
+}
+"
+
+  -- 23. Multiple constrained types
+  comprehensiveCompare "MultiConstrained" "
+composite Packet {
+  var size: int32
+  var flags: int8
+}
+"
+
+  -- 24. Procedure returning bool
+  comprehensiveCompare "ReturnBool" "
+procedure isPositive(x: int): bool {
+  return x > 0
+};
+"
+
+  -- 25. Assign from function call
+  comprehensiveCompare "AssignFromFunc" "
+function double(x: int): int {
+  x + x
+};
+procedure compute(x: int): int {
+  var y: int := double(x);
+  return y
+};
+"
+
+  -- 26. Multiple outputs (procedure with return + exception)
+  comprehensiveCompare "ProcWithReturn" "
+composite Box {
+  var value: int
+  procedure swap(self: Box, newVal: int): int
+    modifies self
+  {
+    var old: int := self#value;
+    self#value := newVal;
+    return old
+  };
+}
+"
+
+  -- 27. Static proc calling instance proc
+  comprehensiveCompare "StaticCallsInstance" "
+composite Counter {
+  var count: int
+  procedure increment(self: Counter)
+    modifies self
+  {
+    self#count := self#count + 1
+  };
+}
+procedure bumpCounter(c: Counter) {
+  c~>increment()
+};
+"
+
+  -- 28. Datatype with fields
+  comprehensiveCompare "DatatypeWithFields" "
+datatype Pair {
+  MkPair(fst: int, snd: int)
+}
+"
+
+  -- 29. Multiple datatypes
+  comprehensiveCompare "MultipleDatatypes" "
+datatype Option {
+  None(),
+  Some(value: int)
+}
+datatype Result {
+  Ok(value: int),
+  Err(code: int)
+}
+"
+
+  -- 30. Composite with string field
+  comprehensiveCompare "StringField" "
+composite Named {
+  var label: string
+  procedure getLabel(self: Named): string {
+    return self#label
+  };
+}
+"
+
+  -- 31. Procedure with multiple params of different types
+  comprehensiveCompare "MixedParams" "
+procedure process(x: int, flag: bool, name: string): int {
+  if (flag) {
+    return x + 1
+  } else {
+    return x
+  }
+};
+"
+
+  -- 32. Nested field access (read field, use in expression)
+  comprehensiveCompare "FieldInExpr" "
+composite Point {
+  var x: int
+  var y: int
+  function distFromOrigin(self: Point): int {
+    self#x + self#y
+  };
+}
+"
+
+  -- 33. Composite with only functions (no procedures)
+  comprehensiveCompare "FunctionsOnly" "
+composite Calc {
+  var value: int
+  function getValue(self: Calc): int {
+    self#value
+  };
+  function isZero(self: Calc): bool {
+    self#value == 0
+  };
+}
+"
+
+  -- 34. External function
+  comprehensiveCompare "ExternalFunc" "
+function externalHelper(x: int): int
+  external;
+procedure useExternal(x: int): int {
+  var y: int := externalHelper(x);
+  return y
+};
+"
+
+  -- 35. Procedure calling both function and procedure
+  comprehensiveCompare "CallBothKinds" "
+function square(x: int): int {
+  x * x
+};
+procedure sideEffect(x: int): int {
+  return x
+};
+procedure mixed(x: int): int {
+  var s: int := square(x);
+  var r: int := sideEffect(s);
+  return r
+};
+"
+
+  -- 36. Composite with many fields
+  comprehensiveCompare "ManyFields" "
+composite BigRecord {
+  var a: int
+  var b: int
+  var c: int
+  var d: bool
+  var e: string
+}
+"
+
+  -- 37. While loop calling instance method
+  comprehensiveCompare "WhileWithInstanceCall" "
+composite Counter {
+  var count: int
+  procedure increment(self: Counter)
+    modifies self
+  {
+    self#count := self#count + 1
+  };
+}
+procedure countTo(c: Counter, n: int) {
+  var i: int := 0;
+  while (i < n)
+    invariant i >= 0
+  {
+    c~>increment();
+    i := i + 1
+  }
+};
+"
+
+  -- 38. Equality comparison
+  comprehensiveCompare "EqualityCheck" "
+function areEqual(x: int, y: int): bool {
+  x == y
+};
+"
+
+  -- 39. Composite with constrained + regular fields
+  comprehensiveCompare "MixedFieldTypes" "
+composite Sensor {
+  var id: int
+  var reading: int32
+  var active: bool
+}
+"
+
+  -- 40. Three composites
+  comprehensiveCompare "ThreeComposites" "
+composite A {
+  var x: int
+}
+composite B {
+  var y: int
+}
+composite C {
+  var z: int
+}
+"

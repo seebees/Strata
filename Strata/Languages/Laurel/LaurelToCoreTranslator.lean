@@ -172,7 +172,7 @@ When an Identifier matches a bound name at index `i`, it becomes `bvar i` (de Br
 instead of `fvar`.
 -/
 
-def translateExpr (expr : StmtExprMd)
+@[expose] def translateExpr (expr : StmtExprMd)
     (boundVars : List Identifier := []) (isPureContext : Bool := false)
     : TranslateM Core.Expression.Expr := do
   let s ← get
@@ -989,4 +989,19 @@ def verifyToDiagnosticModels (program : Program) (options : VerifyOptions := .de
   return (results.snd ++ vcDiags).toArray
 
 end -- public section
+
+/-! ### Equation lemmas for translateExpr (exported for equivalence proofs) -/
+
+@[simp] public theorem translateExpr_eq_literalBool (b : Bool) (md : MetaData) (bv : List Identifier) (pc : Bool) (s : TranslateState) :
+  translateExpr ⟨.LiteralBool b, md⟩ bv pc s = (some (.const () (.boolConst b)), s) := by
+  unfold translateExpr; rfl
+
+@[simp] public theorem translateExpr_eq_literalInt (i : Int) (md : MetaData) (bv : List Identifier) (pc : Bool) (s : TranslateState) :
+  translateExpr ⟨.LiteralInt i, md⟩ bv pc s = (some (.const () (.intConst i)), s) := by
+  unfold translateExpr; rfl
+
+@[simp] public theorem translateExpr_eq_literalString (str : String) (md : MetaData) (bv : List Identifier) (pc : Bool) (s : TranslateState) :
+  translateExpr ⟨.LiteralString str, md⟩ bv pc s = (some (.const () (.strConst str)), s) := by
+  unfold translateExpr; rfl
+
 end Laurel

@@ -26,7 +26,7 @@ Laurel Program ──→ translate ──→ Core Program
 ```
 
 Both take the same input and should produce the same output.
-When they disagree, the model defines what's correct.
+When they disagree, care must be taken.
 
 ## Model Structure
 

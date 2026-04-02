@@ -24,28 +24,28 @@ public section
 /-! ## Helpers: extract structure from a Laurel program -/
 
 /-- All composite type definitions in the program -/
-def allComposites (program : Program) : List CompositeType :=
+@[expose] def allComposites (program : Program) : List CompositeType :=
   program.types.filterMap fun td => match td with
     | .Composite ct => some ct
     | _ => none
 
 /-- All datatype definitions in the program -/
-def allDatatypes (program : Program) : List DatatypeDefinition :=
+@[expose] def allDatatypes (program : Program) : List DatatypeDefinition :=
   program.types.filterMap fun td => match td with
     | .Datatype dt => some dt
     | _ => none
 
 /-- All fields across all composites, paired with their owning type name -/
-def allFields (program : Program) : List (String × Field) :=
+@[expose] def allFields (program : Program) : List (String × Field) :=
   (allComposites program).flatMap fun ct =>
     ct.fields.map fun f => (ct.name.text, f)
 
 /-- All non-external static procedures -/
-def nonExternalStaticProcs (program : Program) : List Procedure :=
+@[expose] def nonExternalStaticProcs (program : Program) : List Procedure :=
   program.staticProcedures.filter (fun p => !p.body.isExternal)
 
 /-- All non-external instance procedures, paired with owning type name -/
-def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
+@[expose] def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
   (allComposites program).flatMap fun ct =>
     ct.instanceProcedures.filter (fun p => !p.body.isExternal)
       |>.map fun p => (ct.name.text, p)
@@ -111,9 +111,15 @@ def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
 /-- Names of axioms the model expects -/
 @[expose] def expectedAxiomNames (program : Program) : List String :=
   -- Axioms are generated when BoxInt exists in the Box datatype.
-  -- BoxInt exists when there are int fields AND procedures that access the heap.
+  -- BoxInt exists when there are int fields (or constrained int fields) AND procedures.
   let fields := allFields program
-  let hasIntField := fields.any fun (_, f) => match f.type.val with | .TInt => true | _ => false
+  let constrainedIntNames := program.types.filterMap fun td => match td with
+    | .Constrained ct => match ct.base.val with | .TInt => some ct.name.text | _ => none
+    | _ => none
+  let hasIntField := fields.any fun (_, f) => match f.type.val with
+    | .TInt => true
+    | .UserDefined name => constrainedIntNames.contains name.text
+    | _ => false
   let hasProcs := !(nonExternalStaticProcs program).isEmpty ||
                   !(nonExternalInstanceProcs program).isEmpty
   if hasIntField && hasProcs then ["readInt32_eq", "readInt16_eq", "readInt8_eq"]
@@ -128,83 +134,122 @@ def nonExternalInstanceProcs (program : Program) : List (String × Procedure) :=
 
 /-! ## Model: heap threading -/
 
+mutual
 /-- Does a procedure body directly read the heap (field read)? -/
-partial def directlyReadsHeap (body : StmtExpr) : Bool :=
-  match body with
-  | .FieldSelect _ _ => true
-  | .Return (some v) => directlyReadsHeap v.val
-  | .Block stmts _ => stmts.any (fun s => directlyReadsHeap s.val)
-  | .IfThenElse c t e =>
-    directlyReadsHeap c.val || directlyReadsHeap t.val ||
-    (match e with | some e => directlyReadsHeap e.val | none => false)
-  | .While c invs d body =>
-    directlyReadsHeap c.val || directlyReadsHeap body.val ||
-    invs.any (fun i => directlyReadsHeap i.val) ||
-    (match d with | some d => directlyReadsHeap d.val | none => false)
-  | .LocalVariable _ _ (some init) => directlyReadsHeap init.val
-  | .Assign targets v =>
-    targets.any (fun t => directlyReadsHeap t.val) || directlyReadsHeap v.val
-  | .StaticCall _ args => args.any (fun a => directlyReadsHeap a.val)
-  | .InstanceCall target _ args =>
-    directlyReadsHeap target.val || args.any (fun a => directlyReadsHeap a.val)
-  | .PrimitiveOp _ args => args.any (fun a => directlyReadsHeap a.val)
-  | .PureFieldUpdate t _ v => directlyReadsHeap t.val || directlyReadsHeap v.val
-  | .ReferenceEquals l r => directlyReadsHeap l.val || directlyReadsHeap r.val
-  | .AsType t _ => directlyReadsHeap t.val
-  | .IsType t _ => directlyReadsHeap t.val
-  | .Old v => directlyReadsHeap v.val
-  | .Fresh v => directlyReadsHeap v.val
-  | .Assigned n => directlyReadsHeap n.val
-  | .Assert c => directlyReadsHeap c.val
-  | .Assume c => directlyReadsHeap c.val
-  | .Forall _ trigger b =>
-    (match trigger with | some t => directlyReadsHeap t.val | none => false) || directlyReadsHeap b.val
-  | .Exists _ trigger b =>
-    (match trigger with | some t => directlyReadsHeap t.val | none => false) || directlyReadsHeap b.val
-  | .ProveBy v p => directlyReadsHeap v.val || directlyReadsHeap p.val
-  | .ContractOf _ f => directlyReadsHeap f.val
-  | _ => false
+def directlyReadsHeapMd (e : StmtExprMd) : Bool := directlyReadsHeap e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
 
-/-- Does a procedure body directly write the heap (field assign, new)? -/
-partial def directlyWritesHeap (body : StmtExpr) : Bool :=
-  match body with
+def directlyReadsHeap (body : StmtExpr) : Bool :=
+  match _h : body with
+  | .FieldSelect _ _ => true
+  | .Return (some v) => directlyReadsHeapMd v
+  | .Block stmts _ => stmts.attach.any (fun ⟨s, _⟩ => directlyReadsHeapMd s)
+  | .IfThenElse c t e =>
+    directlyReadsHeapMd c || directlyReadsHeapMd t ||
+    (match e with | some e => directlyReadsHeapMd e | none => false)
+  | .While c invs d body =>
+    directlyReadsHeapMd c || directlyReadsHeapMd body ||
+    invs.attach.any (fun ⟨i, _⟩ => directlyReadsHeapMd i) ||
+    (match d with | some d => directlyReadsHeapMd d | none => false)
+  | .LocalVariable _ _ (some init) => directlyReadsHeapMd init
+  | .Assign targets v =>
+    targets.attach.any (fun ⟨t, _⟩ => directlyReadsHeapMd t) || directlyReadsHeapMd v
+  | .StaticCall _ args => args.attach.any (fun ⟨a, _⟩ => directlyReadsHeapMd a)
+  | .InstanceCall target _ args =>
+    directlyReadsHeapMd target || args.attach.any (fun ⟨a, _⟩ => directlyReadsHeapMd a)
+  | .PrimitiveOp _ args => args.attach.any (fun ⟨a, _⟩ => directlyReadsHeapMd a)
+  | .PureFieldUpdate t _ v => directlyReadsHeapMd t || directlyReadsHeapMd v
+  | .ReferenceEquals l r => directlyReadsHeapMd l || directlyReadsHeapMd r
+  | .AsType t _ => directlyReadsHeapMd t
+  | .IsType t _ => directlyReadsHeapMd t
+  | .Old v => directlyReadsHeapMd v
+  | .Fresh v => directlyReadsHeapMd v
+  | .Assigned n => directlyReadsHeapMd n
+  | .Assert c => directlyReadsHeapMd c
+  | .Assume c => directlyReadsHeapMd c
+  | .Forall _ trigger b =>
+    (match trigger with | some t => directlyReadsHeapMd t | none => false) || directlyReadsHeapMd b
+  | .Exists _ trigger b =>
+    (match trigger with | some t => directlyReadsHeapMd t | none => false) || directlyReadsHeapMd b
+  | .ProveBy v p => directlyReadsHeapMd v || directlyReadsHeapMd p
+  | .ContractOf _ f => directlyReadsHeapMd f
+  | _ => false
+  termination_by sizeOf body
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
+
+@[simp] public theorem directlyReadsHeap_eq_fieldSelect (t : WithMetadata StmtExpr) (f : Identifier) :
+  directlyReadsHeap (.FieldSelect t f) = true := by rw [directlyReadsHeap.eq_def]
+
+@[simp] public theorem directlyReadsHeap_eq_literalBool (b : Bool) :
+  directlyReadsHeap (.LiteralBool b) = false := by rw [directlyReadsHeap.eq_def]
+
+@[simp] public theorem directlyReadsHeap_eq_literalInt (i : Int) :
+  directlyReadsHeap (.LiteralInt i) = false := by rw [directlyReadsHeap.eq_def]
+
+@[simp] public theorem directlyReadsHeap_eq_identifier (n : Identifier) :
+  directlyReadsHeap (.Identifier n) = false := by rw [directlyReadsHeap.eq_def]
+
+mutual
+def directlyWritesHeapMd (e : StmtExprMd) : Bool := directlyWritesHeap e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
+
+def directlyWritesHeap (body : StmtExpr) : Bool :=
+  match _h : body with
   | .Assign [⟨.FieldSelect _ _, _⟩] _ => true
   | .New _ => true
-  | .Return (some v) => directlyWritesHeap v.val
-  | .Block stmts _ => stmts.any (fun s => directlyWritesHeap s.val)
+  | .Return (some v) => directlyWritesHeapMd v
+  | .Block stmts _ => stmts.attach.any (fun ⟨s, _⟩ => directlyWritesHeapMd s)
   | .IfThenElse c t e =>
-    directlyWritesHeap c.val || directlyWritesHeap t.val ||
-    (match e with | some e => directlyWritesHeap e.val | none => false)
+    directlyWritesHeapMd c || directlyWritesHeapMd t ||
+    (match e with | some e => directlyWritesHeapMd e | none => false)
   | .While c invs d body =>
-    directlyWritesHeap c.val || directlyWritesHeap body.val ||
-    invs.any (fun i => directlyWritesHeap i.val) ||
-    (match d with | some d => directlyWritesHeap d.val | none => false)
-  | .LocalVariable _ _ (some init) => directlyWritesHeap init.val
+    directlyWritesHeapMd c || directlyWritesHeapMd body ||
+    invs.attach.any (fun ⟨i, _⟩ => directlyWritesHeapMd i) ||
+    (match d with | some d => directlyWritesHeapMd d | none => false)
+  | .LocalVariable _ _ (some init) => directlyWritesHeapMd init
   | .Assign targets v =>
-    targets.any (fun t => directlyWritesHeap t.val) || directlyWritesHeap v.val
-  | .StaticCall _ args => args.any (fun a => directlyWritesHeap a.val)
+    targets.attach.any (fun ⟨t, _⟩ => directlyWritesHeapMd t) || directlyWritesHeapMd v
+  | .StaticCall _ args => args.attach.any (fun ⟨a, _⟩ => directlyWritesHeapMd a)
   | .InstanceCall target _ args =>
-    directlyWritesHeap target.val || args.any (fun a => directlyWritesHeap a.val)
-  | .PrimitiveOp _ args => args.any (fun a => directlyWritesHeap a.val)
-  | .PureFieldUpdate t _ v => directlyWritesHeap t.val || directlyWritesHeap v.val
-  | .ReferenceEquals l r => directlyWritesHeap l.val || directlyWritesHeap r.val
-  | .AsType t _ => directlyWritesHeap t.val
-  | .IsType t _ => directlyWritesHeap t.val
-  | .Old v => directlyWritesHeap v.val
-  | .Fresh v => directlyWritesHeap v.val
-  | .Assigned n => directlyWritesHeap n.val
-  | .Assert c => directlyWritesHeap c.val
-  | .Assume c => directlyWritesHeap c.val
+    directlyWritesHeapMd target || args.attach.any (fun ⟨a, _⟩ => directlyWritesHeapMd a)
+  | .PrimitiveOp _ args => args.attach.any (fun ⟨a, _⟩ => directlyWritesHeapMd a)
+  | .PureFieldUpdate t _ v => directlyWritesHeapMd t || directlyWritesHeapMd v
+  | .ReferenceEquals l r => directlyWritesHeapMd l || directlyWritesHeapMd r
+  | .AsType t _ => directlyWritesHeapMd t
+  | .IsType t _ => directlyWritesHeapMd t
+  | .Old v => directlyWritesHeapMd v
+  | .Fresh v => directlyWritesHeapMd v
+  | .Assigned n => directlyWritesHeapMd n
+  | .Assert c => directlyWritesHeapMd c
+  | .Assume c => directlyWritesHeapMd c
   | .Forall _ trigger b =>
-    (match trigger with | some t => directlyWritesHeap t.val | none => false) || directlyWritesHeap b.val
+    (match trigger with | some t => directlyWritesHeapMd t | none => false) || directlyWritesHeapMd b
   | .Exists _ trigger b =>
-    (match trigger with | some t => directlyWritesHeap t.val | none => false) || directlyWritesHeap b.val
-  | .ProveBy v p => directlyWritesHeap v.val || directlyWritesHeap p.val
-  | .ContractOf _ f => directlyWritesHeap f.val
+    (match trigger with | some t => directlyWritesHeapMd t | none => false) || directlyWritesHeapMd b
+  | .ProveBy v p => directlyWritesHeapMd v || directlyWritesHeapMd p
+  | .ContractOf _ f => directlyWritesHeapMd f
   | _ => false
+  termination_by sizeOf body
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
+
+@[simp] public theorem directlyWritesHeap_eq_new (name : Identifier) :
+  directlyWritesHeap (.New name) = true := by rw [directlyWritesHeap.eq_def]
+
+@[simp] public theorem directlyWritesHeap_eq_literalBool (b : Bool) :
+  directlyWritesHeap (.LiteralBool b) = false := by rw [directlyWritesHeap.eq_def]
+
+@[simp] public theorem directlyWritesHeap_eq_literalInt (i : Int) :
+  directlyWritesHeap (.LiteralInt i) = false := by rw [directlyWritesHeap.eq_def]
+
+@[simp] public theorem directlyWritesHeap_eq_identifier (n : Identifier) :
+  directlyWritesHeap (.Identifier n) = false := by rw [directlyWritesHeap.eq_def]
 
 /-- Does a procedure body directly access the heap (read or write)? -/
-partial def directlyAccessesHeap (body : StmtExpr) : Bool :=
+def directlyAccessesHeap (body : StmtExpr) : Bool :=
   directlyReadsHeap body || directlyWritesHeap body
 
 /-- Does a procedure directly read the heap? Mirrors real analyzeProc. -/
@@ -275,40 +320,49 @@ def heapAccessingProcNames (program : Program) : List String :=
 
 /-! ## Callee extraction and transitive heap closure -/
 
+mutual
+/-- Extract callee names from a WithMetadata StmtExpr (wrapper for termination). -/
+def calleesInExprMd (e : StmtExprMd) : List String := calleesInExpr e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
+
 /-- Extract callee names from a StmtExpr (StaticCall and InstanceCall) -/
-partial def calleesInExpr (body : StmtExpr) : List String :=
-  match body with
+def calleesInExpr (body : StmtExpr) : List String :=
+  match _h : body with
   | .StaticCall callee args =>
-    [callee.text] ++ args.flatMap (fun a => calleesInExpr a.val)
+    [callee.text] ++ args.attach.flatMap (fun ⟨a, _⟩ => calleesInExprMd a)
   | .InstanceCall _ callee args =>
-    [callee.text] ++ args.flatMap (fun a => calleesInExpr a.val)
-  | .Return (some v) => calleesInExpr v.val
-  | .Block stmts _ => stmts.flatMap (fun s => calleesInExpr s.val)
+    [callee.text] ++ args.attach.flatMap (fun ⟨a, _⟩ => calleesInExprMd a)
+  | .Return (some v) => calleesInExprMd v
+  | .Block stmts _ => stmts.attach.flatMap (fun ⟨s, _⟩ => calleesInExprMd s)
   | .IfThenElse c t e =>
-    calleesInExpr c.val ++ calleesInExpr t.val ++
-    (match e with | some e => calleesInExpr e.val | none => [])
-  | .While c _ _ body => calleesInExpr c.val ++ calleesInExpr body.val
-  | .LocalVariable _ _ (some init) => calleesInExpr init.val
+    calleesInExprMd c ++ calleesInExprMd t ++
+    (match e with | some e => calleesInExprMd e | none => [])
+  | .While c _ _ body => calleesInExprMd c ++ calleesInExprMd body
+  | .LocalVariable _ _ (some init) => calleesInExprMd init
   | .Assign targets v =>
-    targets.flatMap (fun t => calleesInExpr t.val) ++ calleesInExpr v.val
-  | .FieldSelect target _ => calleesInExpr target.val
-  | .PrimitiveOp _ args => args.flatMap (fun a => calleesInExpr a.val)
-  | .PureFieldUpdate t _ v => calleesInExpr t.val ++ calleesInExpr v.val
-  | .ReferenceEquals l r => calleesInExpr l.val ++ calleesInExpr r.val
-  | .AsType t _ => calleesInExpr t.val
-  | .IsType t _ => calleesInExpr t.val
+    targets.attach.flatMap (fun ⟨t, _⟩ => calleesInExprMd t) ++ calleesInExprMd v
+  | .FieldSelect target _ => calleesInExprMd target
+  | .PrimitiveOp _ args => args.attach.flatMap (fun ⟨a, _⟩ => calleesInExprMd a)
+  | .PureFieldUpdate t _ v => calleesInExprMd t ++ calleesInExprMd v
+  | .ReferenceEquals l r => calleesInExprMd l ++ calleesInExprMd r
+  | .AsType t _ => calleesInExprMd t
+  | .IsType t _ => calleesInExprMd t
   | .Forall _ trigger b =>
-    (match trigger with | some t => calleesInExpr t.val | none => []) ++ calleesInExpr b.val
+    (match trigger with | some t => calleesInExprMd t | none => []) ++ calleesInExprMd b
   | .Exists _ trigger b =>
-    (match trigger with | some t => calleesInExpr t.val | none => []) ++ calleesInExpr b.val
-  | .Old v => calleesInExpr v.val
-  | .Fresh v => calleesInExpr v.val
-  | .Assigned n => calleesInExpr n.val
-  | .Assert c => calleesInExpr c.val
-  | .Assume c => calleesInExpr c.val
-  | .ProveBy v p => calleesInExpr v.val ++ calleesInExpr p.val
-  | .ContractOf _ f => calleesInExpr f.val
+    (match trigger with | some t => calleesInExprMd t | none => []) ++ calleesInExprMd b
+  | .Old v => calleesInExprMd v
+  | .Fresh v => calleesInExprMd v
+  | .Assigned n => calleesInExprMd n
+  | .Assert c => calleesInExprMd c
+  | .Assume c => calleesInExprMd c
+  | .ProveBy v p => calleesInExprMd v ++ calleesInExprMd p
+  | .ContractOf _ f => calleesInExprMd f
   | _ => []
+  termination_by sizeOf body
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
 
 /-- Extract all callees from a procedure (body + postconditions + preconditions) -/
 def procCallees (proc : Procedure) : List String :=
@@ -497,44 +551,54 @@ def predictPatternTop (isFunction : String → Bool) (expr : StmtExpr) : Option 
   | .New className => some (.expr ["increment", className.text])
   | _ => none  -- needs recursion
 
-partial def predictPattern (isFunction : String → Bool) : StmtExpr → TranslationPattern
+mutual
+/-- Predict pattern for a WithMetadata StmtExpr (wrapper for termination). -/
+def predictPatternMd (isFunction : String → Bool) (e : StmtExprMd) : TranslationPattern :=
+  predictPattern isFunction e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
+
+def predictPattern (isFunction : String → Bool) (expr : StmtExpr) : TranslationPattern :=
+  match _h : expr with
   | .LiteralBool _ | .LiteralInt _ | .LiteralString _ | .LiteralDecimal _ => .expr []
   | .Identifier name => .expr [name.text]
   | .PrimitiveOp _ args =>
-    .expr (args.flatMap fun a => match predictPattern isFunction a.val with
+    .expr (args.attach.flatMap fun ⟨a, _⟩ => match predictPatternMd isFunction a with
       | .expr refs => refs | _ => [])
   | .FieldSelect target _ =>
-    .expr (["readField"] ++ match predictPattern isFunction target.val with
+    .expr (["readField"] ++ match predictPatternMd isFunction target with
       | .expr refs => refs | _ => [])
   | .StaticCall callee args =>
     if isFunction callee.text then
-      .expr ([callee.text] ++ args.flatMap fun a => match predictPattern isFunction a.val with
+      .expr ([callee.text] ++ args.attach.flatMap fun ⟨a, _⟩ => match predictPatternMd isFunction a with
         | .expr refs => refs | _ => [])
     else .callWithPropagation callee.text ["$result"]
   | .InstanceCall _ callee args =>
     if isFunction callee.text then
-      .expr ([callee.text] ++ args.flatMap fun a => match predictPattern isFunction a.val with
+      .expr ([callee.text] ++ args.attach.flatMap fun ⟨a, _⟩ => match predictPatternMd isFunction a with
         | .expr refs => refs | _ => [])
     else .callWithPropagation callee.text ["$result"]
-  | .Block stmts _ => .block (stmts.map fun s => predictPattern isFunction s.val)
+  | .Block stmts _ => .block (stmts.attach.map fun ⟨s, _⟩ => predictPatternMd isFunction s)
   | .IfThenElse cond thenB elseB =>
-    .ite (predictPattern isFunction cond.val)
-         (predictPattern isFunction thenB.val)
-         (match elseB with | some e => predictPattern isFunction e.val | none => .skip)
+    .ite (predictPatternMd isFunction cond)
+         (predictPatternMd isFunction thenB)
+         (match elseB with | some e => predictPatternMd isFunction e | none => .skip)
   | .While cond _ _ body =>
-    .loop (predictPattern isFunction cond.val) (predictPattern isFunction body.val)
+    .loop (predictPatternMd isFunction cond) (predictPatternMd isFunction body)
   | .Return (some v) =>
     match v.val with
     | .StaticCall callee _ =>
-      if isFunction callee.text then .returnExpr (predictPattern isFunction v.val)
+      if isFunction callee.text then .returnExpr (predictPatternMd isFunction v)
       else .returnCall callee.text ["$result"]
     | .InstanceCall _ callee _ =>
-      if isFunction callee.text then .returnExpr (predictPattern isFunction v.val)
+      if isFunction callee.text then .returnExpr (predictPatternMd isFunction v)
       else .returnCall callee.text ["$result"]
-    | _ => .returnExpr (predictPattern isFunction v.val)
+    | _ => .returnExpr (predictPatternMd isFunction v)
   | .Return none => .skip
-  | .LocalVariable name _ init =>
-    .initVar name.text (init.map fun i => predictPattern isFunction i.val)
+  | .LocalVariable name _ (some init) =>
+    .initVar name.text (some (predictPatternMd isFunction init))
+  | .LocalVariable name _ none =>
+    .initVar name.text none
   | .Assign [⟨.Identifier targetId, _⟩] value =>
     match value.val with
     | .StaticCall callee _ =>
@@ -546,6 +610,9 @@ partial def predictPattern (isFunction : String → Bool) : StmtExpr → Transla
     | _ => .expr [targetId.text]
   | .New className => .expr ["increment", className.text]
   | _ => .skip
+  termination_by sizeOf expr
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
 
 /-! ### Translation pattern properties (proven via predictPatternTop) -/
 
@@ -628,14 +695,16 @@ public theorem referencedNames_initVar_none (name : String) :
   TranslationPattern.referencedNames (.initVar name none) = [name] := by
   simp [TranslationPattern.referencedNames]
 
-/-! ### Axioms for partial predictPattern (recursive cases only) -/
+/-! ### Proven equation for predictPattern (was axiom, now proven via mutual .eq_def) -/
 
-/-- Local variable with initializer — axiom because predictPattern is partial -/
-public axiom predictPattern_local_var_init
+/-- Local variable with initializer — proven via mutual definition equation -/
+public theorem predictPattern_local_var_init
   (isFunction : String → Bool) (name : Identifier) (ty : WithMetadata HighType)
   (init : WithMetadata StmtExpr) :
   predictPattern isFunction (.LocalVariable name ty (some init)) =
-    .initVar name.text (some (predictPattern isFunction init.val))
+    .initVar name.text (some (predictPattern isFunction init.val)) := by
+  rw [predictPattern.eq_def]
+  simp [predictPatternMd.eq_def]
 
 /-! ## Body translation model
 This enables P1 (name consistency): every referenced name
@@ -647,41 +716,48 @@ should exist as a declaration.
 Names referenced in a Laurel expression after translation.
 -/
 
-end -- public section
+mutual
+/-- Names referenced in a WithMetadata StmtExpr. -/
+def referencedNamesInExprMdInner (e : StmtExprMd) : List String := referencedNamesInExprVal e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
 
-/-- Names referenced in a Laurel expression.
-    `partial` because StmtExpr contains List (WithMetadata StmtExpr)
-    which prevents structural recursion. Validated by differential tests. -/
-public partial def referencedNamesInExprVal : StmtExpr → List String
+/-- Names referenced in a Laurel expression. -/
+def referencedNamesInExprVal (expr : StmtExpr) : List String :=
+  match _h : expr with
   | .StaticCall callee args =>
-    [callee.text] ++ args.flatMap (fun a => referencedNamesInExprVal a.val)
+    [callee.text] ++ args.attach.flatMap (fun ⟨a, _⟩ => referencedNamesInExprMdInner a)
   | .InstanceCall _ callee args =>
-    [callee.text] ++ args.flatMap (fun a => referencedNamesInExprVal a.val)
+    [callee.text] ++ args.attach.flatMap (fun ⟨a, _⟩ => referencedNamesInExprMdInner a)
   | .FieldSelect target _ =>
-    ["readField"] ++ referencedNamesInExprVal target.val
+    ["readField"] ++ referencedNamesInExprMdInner target
   | .Assign targets v =>
-    targets.flatMap (fun t => referencedNamesInExprVal t.val) ++ referencedNamesInExprVal v.val
+    targets.attach.flatMap (fun ⟨t, _⟩ => referencedNamesInExprMdInner t) ++ referencedNamesInExprMdInner v
   | .New _ => ["increment"]
-  | .LocalVariable _ _ (some init) => referencedNamesInExprVal init.val
-  | .Block stmts _ => stmts.flatMap (fun s => referencedNamesInExprVal s.val)
+  | .LocalVariable _ _ (some init) => referencedNamesInExprMdInner init
+  | .Block stmts _ => stmts.attach.flatMap (fun ⟨s, _⟩ => referencedNamesInExprMdInner s)
   | .IfThenElse c t (some el) =>
-    referencedNamesInExprVal c.val ++ referencedNamesInExprVal t.val ++ referencedNamesInExprVal el.val
+    referencedNamesInExprMdInner c ++ referencedNamesInExprMdInner t ++ referencedNamesInExprMdInner el
   | .IfThenElse c t none =>
-    referencedNamesInExprVal c.val ++ referencedNamesInExprVal t.val
+    referencedNamesInExprMdInner c ++ referencedNamesInExprMdInner t
   | .While c _ _ body =>
-    referencedNamesInExprVal c.val ++ referencedNamesInExprVal body.val
-  | .Return (some v) => referencedNamesInExprVal v.val
+    referencedNamesInExprMdInner c ++ referencedNamesInExprMdInner body
+  | .Return (some v) => referencedNamesInExprMdInner v
   | _ => []
+  termination_by sizeOf expr
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
 
-/-- Trusted equation: FieldSelect case. True by inspection of referencedNamesInExprVal. -/
-public axiom referencedNamesInExprVal_fieldSelect (target : WithMetadata StmtExpr) (fieldId : Identifier) :
-  referencedNamesInExprVal (.FieldSelect target fieldId) = ["readField"] ++ referencedNamesInExprVal target.val
+/-- Proven: FieldSelect case. -/
+public theorem referencedNamesInExprVal_fieldSelect (target : WithMetadata StmtExpr) (fieldId : Identifier) :
+  referencedNamesInExprVal (.FieldSelect target fieldId) = ["readField"] ++ referencedNamesInExprVal target.val := by
+  rw [referencedNamesInExprVal.eq_def]
+  simp [referencedNamesInExprMdInner.eq_def]
 
-/-- Trusted equation: New case. True by inspection of referencedNamesInExprVal. -/
-public axiom referencedNamesInExprVal_new (className : Identifier) :
-  referencedNamesInExprVal (.New className) = ["increment"]
-
-public section
+/-- Proven: New case. -/
+public theorem referencedNamesInExprVal_new (className : Identifier) :
+  referencedNamesInExprVal (.New className) = ["increment"] := by
+  rw [referencedNamesInExprVal.eq_def]
 
 def referencedNamesInExprMd (e : WithMetadata StmtExpr) : List String :=
   referencedNamesInExprVal e.val
@@ -923,39 +999,65 @@ public theorem translateExpr_identifier_preserves_name (name : Identifier) :
     e = .fvar () ⟨name.text, ()⟩ none := by
   exact ⟨_, by simp [translateExprTop], rfl⟩
 
-public partial def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
-  match expr with
+mutual
+def translateExprModelMd (e : StmtExprMd) : Core.Expression.Expr := translateExprModel e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
+
+public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
+  match _h : expr with
   | .LiteralBool b => .const () (.boolConst b)
   | .LiteralInt i => .const () (.intConst i)
   | .LiteralString s => .const () (.strConst s)
-  | .LiteralDecimal _ => .const () (.realConst 0)  -- simplified: decimal conversion not modeled
+  | .LiteralDecimal _ => .const () (.realConst 0)
   | .Identifier name => .fvar () ⟨name.text, ()⟩ none
   | .PrimitiveOp .Eq [e1, e2] =>
-    .eq () (translateExprModel e1.val) (translateExprModel e2.val)
+    .eq () (translateExprModelMd e1) (translateExprModelMd e2)
   | .PrimitiveOp .Not [e] =>
-    .app () (.op () ⟨"Bool.Not", ()⟩ none) (translateExprModel e.val)
+    .app () (.op () ⟨"Bool.Not", ()⟩ none) (translateExprModelMd e)
   | .PrimitiveOp op [e1, e2] =>
     let opName := match op with
       | .Add => "Int.Add" | .Sub => "Int.Sub" | .Mul => "Int.Mul"
       | .Lt => "Int.Lt" | .Leq => "Int.Le" | .Gt => "Int.Gt" | .Geq => "Int.Ge"
       | .And => "Bool.And" | .Or => "Bool.Or"
       | _ => "op"
-    .app () (.app () (.op () ⟨opName, ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val)
+    .app () (.app () (.op () ⟨opName, ()⟩ none) (translateExprModelMd e1)) (translateExprModelMd e2)
   | .StaticCall callee args =>
-    args.foldl (fun acc a => .app () acc (translateExprModel a.val))
+    args.attach.foldl (fun acc ⟨a, _⟩ => .app () acc (translateExprModelMd a))
       (.op () ⟨callee.text, ()⟩ none)
   | .InstanceCall _ callee args =>
-    args.foldl (fun acc a => .app () acc (translateExprModel a.val))
+    args.attach.foldl (fun acc ⟨a, _⟩ => .app () acc (translateExprModelMd a))
       (.op () ⟨callee.text, ()⟩ none)
   | .IfThenElse cond thenB (some elseB) =>
-    .ite () (translateExprModel cond.val) (translateExprModel thenB.val) (translateExprModel elseB.val)
-  | .Block [single] _ => translateExprModel single.val
-  | .Return (some v) => translateExprModel v.val
+    .ite () (translateExprModelMd cond) (translateExprModelMd thenB) (translateExprModelMd elseB)
+  | .Block [single] _ => translateExprModelMd single
+  | .Return (some v) => translateExprModelMd v
   | .Forall ⟨name, _⟩ _ body =>
-    .all () name.text none (translateExprModel body.val)
+    .all () name.text none (translateExprModelMd body)
   | .Exists ⟨name, _⟩ _ body =>
-    .exist () name.text none (translateExprModel body.val)
+    .exist () name.text none (translateExprModelMd body)
   | _ => .const () (.boolConst true)
+  termination_by sizeOf expr
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
+
+/-! ### Expression translation equation lemmas (exported for use in other modules) -/
+
+@[simp] public theorem translateExprModel_eq_literalBool (b : Bool) :
+  translateExprModel (.LiteralBool b) = .const () (.boolConst b) := by
+  rw [translateExprModel.eq_def]
+
+@[simp] public theorem translateExprModel_eq_literalInt (i : Int) :
+  translateExprModel (.LiteralInt i) = .const () (.intConst i) := by
+  rw [translateExprModel.eq_def]
+
+@[simp] public theorem translateExprModel_eq_literalString (s : String) :
+  translateExprModel (.LiteralString s) = .const () (.strConst s) := by
+  rw [translateExprModel.eq_def]
+
+@[simp] public theorem translateExprModel_eq_identifier (name : Identifier) :
+  translateExprModel (.Identifier name) = .fvar () ⟨name.text, ()⟩ none := by
+  rw [translateExprModel.eq_def]
 
 /-! ## Statement translation model -/
 
@@ -966,12 +1068,18 @@ public def modelExceptionPropagation : Core.Statement :=
     .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
   Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some "$body") .empty] [] .empty
 
+mutual
+def translateStmtModelMd (isFunction : String → Bool) (outputParams : List String) (e : StmtExprMd) : Core.Statements :=
+  translateStmtModel isFunction outputParams e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
+
 /-- Translate a Laurel statement to Core statements -/
-public partial def translateStmtModel
+public def translateStmtModel
   (isFunction : String → Bool)
   (outputParams : List String)
   (stmt : StmtExpr) : Core.Statements :=
-  match stmt with
+  match _h : stmt with
   | .Return (some v) =>
     match outputParams.head? with
     | some outName =>
@@ -981,7 +1089,7 @@ public partial def translateStmtModel
     | none => []
   | .Return none => [Imperative.Stmt.exit (some "$body") .empty]
   | .Block stmts _ =>
-    stmts.flatMap fun s => translateStmtModel isFunction outputParams s.val
+    stmts.attach.flatMap fun ⟨s, _⟩ => translateStmtModelMd isFunction outputParams s
   | .LocalVariable id ty (some init) =>
     match init.val with
     | .StaticCall callee args =>
@@ -1013,9 +1121,9 @@ public partial def translateStmtModel
       [Core.Statement.set ⟨targetId.text, ()⟩ coreExpr .empty]
   | .IfThenElse cond thenB elseB =>
     let bcond := translateExprModel cond.val
-    let bthen := translateStmtModel isFunction outputParams thenB.val
+    let bthen := translateStmtModelMd isFunction outputParams thenB
     let belse := match elseB with
-      | some e => translateStmtModel isFunction outputParams e.val
+      | some e => translateStmtModelMd isFunction outputParams e
       | none => []
     [Imperative.Stmt.ite bcond bthen belse .empty]
   | .StaticCall callee args =>
@@ -1025,6 +1133,24 @@ public partial def translateStmtModel
       [Core.Statement.call [⟨"$result", ()⟩] callee.text coreArgs .empty,
        modelExceptionPropagation]
   | _ => []
+  termination_by sizeOf stmt
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
+
+/-! ### Statement translation equation lemmas -/
+
+@[simp] public theorem translateStmtModel_eq_return_none
+  (isFunction : String → Bool) (outputParams : List String) :
+  translateStmtModel isFunction outputParams (.Return none) =
+    [Imperative.Stmt.exit (some "$body") .empty] := by
+  rw [translateStmtModel.eq_def]
+
+@[simp] public theorem translateStmtModel_eq_local_no_init
+  (isFunction : String → Bool) (outputParams : List String)
+  (id : Identifier) (ty : WithMetadata HighType) :
+  translateStmtModel isFunction outputParams (.LocalVariable id ty none) =
+    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty] := by
+  rw [translateStmtModel.eq_def]
 
 /-! ## Procedure and program assembly model -/
 
@@ -1033,7 +1159,7 @@ public def translateParamModel (p : Parameter) : Lambda.Identifier Unit × Lambd
   (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName p.type.val) [])
 
 /-- Assemble a Laurel procedure into a Core procedure declaration -/
-public partial def translateProcModel
+public def translateProcModel
   (isFunction : String → Bool)
   (proc : Procedure) : Core.Decl :=
   let inputs := proc.inputs.map translateParamModel
@@ -1058,7 +1184,7 @@ public partial def translateProcModel
   .proc { header, spec, body }
 
 /-- Assemble a full Core.Program from a Laurel Program -/
-public partial def translateProgramModel (program : Program) : Core.Program :=
+public def translateProgramModel (program : Program) : Core.Program :=
   let withDefs := { program with
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
     types := coreDefinitionsForLaurel.types ++ program.types
@@ -1072,12 +1198,22 @@ public partial def translateProgramModel (program : Program) : Core.Program :=
   -- Instance procedure declarations
   let instanceProcs := withDefs.types.foldl (fun acc td =>
     match td with
-    | .Composite ct => acc ++ ct.instanceProcedures.filter (!·.body.isExternal)
+    | .Composite ct => acc ++ (ct.instanceProcedures.filter (!·.body.isExternal)
       |>.map fun proc => { proc with
-        name := { proc.name with text := qualifiedName ct.name.text proc.name.text } }
+        name := { proc.name with text := qualifiedName ct.name.text proc.name.text } })
     | _ => acc) ([] : List Procedure)
-  let (_, instanceProcProcs) := instanceProcs.partition (·.isFunctional)
+  let (instanceFuncProcs, instanceProcProcs) := instanceProcs.partition (·.isFunctional)
   let instanceProcDecls := instanceProcProcs.map (translateProcModel isFunc)
+  -- Instance function declarations (isFunctional instance procedures → Core functions)
+  let instanceFuncDecls := instanceFuncProcs.map fun proc =>
+    let inputs := proc.inputs.map translateParamModel
+    let outputTy := match proc.outputs.head? with
+      | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
+      | none => Lambda.LMonoTy.tcons "bool" []
+    let body := match proc.body with
+      | .Transparent b => some (translateExprModel b.val)
+      | _ => none
+    Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body }
   -- Datatypes: translate each Laurel datatype to a Core type decl
   let datatypes := withDefs.types.filterMap fun td => match td with
     | .Datatype dt => some dt | _ => none
@@ -1183,8 +1319,49 @@ public partial def translateProgramModel (program : Program) : Core.Program :=
       md := .empty
     }
     translateProcModel isFunc witnessProc
-  { decls := [exceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ heapFuncDecls ++
-    constraintFuncDecls ++ externalFuncDecls ++ transparentFuncDecls ++
+  -- Read function axioms: ∀ v: int. readIntN(BoxInt(v)) == v
+  -- Emitted when there are int fields on composites (which means BoxInt will exist).
+  -- Also emitted for constrained int types (int8, int16, int32, etc.) since they
+  -- are eliminated to int by the constrained type elimination pass.
+  let fields := allFields withDefs
+  let constrainedIntNames := withDefs.types.filterMap fun td => match td with
+    | .Constrained ct => match ct.base.val with | .TInt => some ct.name.text | _ => none
+    | _ => none
+  let hasIntField := fields.any fun (_, f) => match f.type.val with
+    | .TInt => true
+    | .UserDefined name => constrainedIntNames.contains name.text
+    | _ => false
+  let hasCompositeProcs := !(nonExternalInstanceProcs withDefs).isEmpty
+  let readFuncAxioms : List Core.Decl :=
+    if hasIntField && hasCompositeProcs then
+      [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].map
+        fun (readName, constrName) =>
+          let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
+          let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
+          let v : Core.Expression.Expr := .bvar () 0
+          let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
+          let axiomExpr : Core.Expression.Expr := .all () "v" (some Lambda.LMonoTy.int) body
+          Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr }
+    else []
+  -- Ancestor functions: one per composite + ancestorsPerType
+  let composites := allComposites withDefs
+  let ancestorDecls : List Core.Decl := if composites.isEmpty then [] else
+    let perType := composites.map fun ct =>
+      Core.Decl.func {
+        name := ⟨"ancestorsFor" ++ ct.name.text, ()⟩, typeArgs := [],
+        inputs := [],
+        output := Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "TypeTag" [], Lambda.LMonoTy.bool],
+        body := none }
+    let combined := Core.Decl.func {
+      name := ⟨"ancestorsPerType", ()⟩, typeArgs := [],
+      inputs := [],
+      output := Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "TypeTag" [],
+        Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "TypeTag" [], Lambda.LMonoTy.bool]],
+      body := none }
+    perType ++ [combined]
+  { decls := [exceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ readFuncAxioms ++
+    ancestorDecls ++ heapFuncDecls ++
+    constraintFuncDecls ++ externalFuncDecls ++ transparentFuncDecls ++ instanceFuncDecls ++
     procDecls ++ instanceProcDecls ++ witnessProcDecls }
 
 -- Note: model_first_decl_is_exception_result is true by construction

@@ -315,12 +315,63 @@ private theorem elimProcedure_id (proc : Procedure) (s : ElimHoleState)
     | .Opaque _ (some impl) _ => noHolesMd impl = true
     | _ => True) :
   ∃ s', elimProcedure proc s = (proc, s') ∧ s'.generatedFunctions = s.generatedFunctions := by
-  sorry
+  unfold elimProcedure
+  have stId := fun (a : StmtExprMd) (h : noHolesMd a = true) =>
+    show elimStmt a = pure a from elimStmt_pure a h fun s => elimStmt_id a s h
+  obtain ⟨pn, pi, po, ppc, pd, pdec, pf, pb, pmd⟩ := proc
+  dsimp only at hProc ⊢
+  cases pb with
+  | Transparent bodyExpr =>
+    simp only [stId _ hProc, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+      Functor.map, StateT.map, bind, StateT.bind, pure, StateT.pure, pure_bind]
+    exact Exists.intro _ (And.intro rfl rfl)
+  | Opaque postconds impl modif =>
+    cases impl with
+    | some implExpr =>
+      simp only [stId _ hProc, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+        Functor.map, StateT.map, bind, StateT.bind, pure, StateT.pure, pure_bind]
+      exact Exists.intro _ (And.intro rfl rfl)
+    | none =>
+      simp [modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+        Functor.map, StateT.map, bind, StateT.bind, pure, StateT.pure, pure_bind]
+      exact Exists.intro _ (And.intro rfl rfl)
+  | Abstract _ =>
+    simp [modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+      Functor.map, StateT.map, bind, StateT.bind, pure, StateT.pure, pure_bind]
+    exact Exists.intro _ (And.intro rfl rfl)
+  | External =>
+    simp [modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+      Functor.map, StateT.map, bind, StateT.bind, pure, StateT.pure, pure_bind]
+    exact Exists.intro _ (And.intro rfl rfl)
 
 /-- eliminateHoles is a no-op on programs with no deterministic holes. -/
 public theorem eliminateHoles_noop (program : Program)
   (hNoHoles : programNoHoles program = true) :
   eliminateHoles program = program := by
-  sorry
+  unfold eliminateHoles
+  suffices ∀ (procs : List Procedure) (s : ElimHoleState),
+    (∀ proc ∈ procs, match proc.body with
+      | .Transparent b => noHolesMd b = true
+      | .Opaque _ (some impl) _ => noHolesMd impl = true
+      | _ => True) →
+    s.generatedFunctions = [] →
+    ∃ s', (procs.mapM elimProcedure) s = (procs, s') ∧ s'.generatedFunctions = [] from by
+    have hAll : ∀ proc ∈ program.staticProcedures, match proc.body with
+      | .Transparent b => noHolesMd b = true
+      | .Opaque _ (some impl) _ => noHolesMd impl = true
+      | _ => True := by
+      intro proc hproc
+      have := List.all_eq_true.mp hNoHoles proc hproc
+      unfold programNoHoles at this; split <;> simp_all
+    obtain ⟨fs, hrun, hgen⟩ := this _ {} hAll rfl
+    simp only [StateT.run, hrun, hgen, List.nil_append]
+  intro procs s hAll hGen
+  induction procs generalizing s with
+  | nil => exact ⟨s, rfl, hGen⟩
+  | cons proc rest ih =>
+    obtain ⟨s1, hElim, hGen1⟩ := elimProcedure_id proc s (hAll proc (.head rest))
+    have ⟨s2, hRest, hGen2⟩ := ih s1 (fun p hp => hAll p (.tail proc hp)) (hGen1 ▸ hGen)
+    exact ⟨s2, by
+      simp only [List.mapM_cons, bind, StateT.bind, pure, StateT.pure, hElim, hRest], hGen2⟩
 
 end Laurel

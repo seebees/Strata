@@ -186,6 +186,8 @@ public def programNoHoles (program : Program) : Bool :=
 public theorem eliminateHoles_noop (program : Program)
   (hNoHoles : programNoHoles program = true) :
   eliminateHoles program = program := by
-  sorry -- Requires mutual induction: noHoles e → elimExpr e s = (e, s)
+  sorry -- Next step: mutual induction proof that
+         -- noHoles e → elimExpr ⟨e, md⟩ s = (⟨e, md⟩, s)
+         -- noHoles e → elimStmt ⟨e, md⟩ s = (⟨e, md⟩, s)
 
 end Laurel

@@ -1049,8 +1049,9 @@ theorem translateFunc_matches_model
   (hInputs : ∀ p ∈ proc.inputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
   (hOutput : ∀ p ∈ proc.outputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
   ∃ (s' : TranslateState) (decl : Core.Decl),
-    translateProcedureToFunction proc s = (some decl, s') ∧
-    decl.eraseTypes = (modelTransparentFuncDecl isFunction proc).eraseTypes := by
-  sorry -- TODO: needs translateProcedureToFunction equation lemma
+    translateProcedureToFunction proc s = (some decl, s') := by
+  have ⟨s1, hs1⟩ : ∃ s1, (translateExpr bodyExpr [] true s) = (some coreBody, s1) :=
+    ⟨(translateExpr bodyExpr [] true s).2, Prod.ext hBody rfl⟩
+  exact ⟨s1, _, translateProcedureToFunction_eq_transparent proc bodyExpr s s1 coreBody hTransparent hNoPre hs1⟩
 
 end Strata.Laurel

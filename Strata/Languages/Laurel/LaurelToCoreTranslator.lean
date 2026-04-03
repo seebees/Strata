@@ -1019,6 +1019,13 @@ end -- public section
   unfold OptionT.bind OptionT.mk
   simp only [bind, StateT.bind, h]
 
+@[simp] public theorem TranslateM.map_some (f : α → β) (m : TranslateM α) (s s1 : TranslateState) (a : α)
+  (h : m s = (some a, s1)) :
+  (f <$> m) s = (some (f a), s1) := by
+  show OptionT.bind m (OptionT.pure ∘ f) s = _
+  unfold OptionT.bind OptionT.mk OptionT.pure
+  simp [bind, StateT.bind, h]; rfl
+
 /-! ### translateType equation lemmas -/
 
 @[simp] public theorem translateType_int (model : SemanticModel) (md : MetaData) :
@@ -1384,5 +1391,31 @@ private theorem binOp_eq (op : Core.Expression.Expr) (e1 e2 : StmtExprMd) (md : 
   rw [List.flatMapM_cons]
   simp only [TranslateM.bind_some _ _ _ _ _ hHead,
     TranslateM.bind_some _ _ _ _ _ hTail, TranslateM.pure_eq]
+
+/-! ### translateProcedureToFunction equation lemma -/
+
+@[simp] public theorem translateProcedureToFunction_eq_transparent
+  (proc : Procedure) (bodyExpr : StmtExprMd)
+  (s s1 : TranslateState) (coreBody : Core.Expression.Expr)
+  (hTransparent : proc.body = .Transparent bodyExpr)
+  (hNoPre : proc.preconditions = [])
+  (hBody : translateExpr bodyExpr [] true s = (some coreBody, s1)) :
+  translateProcedureToFunction proc s =
+    (some (.func {
+      name := ⟨proc.name.text, ()⟩
+      typeArgs := []
+      inputs := proc.inputs.map (translateParameterToCore s.model)
+      output := match proc.outputs.head? with
+        | some p => translateType s.model p.type
+        | none => LMonoTy.int
+      body := some coreBody
+      preconditions := []
+    }), s1) := by
+  unfold translateProcedureToFunction
+  simp only [TranslateM.get_bind, hTransparent]
+  rw [hNoPre, List.mapM_nil]
+  simp only [bind, OptionT.bind, StateT.bind, OptionT.mk, TranslateM.pure_eq,
+    TranslateM.map_some _ _ _ _ _ hBody]
+  rfl
 
 end Laurel

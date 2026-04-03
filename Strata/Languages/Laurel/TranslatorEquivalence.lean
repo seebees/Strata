@@ -7,6 +7,7 @@ module
 import Strata.Languages.Laurel.TranslatorModel
 import Strata.Languages.Laurel.TranslatorModelProperties
 import Strata.Languages.Laurel.LaurelToCoreTranslator
+import Strata.Languages.Laurel.DatatypeGrouping
 
 /-!
 # Translator Equivalence
@@ -1053,5 +1054,18 @@ theorem translateFunc_matches_model
   have ⟨s1, hs1⟩ : ∃ s1, (translateExpr bodyExpr [] true s) = (some coreBody, s1) :=
     ⟨(translateExpr bodyExpr [] true s).2, Prod.ext hBody rfl⟩
   exact ⟨s1, _, translateProcedureToFunction_eq_transparent proc bodyExpr s s1 coreBody hTransparent hNoPre hs1⟩
+
+/-! ### Datatype declaration correspondence -/
+
+/-- When a program has no Datatype type definitions, the datatype translation
+    produces []. This closes the last gap in the declaration list. -/
+theorem no_datatypes_no_decls
+  (types : List TypeDefinition) (model : SemanticModel)
+  (hNoDatatypes : types.filterMap (fun td => match td with | .Datatype dt => some dt | _ => none) = []) :
+  let laurelDatatypes := types.filterMap fun td => match td with | .Datatype dt => some dt | _ => none
+  let ldatatypes := laurelDatatypes.map (translateDatatypeDefinition model)
+  let groups := groupDatatypes laurelDatatypes ldatatypes
+  groups.map (fun group => Core.Decl.type (.data group)) = [] := by
+  simp [hNoDatatypes, groupDatatypes_nil]
 
 end Strata.Laurel

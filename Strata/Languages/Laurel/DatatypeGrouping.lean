@@ -66,4 +66,8 @@ public def groupDatatypes (dts : List DatatypeDefinition)
       dtsArr[idx]? |>.bind fun dt => ldtMap.get? dt.name.text
     if members.isEmpty then none else some members
 
+@[simp] public theorem groupDatatypes_nil (ldts : List (Lambda.LDatatype Unit)) :
+  groupDatatypes [] ldts = [] := by
+  unfold groupDatatypes; rfl
+
 end Strata.Laurel

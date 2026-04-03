@@ -978,3 +978,38 @@ def builtinFunctions : Array String :=
 
 end
 end Core
+
+/-! ### Operator eraseTypes lemmas -/
+namespace Core
+
+@[simp] public theorem boolNotOp_eraseTypes : boolNotOp.eraseTypes = .op () ⟨"Bool.Not", ()⟩ none := by
+  unfold boolNotOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem boolAndOp_eraseTypes : boolAndOp.eraseTypes = .op () ⟨"Bool.And", ()⟩ none := by
+  unfold boolAndOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem boolOrOp_eraseTypes : boolOrOp.eraseTypes = .op () ⟨"Bool.Or", ()⟩ none := by
+  unfold boolOrOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem intAddOp_eraseTypes : intAddOp.eraseTypes = .op () ⟨"Int.Add", ()⟩ none := by
+  unfold intAddOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem intSubOp_eraseTypes : intSubOp.eraseTypes = .op () ⟨"Int.Sub", ()⟩ none := by
+  unfold intSubOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem intMulOp_eraseTypes : intMulOp.eraseTypes = .op () ⟨"Int.Mul", ()⟩ none := by
+  unfold intMulOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem intLtOp_eraseTypes : intLtOp.eraseTypes = .op () ⟨"Int.Lt", ()⟩ none := by
+  unfold intLtOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem intLeOp_eraseTypes : intLeOp.eraseTypes = .op () ⟨"Int.Le", ()⟩ none := by
+  unfold intLeOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem intGtOp_eraseTypes : intGtOp.eraseTypes = .op () ⟨"Int.Gt", ()⟩ none := by
+  unfold intGtOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+@[simp] public theorem intGeOp_eraseTypes : intGeOp.eraseTypes = .op () ⟨"Int.Ge", ()⟩ none := by
+  unfold intGeOp Lambda.WFLFunc.opExpr Lambda.LFunc.opExpr Lambda.LExpr.eraseTypes; rfl
+
+end Core

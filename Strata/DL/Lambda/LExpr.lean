@@ -415,7 +415,7 @@ def denoteString {T : LExprParams} (e : LExpr T.mono) : Option String :=
   | .strConst _ s => some s
   | _ => none
 
-def mkApp {T : LExprParamsT} (m : T.base.Metadata) (fn : LExpr T) (args : List (LExpr T)) : LExpr T :=
+@[expose] def mkApp {T : LExprParamsT} (m : T.base.Metadata) (fn : LExpr T) (args : List (LExpr T)) : LExpr T :=
   match args with
   | [] => fn
   | a :: rest =>
@@ -1169,6 +1169,31 @@ elab "es[" e:lexpr "]" : term => elabLExpr (T:=⟨Unit, Unit⟩) e
 end Syntax
 
 ---------------------------------------------------------------------
+
+@[simp] public theorem eraseTypes_const {T : LExprParamsT} (m : T.base.Metadata) (c : LConst) :
+  (LExpr.const m c : LExpr T).eraseTypes = .const m c := by unfold eraseTypes; rfl
+
+@[simp] public theorem eraseTypes_fvar {T : LExprParamsT} (m : T.base.Metadata)
+  (name : Identifier T.base.IDMeta) (ty : Option T.TypeType) :
+  (LExpr.fvar m name ty : LExpr T).eraseTypes = .fvar m name none := by
+  simp only [eraseTypes]
+
+@[simp] public theorem eraseTypes_op {T : LExprParamsT} (m : T.base.Metadata)
+  (o : Identifier T.base.IDMeta) (ty : Option T.TypeType) :
+  (LExpr.op m o ty : LExpr T).eraseTypes = .op m o none := by
+  simp only [eraseTypes]
+
+@[simp] public theorem eraseTypes_app {T : LExprParamsT} (m : T.base.Metadata) (e1 e2 : LExpr T) :
+  (LExpr.app m e1 e2).eraseTypes = .app m e1.eraseTypes e2.eraseTypes := by
+  simp only [eraseTypes]
+
+@[simp] public theorem eraseTypes_eq' {T : LExprParamsT} (m : T.base.Metadata) (e1 e2 : LExpr T) :
+  (LExpr.eq m e1 e2).eraseTypes = .eq m e1.eraseTypes e2.eraseTypes := by
+  simp only [eraseTypes]
+
+@[simp] public theorem eraseTypes_ite' {T : LExprParamsT} (m : T.base.Metadata) (c t f : LExpr T) :
+  (LExpr.ite m c t f).eraseTypes = .ite m c.eraseTypes t.eraseTypes f.eraseTypes := by
+  simp only [eraseTypes]
 
 end LExpr
 end -- public section

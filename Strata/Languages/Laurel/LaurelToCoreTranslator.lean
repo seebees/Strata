@@ -698,7 +698,7 @@ private def translateChecks (checks : List StmtExprMd) (labelBase : String)
 /--
 Translate Laurel Parameter to Core Signature entry
 -/
-def translateParameterToCore (model : SemanticModel) (param : Parameter) : (Core.CoreIdent × LMonoTy) :=
+@[expose] def translateParameterToCore (model : SemanticModel) (param : Parameter) : (Core.CoreIdent × LMonoTy) :=
   let ident := ⟨param.name.text, ()⟩
   let ty := translateType model param.type
   (ident, ty)
@@ -1003,5 +1003,386 @@ end -- public section
 @[simp] public theorem translateExpr_eq_literalString (str : String) (md : MetaData) (bv : List Identifier) (pc : Bool) (s : TranslateState) :
   translateExpr ⟨.LiteralString str, md⟩ bv pc s = (some (.const () (.strConst str)), s) := by
   unfold translateExpr; rfl
+
+/-! ### Monad reduction lemmas for TranslateM -/
+
+@[simp] public theorem TranslateM.get_bind (f : TranslateState → TranslateM α) (s : TranslateState) :
+  (do let st ← get; f st) s = f s s := by rfl
+
+@[simp] public theorem TranslateM.pure_eq (a : α) (s : TranslateState) :
+  (pure a : TranslateM α) s = (some a, s) := by rfl
+
+@[simp] public theorem TranslateM.bind_some (m : TranslateM α) (f : α → TranslateM β) (s s' : TranslateState) (a : α)
+  (h : m s = (some a, s')) :
+  (do let x ← m; f x) s = f a s' := by
+  show OptionT.bind m f s = f a s'
+  unfold OptionT.bind OptionT.mk
+  simp only [bind, StateT.bind, h]
+
+/-! ### translateType equation lemmas -/
+
+@[simp] public theorem translateType_int (model : SemanticModel) (md : MetaData) :
+  translateType model ⟨.TInt, md⟩ = LMonoTy.tcons "int" [] := by unfold translateType; rfl
+
+@[simp] public theorem translateType_bool (model : SemanticModel) (md : MetaData) :
+  translateType model ⟨.TBool, md⟩ = LMonoTy.tcons "bool" [] := by unfold translateType; rfl
+
+@[simp] public theorem translateType_string (model : SemanticModel) (md : MetaData) :
+  translateType model ⟨.TString, md⟩ = LMonoTy.tcons "string" [] := by unfold translateType; rfl
+
+/-! ### translateExpr equation lemmas -/
+
+@[simp] public theorem translateExpr_eq_identifier_succeeds
+  (name : Identifier) (md : MetaData) (s : TranslateState)
+  (hNotResult : name.text ≠ "$result") (hNotSuccess : name.text ≠ "Success")
+  (hNotFailure : name.text ≠ "Failure")
+  (hNotField : ∀ owner f, s.model.get name ≠ .field owner f) :
+  ∃ r, (translateExpr ⟨.Identifier name, md⟩ [] false s).1 = some r ∧
+    (translateExpr ⟨.Identifier name, md⟩ [] false s).2 = s ∧
+    r.eraseTypes = .fvar () ⟨name.text, ()⟩ none := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, List.findIdx?]
+  have hr : (name.text == "$result") = false := by simp [BEq.beq, hNotResult]
+  have hs : (name.text == "Success" || name.text == "Failure") = false := by
+    simp [BEq.beq, Bool.or_eq_false_iff, hNotSuccess, hNotFailure]
+  simp [hr, hs]
+  match hm : s.model.get name with
+  | .field owner f => exact absurd hm (hNotField owner f)
+  | astNode => exact ⟨_, rfl, rfl, by simp [Lambda.LExpr.eraseTypes_fvar]⟩
+
+@[simp] public theorem translateExpr_eq_staticCall_noArgs
+  (callee : Identifier) (md : MetaData) (bv : List Identifier) (s : TranslateState) :
+  translateExpr ⟨.StaticCall callee [], md⟩ bv false s =
+    (some (.op () ⟨callee.text, ()⟩ none), s) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.pure_eq]
+  simp [List.attach, List.foldlM]
+
+@[simp] public theorem translateExpr_eq_staticCall_oneArg
+  (callee : Identifier) (a1 : StmtExprMd) (md : MetaData) (bv : List Identifier)
+  (s s1 : TranslateState) (r1 : Core.Expression.Expr)
+  (h1 : translateExpr a1 bv false s = (some r1, s1)) :
+  translateExpr ⟨.StaticCall callee [a1], md⟩ bv false s =
+    (some (.app () (.op () ⟨callee.text, ()⟩ none) r1), s1) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.pure_eq]
+  simp [List.attach, List.foldlM, bind, OptionT.bind, StateT.bind, OptionT.mk, h1, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_staticCall_twoArgs
+  (callee : Identifier) (a1 a2 : StmtExprMd) (md : MetaData) (bv : List Identifier)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr a1 bv false s = (some r1, s1))
+  (h2 : translateExpr a2 bv false s1 = (some r2, s2)) :
+  translateExpr ⟨.StaticCall callee [a1, a2], md⟩ bv false s =
+    (some (.app () (.app () (.op () ⟨callee.text, ()⟩ none) r1) r2), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.pure_eq]
+  simp [List.attach, List.foldlM, bind, OptionT.bind, StateT.bind, OptionT.mk, h1, h2, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_primEq
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2)) :
+  translateExpr ⟨.PrimitiveOp .Eq [e1, e2], md⟩ bv pc s =
+    (some (.eq () r1 r2), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_primNeq
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2)) :
+  translateExpr ⟨.PrimitiveOp .Neq [e1, e2], md⟩ bv pc s =
+    (some (.app () boolNotOp (.eq () r1 r2)), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_primNot
+  (e : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 : TranslateState) (r : Core.Expression.Expr)
+  (h : translateExpr e bv pc s = (some r, s1)) :
+  translateExpr ⟨.PrimitiveOp .Not [e], md⟩ bv pc s =
+    (some (.app () boolNotOp r), s1) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_ite
+  (cond thenB elseB : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 s3 : TranslateState) (rc rt re : Core.Expression.Expr)
+  (hc : translateExpr cond bv pc s = (some rc, s1))
+  (ht : translateExpr thenB bv pc s1 = (some rt, s2))
+  (he : translateExpr elseB bv pc s2 = (some re, s3)) :
+  translateExpr ⟨.IfThenElse cond thenB (some elseB), md⟩ bv pc s =
+    (some (.ite () rc rt re), s3) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ hc,
+    TranslateM.bind_some _ _ _ _ _ ht, TranslateM.bind_some _ _ _ _ _ he, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_primAnd
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2)) :
+  translateExpr ⟨.PrimitiveOp .And [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () boolAndOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_primOr
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2)) :
+  translateExpr ⟨.PrimitiveOp .Or [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () boolOrOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+
+-- Binary arithmetic/comparison ops (non-real)
+private theorem binOp_eq (op : Core.Expression.Expr) (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2)) :
+  (do let re1 ← translateExpr e1 bv pc; let re2 ← translateExpr e2 bv pc;
+      pure (LExpr.mkApp () op [re1, re2])) s = (some (LExpr.mkApp () op [r1, r2]), s2) := by
+  simp only [TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+
+@[simp] public theorem translateExpr_eq_primAdd_int
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
+  (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
+    | .TReal, _ | _, .TReal => False | _, _ => True) :
+  translateExpr ⟨.PrimitiveOp .Add [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () intAddOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+  split <;> simp_all
+
+@[simp] public theorem translateExpr_eq_primSub_int
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
+  (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
+    | .TReal, _ | _, .TReal => False | _, _ => True) :
+  translateExpr ⟨.PrimitiveOp .Sub [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () intSubOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+  split <;> simp_all
+
+@[simp] public theorem translateExpr_eq_primMul_int
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
+  (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
+    | .TReal, _ | _, .TReal => False | _, _ => True) :
+  translateExpr ⟨.PrimitiveOp .Mul [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () intMulOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+  split <;> simp_all
+
+@[simp] public theorem translateExpr_eq_primLt_int
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
+  (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
+    | .TReal, _ | _, .TReal => False | _, _ => True) :
+  translateExpr ⟨.PrimitiveOp .Lt [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () intLtOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+  split <;> simp_all
+
+@[simp] public theorem translateExpr_eq_primGt_int
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
+  (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
+    | .TReal, _ | _, .TReal => False | _, _ => True) :
+  translateExpr ⟨.PrimitiveOp .Gt [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () intGtOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+  split <;> simp_all
+
+@[simp] public theorem translateExpr_eq_primLeq_int
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
+  (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
+    | .TReal, _ | _, .TReal => False | _, _ => True) :
+  translateExpr ⟨.PrimitiveOp .Leq [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () intLeOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+  split <;> simp_all
+
+@[simp] public theorem translateExpr_eq_primGeq_int
+  (e1 e2 : StmtExprMd) (md : MetaData) (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+  (h1 : translateExpr e1 bv pc s = (some r1, s1))
+  (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
+  (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
+    | .TReal, _ | _, .TReal => False | _, _ => True) :
+  translateExpr ⟨.PrimitiveOp .Geq [e1, e2], md⟩ bv pc s =
+    (some (LExpr.mkApp () intGeOp [r1, r2]), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
+  split <;> simp_all
+
+/-! ### translateStmt equation lemmas -/
+
+@[simp] public theorem translateStmt_eq_return_none
+  (md : MetaData) (outputParams : List Parameter) (s : TranslateState) :
+  translateStmt outputParams ⟨.Return none, md⟩ s =
+    (some [Imperative.Stmt.exit (some "$body") md], s) := by
+  unfold translateStmt; simp only [TranslateM.get_bind, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_return_expr
+  (value : StmtExprMd) (md : MetaData) (outputParams : List Parameter)
+  (outParam : Parameter) (s s1 : TranslateState) (coreExpr : Core.Expression.Expr)
+  (hHead : outputParams.head? = some outParam)
+  (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a)
+  (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a)
+  (hExpr : translateExpr value [] false s = (some coreExpr, s1)) :
+  translateStmt outputParams ⟨.Return (some value), md⟩ s =
+    (some [Core.Statement.set ⟨outParam.name.text, ()⟩ coreExpr md,
+           Imperative.Stmt.exit (some "$body") md], s1) := by
+  unfold translateStmt; simp only [TranslateM.get_bind, hHead]
+  cases hv : value.val <;> simp_all [TranslateM.bind_some _ _ _ _ _ hExpr, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_ite_noElse
+  (cond thenB : StmtExprMd) (md : MetaData) (outputParams : List Parameter)
+  (s s1 s2 : TranslateState) (rc : Core.Expression.Expr) (rt : List Core.Statement)
+  (hc : translateExpr cond [] false s = (some rc, s1))
+  (ht : translateStmt outputParams thenB s1 = (some rt, s2)) :
+  translateStmt outputParams ⟨.IfThenElse cond thenB none, md⟩ s =
+    (some [Imperative.Stmt.ite rc rt [] .empty], s2) := by
+  unfold translateStmt
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ hc,
+    TranslateM.bind_some _ _ _ _ _ ht, TranslateM.pure_eq]; rfl
+
+@[simp] public theorem translateStmt_eq_ite_withElse
+  (cond thenB elseB : StmtExprMd) (md : MetaData) (outputParams : List Parameter)
+  (s s1 s2 s3 : TranslateState) (rc : Core.Expression.Expr) (rt re : List Core.Statement)
+  (hc : translateExpr cond [] false s = (some rc, s1))
+  (ht : translateStmt outputParams thenB s1 = (some rt, s2))
+  (he : translateStmt outputParams elseB s2 = (some re, s3)) :
+  translateStmt outputParams ⟨.IfThenElse cond thenB (some elseB), md⟩ s =
+    (some [Imperative.Stmt.ite rc rt re .empty], s3) := by
+  unfold translateStmt
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ hc,
+    TranslateM.bind_some _ _ _ _ _ ht, TranslateM.bind_some _ _ _ _ _ he, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_localVar_noInit
+  (id : Identifier) (ty : WithMetadata HighType)
+  (md : MetaData) (outputParams : List Parameter) (s : TranslateState) :
+  translateStmt outputParams ⟨.LocalVariable id ty none, md⟩ s =
+    (some [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (translateType s.model ty)) none md], s) := by
+  unfold translateStmt; simp only [TranslateM.get_bind, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_localVar_exprInit
+  (id : Identifier) (ty : WithMetadata HighType) (v : StmtExpr) (m : MetaData)
+  (md : MetaData) (outputParams : List Parameter)
+  (s s1 : TranslateState) (coreExpr : Core.Expression.Expr)
+  (hNotStaticCall : ∀ c a, v ≠ .StaticCall c a)
+  (hNotInstanceCall : ∀ t c a, v ≠ .InstanceCall t c a)
+  (hNotHole : ∀ n t, v ≠ .Hole n t)
+  (hExpr : translateExpr ⟨v, m⟩ [] false s = (some coreExpr, s1)) :
+  translateStmt outputParams ⟨.LocalVariable id ty (some ⟨v, m⟩), md⟩ s =
+    (some [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (translateType s.model ty)) (some coreExpr) md], s1) := by
+  unfold translateStmt; simp only [TranslateM.get_bind]
+  cases v <;> simp_all [TranslateM.bind_some _ _ _ _ _ hExpr, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_assign_expr
+  (targetId : Identifier) (targetMd : MetaData) (value : StmtExprMd)
+  (md : MetaData) (outputParams : List Parameter)
+  (s s1 : TranslateState) (coreExpr : Core.Expression.Expr)
+  (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a)
+  (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a)
+  (hExpr : translateExpr value [] false s = (some coreExpr, s1)) :
+  translateStmt outputParams ⟨.Assign [⟨.Identifier targetId, targetMd⟩] value, md⟩ s =
+    (some [Core.Statement.set ⟨targetId.text, ()⟩ coreExpr md], s1) := by
+  unfold translateStmt; simp only [TranslateM.get_bind]
+  cases hv : value.val <;> simp_all [TranslateM.bind_some _ _ _ _ _ hExpr, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_block_unlabeled
+  (stmts : List StmtExprMd) (md : MetaData) (outputParams : List Parameter)
+  (s s1 : TranslateState) (result : List Core.Statement)
+  (hInner : stmts.flatMapM (fun s => translateStmt outputParams s) s = (some result, s1)) :
+  translateStmt outputParams ⟨.Block stmts none, md⟩ s = (some result, s1) := by
+  unfold translateStmt
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ hInner, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_while
+  (cond : StmtExprMd) (invariants : List StmtExprMd) (decreasesExpr : Option StmtExprMd)
+  (body : StmtExprMd) (md : MetaData) (outputParams : List Parameter)
+  (s s1 : TranslateState) (condExpr : Core.Expression.Expr)
+  (s2 : TranslateState) (invExprs : List Core.Expression.Expr)
+  (s3 : TranslateState) (decExprCore : Option Core.Expression.Expr)
+  (s4 : TranslateState) (bodyStmts : List Core.Statement)
+  (hCond : translateExpr cond [] false s = (some condExpr, s1))
+  (hInvs : invariants.mapM translateExpr s1 = (some invExprs, s2))
+  (hDec : decreasesExpr.mapM translateExpr s2 = (some decExprCore, s3))
+  (hBody : translateStmt outputParams body s3 = (some bodyStmts, s4)) :
+  translateStmt outputParams ⟨.While cond invariants decreasesExpr body, md⟩ s =
+    (some [Imperative.Stmt.loop condExpr decExprCore invExprs bodyStmts md], s4) := by
+  unfold translateStmt
+  simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ hCond,
+    TranslateM.bind_some _ _ _ _ _ hInvs, TranslateM.bind_some _ _ _ _ _ hDec,
+    TranslateM.bind_some _ _ _ _ _ hBody, TranslateM.pure_eq]
+
+@[simp] public theorem translateStmt_eq_staticCall_proc
+  (callee : Identifier) (args : List StmtExprMd) (md : MetaData)
+  (outputParams : List Parameter)
+  (s s1 : TranslateState) (coreArgs : List Core.Expression.Expr)
+  (hNotFunc : s.model.isFunction callee = false)
+  (hArgs : (args.mapM (fun a => translateExpr a)) s = (some coreArgs, s1)) :
+  translateStmt outputParams ⟨.StaticCall callee args, md⟩ s =
+    (some [Core.Statement.call [⟨"$result", ()⟩] callee.text coreArgs md,
+      Imperative.Stmt.ite
+        (LExpr.app () (LExpr.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (LExpr.fvar () ⟨"$result", ()⟩ none))
+        [Imperative.Stmt.exit (some s1.exceptionTarget) md] [] md], s1) := by
+  unfold translateStmt
+  simp only [TranslateM.get_bind, hNotFunc]
+  norm_cast; simp only [ite_false]
+  have h1 : (List.mapM (fun a => translateExpr a) args >>= fun coreArgs => do
+    let __do_lift ← exceptionPropagationCheck md
+    pure ([Core.Statement.call [⟨"$result", ()⟩] callee.text coreArgs md] ++ __do_lift)) s =
+    (do let __do_lift ← exceptionPropagationCheck md
+        pure ([Core.Statement.call [⟨"$result", ()⟩] callee.text coreArgs md] ++ __do_lift)) s1 := by
+    simp only [bind, OptionT.bind, StateT.bind, OptionT.mk, hArgs]
+  rw [h1]; unfold exceptionPropagationCheck
+  simp only [TranslateM.get_bind, bind, OptionT.bind, StateT.bind, OptionT.mk, TranslateM.pure_eq]
+  rfl
+
+/-! ### flatMapM equation lemmas for translateStmt -/
+
+@[simp] public theorem flatMapM_translateStmt_nil
+  (outputParams : List Parameter) (s : TranslateState) :
+  (List.flatMapM (fun s => translateStmt outputParams s) [] : TranslateM _) s = (some [], s) := by
+  simp [List.flatMapM_nil, TranslateM.pure_eq]
+
+@[simp] public theorem flatMapM_translateStmt_cons
+  (outputParams : List Parameter)
+  (x : StmtExprMd) (xs : List StmtExprMd)
+  (s s1 s2 : TranslateState)
+  (r1 : List Core.Statement) (r2 : List Core.Statement)
+  (hHead : translateStmt outputParams x s = (some r1, s1))
+  (hTail : (List.flatMapM (fun s => translateStmt outputParams s) xs : TranslateM _) s1 = (some r2, s2)) :
+  (List.flatMapM (fun s => translateStmt outputParams s) (x :: xs) : TranslateM _) s = (some (r1 ++ r2), s2) := by
+  rw [List.flatMapM_cons]
+  simp only [TranslateM.bind_some _ _ _ _ _ hHead,
+    TranslateM.bind_some _ _ _ _ _ hTail, TranslateM.pure_eq]
 
 end Laurel

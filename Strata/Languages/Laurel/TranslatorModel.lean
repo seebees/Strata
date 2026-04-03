@@ -906,7 +906,7 @@ we investigate who is right.
 -/
 
 /-- Build the ExceptionResult datatype declaration -/
-def modelExceptionResultDecl : Core.Decl :=
+@[expose] def modelExceptionResultDecl : Core.Decl :=
   Core.Decl.type (.data [{
     name := "ExceptionResult"
     typeArgs := []
@@ -1013,6 +1013,8 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
   | .Identifier name => .fvar () ⟨name.text, ()⟩ none
   | .PrimitiveOp .Eq [e1, e2] =>
     .eq () (translateExprModelMd e1) (translateExprModelMd e2)
+  | .PrimitiveOp .Neq [e1, e2] =>
+    .app () (.op () ⟨"Bool.Not", ()⟩ none) (.eq () (translateExprModelMd e1) (translateExprModelMd e2))
   | .PrimitiveOp .Not [e] =>
     .app () (.op () ⟨"Bool.Not", ()⟩ none) (translateExprModelMd e)
   | .PrimitiveOp op [e1, e2] =>
@@ -1059,6 +1061,80 @@ end
   translateExprModel (.Identifier name) = .fvar () ⟨name.text, ()⟩ none := by
   rw [translateExprModel.eq_def]
 
+@[simp] public theorem translateExprModel_eq_primEq (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Eq [e1, e2]) =
+    .eq () (translateExprModel e1.val) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]
+  simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primNot (e : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Not [e]) =
+    .app () (.op () ⟨"Bool.Not", ()⟩ none) (translateExprModel e.val) := by
+  rw [translateExprModel.eq_def]
+  simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_ite (c t e : StmtExprMd) :
+  translateExprModel (.IfThenElse c t (some e)) =
+    .ite () (translateExprModel c.val) (translateExprModel t.val) (translateExprModel e.val) := by
+  rw [translateExprModel.eq_def]
+  simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primAdd (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Add [e1, e2]) =
+    .app () (.app () (.op () ⟨"Int.Add", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primSub (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Sub [e1, e2]) =
+    .app () (.app () (.op () ⟨"Int.Sub", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primMul (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Mul [e1, e2]) =
+    .app () (.app () (.op () ⟨"Int.Mul", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primLt (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Lt [e1, e2]) =
+    .app () (.app () (.op () ⟨"Int.Lt", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primGt (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Gt [e1, e2]) =
+    .app () (.app () (.op () ⟨"Int.Gt", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primLeq (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Leq [e1, e2]) =
+    .app () (.app () (.op () ⟨"Int.Le", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primGeq (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Geq [e1, e2]) =
+    .app () (.app () (.op () ⟨"Int.Ge", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primAnd (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .And [e1, e2]) =
+    .app () (.app () (.op () ⟨"Bool.And", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primOr (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Or [e1, e2]) =
+    .app () (.app () (.op () ⟨"Bool.Or", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_primNeq (e1 e2 : StmtExprMd) :
+  translateExprModel (.PrimitiveOp .Neq [e1, e2]) =
+    .app () (.op () ⟨"Bool.Not", ()⟩ none) (.eq () (translateExprModel e1.val) (translateExprModel e2.val)) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
+@[simp] public theorem translateExprModel_eq_staticCall (callee : Identifier) (args : List StmtExprMd) :
+  translateExprModel (.StaticCall callee args) =
+    args.attach.foldl (fun acc ⟨a, _⟩ => .app () acc (translateExprModel a.val))
+      (.op () ⟨callee.text, ()⟩ none) := by
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+
 /-! ## Statement translation model -/
 
 /-- The exception propagation check: if $result is Failure, exit $body -/
@@ -1069,7 +1145,7 @@ public def modelExceptionPropagation : Core.Statement :=
   Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some "$body") .empty] [] .empty
 
 mutual
-def translateStmtModelMd (isFunction : String → Bool) (outputParams : List String) (e : StmtExprMd) : Core.Statements :=
+public def translateStmtModelMd (isFunction : String → Bool) (outputParams : List String) (e : StmtExprMd) : Core.Statements :=
   translateStmtModel isFunction outputParams e.val
   termination_by sizeOf e
   decreasing_by cases e; term_by_mem
@@ -1132,6 +1208,12 @@ public def translateStmtModel
       let coreArgs := args.map fun a => translateExprModel a.val
       [Core.Statement.call [⟨"$result", ()⟩] callee.text coreArgs .empty,
        modelExceptionPropagation]
+  | .While cond invariants decreasesExpr body =>
+    let condExpr := translateExprModel cond.val
+    let invExprs := invariants.map fun i => translateExprModel i.val
+    let decExprCore := decreasesExpr.map fun d => translateExprModel d.val
+    let bodyStmts := translateStmtModelMd isFunction outputParams body
+    [Imperative.Stmt.loop condExpr decExprCore invExprs bodyStmts .empty]
   | _ => []
   termination_by sizeOf stmt
   decreasing_by all_goals (simp_wf; try term_by_mem)
@@ -1152,14 +1234,95 @@ end
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty] := by
   rw [translateStmtModel.eq_def]
 
+@[simp] public theorem translateStmtModel_eq_local_expr_init
+  (isFunction : String → Bool) (outputParams : List String)
+  (id : Identifier) (ty : WithMetadata HighType) (init : StmtExprMd)
+  (hNotStaticCall : ∀ c a, init.val ≠ .StaticCall c a)
+  (hNotInstanceCall : ∀ t c a, init.val ≠ .InstanceCall t c a)
+  (hNotHole : ∀ n t, init.val ≠ .Hole n t) :
+  translateStmtModel isFunction outputParams (.LocalVariable id ty (some init)) =
+    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (translateExprModel init.val)) .empty] := by
+  rw [translateStmtModel.eq_def]
+  cases hv : init.val <;> simp_all
+
+@[simp] public theorem translateStmtModel_eq_return_expr
+  (isFunction : String → Bool) (outputParams : List String)
+  (value : StmtExprMd) (outName : String)
+  (hHead : outputParams.head? = some outName) :
+  translateStmtModel isFunction outputParams (.Return (some value)) =
+    [Core.Statement.set ⟨outName, ()⟩ (translateExprModel value.val) .empty,
+     Imperative.Stmt.exit (some "$body") .empty] := by
+  rw [translateStmtModel.eq_def]; simp [hHead]
+
+@[simp] public theorem translateStmtModel_eq_ite_noElse
+  (isFunction : String → Bool) (outputParams : List String)
+  (cond thenB : StmtExprMd) :
+  translateStmtModel isFunction outputParams (.IfThenElse cond thenB none) =
+    [Imperative.Stmt.ite (translateExprModel cond.val)
+      (translateStmtModelMd isFunction outputParams thenB)
+      []
+      .empty] := by
+  rw [translateStmtModel.eq_def]
+
+@[simp] public theorem translateStmtModel_eq_ite_withElse
+  (isFunction : String → Bool) (outputParams : List String)
+  (cond thenB elseB : StmtExprMd) :
+  translateStmtModel isFunction outputParams (.IfThenElse cond thenB (some elseB)) =
+    [Imperative.Stmt.ite (translateExprModel cond.val)
+      (translateStmtModelMd isFunction outputParams thenB)
+      (translateStmtModelMd isFunction outputParams elseB)
+      .empty] := by
+  rw [translateStmtModel.eq_def]
+
+@[simp] public theorem translateStmtModel_eq_assign_expr
+  (isFunction : String → Bool) (outputParams : List String)
+  (targetId : Identifier) (targetMd : MetaData) (value : StmtExprMd)
+  (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a)
+  (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a) :
+  translateStmtModel isFunction outputParams (.Assign [⟨.Identifier targetId, targetMd⟩] value) =
+    [Core.Statement.set ⟨targetId.text, ()⟩ (translateExprModel value.val) .empty] := by
+  rw [translateStmtModel.eq_def]
+  cases hv : value.val <;> simp_all
+
+@[simp] public theorem translateStmtModel_eq_staticCall_proc
+  (isFunction : String → Bool) (outputParams : List String)
+  (callee : Identifier) (args : List StmtExprMd)
+  (hNotFunc : isFunction callee.text = false) :
+  translateStmtModel isFunction outputParams (.StaticCall callee args) =
+    [Core.Statement.call [⟨"$result", ()⟩] callee.text (args.map fun a => translateExprModel a.val) .empty,
+     modelExceptionPropagation] := by
+  rw [translateStmtModel.eq_def]; simp [hNotFunc]
+
+@[simp] public theorem translateStmtModel_eq_block_unlabeled
+  (isFunction : String → Bool) (outputParams : List String)
+  (stmts : List StmtExprMd) :
+  translateStmtModel isFunction outputParams (.Block stmts none) =
+    stmts.flatMap fun s => translateStmtModelMd isFunction outputParams s := by
+  rw [translateStmtModel.eq_def]
+  induction stmts with
+  | nil => rfl
+  | cons x xs ih => simp [List.flatMap, List.attach_cons, ih]
+
+@[simp] public theorem translateStmtModel_eq_while
+  (isFunction : String → Bool) (outputParams : List String)
+  (cond : StmtExprMd) (invariants : List StmtExprMd)
+  (decreasesExpr : Option StmtExprMd) (body : StmtExprMd) :
+  translateStmtModel isFunction outputParams (.While cond invariants decreasesExpr body) =
+    [Imperative.Stmt.loop (translateExprModel cond.val)
+      (decreasesExpr.map fun d => translateExprModel d.val)
+      (invariants.map fun i => translateExprModel i.val)
+      (translateStmtModelMd isFunction outputParams body)
+      .empty] := by
+  rw [translateStmtModel.eq_def]
+
 /-! ## Procedure and program assembly model -/
 
 /-- Translate a Laurel parameter to Core (name, type) pair -/
-public def translateParamModel (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
+@[expose] public def translateParamModel (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
   (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName p.type.val) [])
 
 /-- Assemble a Laurel procedure into a Core procedure declaration -/
-public def translateProcModel
+@[expose] public def translateProcModel
   (isFunction : String → Bool)
   (proc : Procedure) : Core.Decl :=
   let inputs := proc.inputs.map translateParamModel

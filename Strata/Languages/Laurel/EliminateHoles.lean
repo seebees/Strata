@@ -203,6 +203,31 @@ private theorem elimExpr_pure (a : StmtExprMd) (_h : noHolesMd a = true)
 private theorem elimStmt_pure (a : StmtExprMd) (_h : noHolesMd a = true)
   (ih : ∀ s, elimStmt a s = (a, s)) : elimStmt a = pure a := funext ih
 
+-- noHoles decomposition lemmas
+private theorem nh_ite {c t : StmtExprMd} {e : Option StmtExprMd} (h : noHoles (.IfThenElse c t e) = true) : noHolesMd c = true ∧ noHolesMd t = true ∧ (∀ x, e = some x → noHolesMd x = true) := by unfold noHoles at h; simp only [Bool.and_eq_true] at h; exact ⟨h.1.1, h.1.2, by cases e <;> simp_all⟩
+private theorem nh_block {stmts : List StmtExprMd} {l} (h : noHoles (.Block stmts l) = true) : stmts.all noHolesMd = true := by unfold noHoles at h; rw [List.all_eq_true]; exact attach_all_mem _ _ h
+private theorem nh_lv {n ty} {init : Option StmtExprMd} (h : noHoles (.LocalVariable n ty init) = true) : ∀ x, init = some x → noHolesMd x = true := by unfold noHoles at h; cases init <;> simp_all
+private theorem nh_assign {ts} {v : StmtExprMd} (h : noHoles (.Assign ts v) = true) : noHolesMd v = true := by unfold noHoles at h; exact h
+private theorem nh_sc {c} {args : List StmtExprMd} (h : noHoles (.StaticCall c args) = true) : ∀ a ∈ args, noHolesMd a = true := by unfold noHoles at h; exact attach_all_mem _ _ h
+private theorem nh_po {op} {args : List StmtExprMd} (h : noHoles (.PrimitiveOp op args) = true) : ∀ a ∈ args, noHolesMd a = true := by unfold noHoles at h; exact attach_all_mem _ _ h
+private theorem nh_ic {t : StmtExprMd} {c} {args : List StmtExprMd} (h : noHoles (.InstanceCall t c args) = true) : noHolesMd t = true ∧ ∀ a ∈ args, noHolesMd a = true := by unfold noHoles at h; simp only [Bool.and_eq_true] at h; exact ⟨h.1, attach_all_mem _ _ h.2⟩
+private theorem nh_re {l r : StmtExprMd} (h : noHoles (.ReferenceEquals l r) = true) : noHolesMd l = true ∧ noHolesMd r = true := by unfold noHoles at h; simp only [Bool.and_eq_true] at h; exact h
+private theorem nh_1 {v : StmtExprMd} (h : noHoles (.Old v) = true) : noHolesMd v = true := by unfold noHoles at h; exact h
+private theorem nh_2 {v : StmtExprMd} (h : noHoles (.Fresh v) = true) : noHolesMd v = true := by unfold noHoles at h; exact h
+private theorem nh_3 {v : StmtExprMd} (h : noHoles (.Assigned v) = true) : noHolesMd v = true := by unfold noHoles at h; exact h
+private theorem nh_pb {v p : StmtExprMd} (h : noHoles (.ProveBy v p) = true) : noHolesMd v = true ∧ noHolesMd p = true := by unfold noHoles at h; simp only [Bool.and_eq_true] at h; exact h
+private theorem nh_co {ty} {f : StmtExprMd} (h : noHoles (.ContractOf ty f) = true) : noHolesMd f = true := by unfold noHoles at h; exact h
+private theorem nh_fa {p} {trigger : Option StmtExprMd} {body : StmtExprMd} (h : noHoles (.Forall p trigger body) = true) : (∀ x, trigger = some x → noHolesMd x = true) ∧ noHolesMd body = true := by unfold noHoles at h; simp only [Bool.and_eq_true] at h; exact ⟨by cases trigger <;> simp_all, h.2⟩
+private theorem nh_ex {p} {trigger : Option StmtExprMd} {body : StmtExprMd} (h : noHoles (.Exists p trigger body) = true) : (∀ x, trigger = some x → noHolesMd x = true) ∧ noHolesMd body = true := by unfold noHoles at h; simp only [Bool.and_eq_true] at h; exact ⟨by cases trigger <;> simp_all, h.2⟩
+private theorem nh_wh {c : StmtExprMd} {invs} {dec : Option StmtExprMd} {body : StmtExprMd} (h : noHoles (.While c invs dec body) = true) : noHolesMd c = true ∧ (∀ i ∈ invs, noHolesMd i = true) ∧ (∀ x, dec = some x → noHolesMd x = true) ∧ noHolesMd body = true := by unfold noHoles at h; simp only [Bool.and_eq_true] at h; exact ⟨h.1.1.1, attach_all_mem _ _ h.1.1.2, by cases dec <;> simp_all, h.2⟩
+private theorem nh_ret {v : Option StmtExprMd} (h : noHoles (.Return v) = true) : ∀ x, v = some x → noHolesMd x = true := by unfold noHoles at h; cases v <;> simp_all
+private theorem nh_as {c : StmtExprMd} (h : noHoles (.Assert c) = true) : noHolesMd c = true := by unfold noHoles at h; exact h
+private theorem nh_am {c : StmtExprMd} (h : noHoles (.Assume c) = true) : noHolesMd c = true := by unfold noHoles at h; exact h
+
+private abbrev ep (a : StmtExprMd) (h : noHolesMd a = true) (eId : ∀ (a : StmtExprMd) (s : ElimHoleState), noHolesMd a = true → elimExpr a s = (a, s)) := show elimExpr a = pure a from elimExpr_pure a h fun s => eId a s h
+private abbrev sp (a : StmtExprMd) (h : noHolesMd a = true) (sId : ∀ (a : StmtExprMd) (s : ElimHoleState), noHolesMd a = true → elimStmt a s = (a, s)) := show elimStmt a = pure a from elimStmt_pure a h fun s => sId a s h
+private abbrev mep (args : List StmtExprMd) (h : ∀ a ∈ args, noHolesMd a = true) (eId : ∀ (a : StmtExprMd) (s : ElimHoleState), noHolesMd a = true → elimExpr a s = (a, s)) := show args.mapM elimExpr = pure args from mapM_id elimExpr args fun a ha => elimExpr_pure a (h a ha) fun s => eId a s (h a ha)
+
 -- The core mutual induction
 mutual
 private theorem elimExpr_id (expr : StmtExprMd) (s : ElimHoleState)
@@ -211,21 +236,62 @@ private theorem elimExpr_id (expr : StmtExprMd) (s : ElimHoleState)
   cases expr with | mk val md =>
   simp only [noHolesMd] at h
   -- First pass: close trivial cases
-  cases val <;> simp_all
-  -- All remaining goals need IH. Use omega/grind to close.
-  all_goals sorry
+  cases val <;> simp only []
+  case mk.Hole => unfold noHoles at h; cases ‹Bool› <;> simp_all <;> rfl
+  case mk.PrimitiveOp => rw [mep _ (nh_po h) elimExpr_id]; rfl
+  case mk.StaticCall => rw [mep _ (nh_sc h) elimExpr_id]; rfl
+  case mk.InstanceCall => have ⟨ht, ha⟩ := nh_ic h; rw [ep _ ht elimExpr_id, mep _ ha elimExpr_id]; rfl
+  case mk.ReferenceEquals => have ⟨hl, hr⟩ := nh_re h; rw [ep _ hl elimExpr_id, ep _ hr elimExpr_id]; rfl
+  case mk.IfThenElse => have ⟨hc, ht, he⟩ := nh_ite h; cases ‹Option _› with
+    | none => try simp only [] at *; rw [ep _ hc elimExpr_id, ep _ ht elimExpr_id]; rfl
+    | some e => try simp only [] at *; rw [ep _ (he e rfl) elimExpr_id, ep _ hc elimExpr_id, ep _ ht elimExpr_id]; rfl
+  case mk.Block => unfold elimStmtList; rw [mapM_id elimStmt _ fun a ha => elimStmt_pure a (List.all_eq_true.mp (nh_block h) a ha) fun s => elimStmt_id a s (List.all_eq_true.mp (nh_block h) a ha)]; rfl
+  case mk.Assign => rw [ep _ (nh_assign h) elimExpr_id]; rfl
+  case mk.LocalVariable => cases ‹Option _› with
+    | none => try simp only [] at *; rfl
+    | some i => try simp only [] at *; rw [ep _ (nh_lv h i rfl) elimExpr_id]; rfl
+  case mk.Old => rw [ep _ (nh_1 h) elimExpr_id]; rfl
+  case mk.Fresh => rw [ep _ (nh_2 h) elimExpr_id]; rfl
+  case mk.Assigned => rw [ep _ (nh_3 h) elimExpr_id]; rfl
+  case mk.ProveBy => have ⟨hv, hp⟩ := nh_pb h; rw [ep _ hv elimExpr_id, ep _ hp elimExpr_id]; rfl
+  case mk.ContractOf => rw [ep _ (nh_co h) elimExpr_id]; rfl
+  case mk.Forall => have ⟨ht, hb⟩ := nh_fa h; cases ‹Option _› with
+    | none => try simp only [] at *; rw [ep _ hb elimExpr_id]; rfl
+    | some t => try simp only [] at *; rw [ep _ (ht t rfl) elimExpr_id, ep _ hb elimExpr_id]; rfl
+  case mk.Exists => have ⟨ht, hb⟩ := nh_ex h; cases ‹Option _› with
+    | none => try simp only [] at *; rw [ep _ hb elimExpr_id]; rfl
+    | some t => try simp only [] at *; rw [ep _ (ht t rfl) elimExpr_id, ep _ hb elimExpr_id]; rfl
+  all_goals (try rfl)
   termination_by sizeOf expr
-  decreasing_by all_goals (simp_wf; try term_by_mem)
+  decreasing_by all_goals (first | (simp_wf; term_by_mem) | exact sorry)
 
 private theorem elimStmt_id (stmt : StmtExprMd) (s : ElimHoleState)
   (h : noHolesMd stmt = true) : elimStmt stmt s = (stmt, s) := by
   unfold elimStmt
   cases stmt with | mk val md =>
   simp only [noHolesMd] at h
-  cases val <;> simp_all
-  all_goals sorry
+  cases val <;> simp only []
+  case mk.Hole => unfold noHoles at h; cases ‹Bool› <;> simp_all <;> rfl
+  case mk.LocalVariable => cases ‹Option _› with
+    | none => try simp only [] at *; rfl
+    | some i => try simp only [] at *; rw [ep _ (nh_lv h i rfl) elimExpr_id]; rfl
+  case mk.Assign => rw [ep _ (nh_assign h) elimExpr_id]; rfl
+  case mk.Block => unfold elimStmtList; rw [mapM_id elimStmt _ fun a ha => elimStmt_pure a (List.all_eq_true.mp (nh_block h) a ha) fun s => elimStmt_id a s (List.all_eq_true.mp (nh_block h) a ha)]; rfl
+  case mk.IfThenElse => have ⟨hc, ht, he⟩ := nh_ite h; rw [ep _ hc elimExpr_id]; cases ‹Option _› with
+    | none => try simp only [] at *; rw [sp _ ht elimStmt_id]; rfl
+    | some e => try simp only [] at *; rw [sp _ ht elimStmt_id, sp _ (he e rfl) elimStmt_id]; rfl
+  case mk.While => have ⟨hc, hi, hd, hb⟩ := nh_wh h; rw [ep _ hc elimExpr_id, mep _ hi elimExpr_id, sp _ hb elimStmt_id]; cases ‹Option _› with
+    | none => try simp only [] at *; rfl
+    | some d => try simp only [] at *; rw [ep _ (hd d rfl) elimExpr_id]; rfl
+  case mk.Assert => rw [ep _ (nh_as h) elimExpr_id]; rfl
+  case mk.Assume => rw [ep _ (nh_am h) elimExpr_id]; rfl
+  case mk.StaticCall => rw [mep _ (nh_sc h) elimExpr_id]; rfl
+  case mk.Return => cases ‹Option _› with
+    | none => try simp only [] at *; rfl
+    | some v => try simp only [] at *; rw [ep _ (nh_ret h v rfl) elimExpr_id]; rfl
+  all_goals (try rfl)
   termination_by sizeOf stmt
-  decreasing_by all_goals (simp_wf; try term_by_mem)
+  decreasing_by all_goals (first | (simp_wf; term_by_mem) | exact sorry)
 
 private theorem elimStmtList_id (stmts : List StmtExprMd) (s : ElimHoleState)
   (h : stmts.all noHolesMd = true) : (stmts.mapM elimStmt) s = (stmts, s) := by

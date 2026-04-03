@@ -182,12 +182,61 @@ public def programNoHoles (program : Program) : Bool :=
     | .Opaque _ (some impl) _ => noHolesMd impl
     | _ => true
 
+-- WithMetadata eta
+private theorem wm_eta (e : WithMetadata α) : (⟨e.val, e.md⟩ : WithMetadata α) = e := by cases e; rfl
+
+-- mapM identity: if f is identity on each element, mapM f is identity
+private theorem mapM_id {α : Type} {m : Type → Type} [Monad m] [LawfulMonad m]
+  (f : α → m α) (xs : List α) (hf : ∀ x ∈ xs, f x = pure x) :
+  xs.mapM f = pure xs := by
+  induction xs with
+  | nil => simp [List.mapM_nil]
+  | cons x xs ih =>
+    rw [List.mapM_cons, hf x (.head xs), pure_bind, ih (fun y hy => hf y (.tail x hy)), pure_bind]
+
+-- The core mutual induction: elimExpr/elimStmt/elimStmtList are identity for hole-free inputs
+mutual
+private theorem elimExpr_id (expr : StmtExprMd) (s : ElimHoleState)
+  (h : noHolesMd expr = true) : elimExpr expr s = (expr, s) := by
+  unfold elimExpr
+  cases expr with | mk val md =>
+  simp only [noHolesMd, noHoles] at h
+  cases val <;> simp_all [wm_eta]
+  all_goals (try (simp only [Bool.and_eq_true] at h; obtain ⟨h1, h2⟩ := h))
+  all_goals sorry
+  termination_by sizeOf expr
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+
+private theorem elimStmt_id (stmt : StmtExprMd) (s : ElimHoleState)
+  (h : noHolesMd stmt = true) : elimStmt stmt s = (stmt, s) := by
+  unfold elimStmt
+  cases stmt with | mk val md =>
+  simp only [noHolesMd, noHoles] at h
+  cases val <;> simp_all [wm_eta]
+  all_goals sorry
+  termination_by sizeOf stmt
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+
+private theorem elimStmtList_id (stmts : List StmtExprMd) (s : ElimHoleState)
+  (h : stmts.all noHolesMd = true) : (stmts.mapM elimStmt) s = (stmts, s) := by
+  induction stmts generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    have hx := List.all_eq_true.mp h x (.head xs)
+    have hxs := List.all_eq_true.mpr (fun y hy => List.all_eq_true.mp h y (.tail x hy))
+    -- mapM for cons: bind (f x) (fun a => bind (mapM f xs) (fun as => pure (a :: as)))
+    -- Applied to s: let (a, s') := f x s; let (as, s'') := mapM f xs s'; (a :: as, s'')
+    show (List.mapM elimStmt (x :: xs)) s = _
+    simp only [List.mapM_cons, bind, StateT.bind, pure, StateT.pure,
+      elimStmt_id x s hx, ih s hxs]
+  termination_by sizeOf stmts
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
+
 /-- eliminateHoles is a no-op on programs with no deterministic holes. -/
 public theorem eliminateHoles_noop (program : Program)
   (hNoHoles : programNoHoles program = true) :
   eliminateHoles program = program := by
-  sorry -- Next step: mutual induction proof that
-         -- noHoles e → elimExpr ⟨e, md⟩ s = (⟨e, md⟩, s)
-         -- noHoles e → elimStmt ⟨e, md⟩ s = (⟨e, md⟩, s)
+  sorry -- Uses elimExpr_id/elimStmt_id to show each procedure is unchanged
 
 end Laurel

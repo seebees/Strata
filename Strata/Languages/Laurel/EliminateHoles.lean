@@ -144,4 +144,48 @@ def eliminateHoles (program : Program) : Program :=
   { program with staticProcedures := finalState.generatedFunctions ++ procs }
 
 end -- public section
+
+mutual
+def noHolesMd (e : StmtExprMd) : Bool := noHoles e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
+
+def noHoles : StmtExpr → Bool
+  | .Hole true _ => false
+  | .Hole false _ => true
+  | .PrimitiveOp _ args => args.attach.all fun ⟨a, _⟩ => noHolesMd a
+  | .StaticCall _ args => args.attach.all fun ⟨a, _⟩ => noHolesMd a
+  | .InstanceCall t _ args => noHolesMd t && args.attach.all fun ⟨a, _⟩ => noHolesMd a
+  | .ReferenceEquals a b => noHolesMd a && noHolesMd b
+  | .IfThenElse c t e => noHolesMd c && noHolesMd t && match e with | some e => noHolesMd e | none => true
+  | .Block stmts _ => stmts.attach.all fun ⟨s, _⟩ => noHolesMd s
+  | .Assign _ v => noHolesMd v
+  | .LocalVariable _ _ init => match init with | some i => noHolesMd i | none => true
+  | .While c invs dec body => noHolesMd c && invs.attach.all (fun ⟨i, _⟩ => noHolesMd i) &&
+      (match dec with | some d => noHolesMd d | none => true) && noHolesMd body
+  | .Assert c | .Assume c => noHolesMd c
+  | .Return v => match v with | some v => noHolesMd v | none => true
+  | .Old v | .Fresh v | .Assigned v => noHolesMd v
+  | .ProveBy v p => noHolesMd v && noHolesMd p
+  | .ContractOf _ f => noHolesMd f
+  | .Forall _ trigger b => (match trigger with | some t => noHolesMd t | none => true) && noHolesMd b
+  | .Exists _ trigger b => (match trigger with | some t => noHolesMd t | none => true) && noHolesMd b
+  | _ => true
+  termination_by e => sizeOf e
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
+
+/-- A program has no deterministic holes. -/
+public def programNoHoles (program : Program) : Bool :=
+  program.staticProcedures.all fun proc => match proc.body with
+    | .Transparent b => noHolesMd b
+    | .Opaque _ (some impl) _ => noHolesMd impl
+    | _ => true
+
+/-- eliminateHoles is a no-op on programs with no deterministic holes. -/
+public theorem eliminateHoles_noop (program : Program)
+  (hNoHoles : programNoHoles program = true) :
+  eliminateHoles program = program := by
+  sorry -- Requires mutual induction: noHoles e → elimExpr e s = (e, s)
+
 end Laurel

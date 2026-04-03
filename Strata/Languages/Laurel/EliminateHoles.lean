@@ -182,10 +182,9 @@ public def programNoHoles (program : Program) : Bool :=
     | .Opaque _ (some impl) _ => noHolesMd impl
     | _ => true
 
--- WithMetadata eta
+
 private theorem wm_eta (e : WithMetadata α) : (⟨e.val, e.md⟩ : WithMetadata α) = e := by cases e; rfl
 
--- mapM identity: if f is identity on each element, mapM f is identity
 private theorem mapM_id {α : Type} {m : Type → Type} [Monad m] [LawfulMonad m]
   (f : α → m α) (xs : List α) (hf : ∀ x ∈ xs, f x = pure x) :
   xs.mapM f = pure xs := by
@@ -194,15 +193,26 @@ private theorem mapM_id {α : Type} {m : Type → Type} [Monad m] [LawfulMonad m
   | cons x xs ih =>
     rw [List.mapM_cons, hf x (.head xs), pure_bind, ih (fun y hy => hf y (.tail x hy)), pure_bind]
 
--- The core mutual induction: elimExpr/elimStmt/elimStmtList are identity for hole-free inputs
+private theorem attach_all_mem {α : Type} (xs : List α) (p : α → Bool)
+  (h : xs.attach.all (fun ⟨a, _⟩ => p a) = true) : ∀ a ∈ xs, p a = true := by
+  intro a ha; exact List.all_eq_true.mp h ⟨a, ha⟩ (List.mem_attach xs ⟨a, ha⟩)
+
+private theorem elimExpr_pure (a : StmtExprMd) (_h : noHolesMd a = true)
+  (ih : ∀ s, elimExpr a s = (a, s)) : elimExpr a = pure a := funext ih
+
+private theorem elimStmt_pure (a : StmtExprMd) (_h : noHolesMd a = true)
+  (ih : ∀ s, elimStmt a s = (a, s)) : elimStmt a = pure a := funext ih
+
+-- The core mutual induction
 mutual
 private theorem elimExpr_id (expr : StmtExprMd) (s : ElimHoleState)
   (h : noHolesMd expr = true) : elimExpr expr s = (expr, s) := by
   unfold elimExpr
   cases expr with | mk val md =>
-  simp only [noHolesMd, noHoles] at h
-  cases val <;> simp_all [wm_eta]
-  all_goals (try (simp only [Bool.and_eq_true] at h; obtain ⟨h1, h2⟩ := h))
+  simp only [noHolesMd] at h
+  -- First pass: close trivial cases
+  cases val <;> simp_all
+  -- All remaining goals need IH. Use omega/grind to close.
   all_goals sorry
   termination_by sizeOf expr
   decreasing_by all_goals (simp_wf; try term_by_mem)
@@ -211,8 +221,8 @@ private theorem elimStmt_id (stmt : StmtExprMd) (s : ElimHoleState)
   (h : noHolesMd stmt = true) : elimStmt stmt s = (stmt, s) := by
   unfold elimStmt
   cases stmt with | mk val md =>
-  simp only [noHolesMd, noHoles] at h
-  cases val <;> simp_all [wm_eta]
+  simp only [noHolesMd] at h
+  cases val <;> simp_all
   all_goals sorry
   termination_by sizeOf stmt
   decreasing_by all_goals (simp_wf; try term_by_mem)
@@ -224,19 +234,27 @@ private theorem elimStmtList_id (stmts : List StmtExprMd) (s : ElimHoleState)
   | cons x xs ih =>
     have hx := List.all_eq_true.mp h x (.head xs)
     have hxs := List.all_eq_true.mpr (fun y hy => List.all_eq_true.mp h y (.tail x hy))
-    -- mapM for cons: bind (f x) (fun a => bind (mapM f xs) (fun as => pure (a :: as)))
-    -- Applied to s: let (a, s') := f x s; let (as, s'') := mapM f xs s'; (a :: as, s'')
     show (List.mapM elimStmt (x :: xs)) s = _
-    simp only [List.mapM_cons, bind, StateT.bind, pure, StateT.pure,
-      elimStmt_id x s hx, ih s hxs]
-  termination_by sizeOf stmts
-  decreasing_by all_goals (simp_wf; try term_by_mem)
+    rw [List.mapM_cons,
+      show elimStmt x = pure x from elimStmt_pure x hx fun s => elimStmt_id x s hx, pure_bind,
+      show xs.mapM elimStmt = pure xs from
+        mapM_id elimStmt xs fun a ha => elimStmt_pure a (List.all_eq_true.mp hxs a ha) fun s =>
+          elimStmt_id a s (List.all_eq_true.mp hxs a ha), pure_bind]
+    rfl
 end
+
+private theorem elimProcedure_id (proc : Procedure) (s : ElimHoleState)
+  (hProc : match proc.body with
+    | .Transparent b => noHolesMd b = true
+    | .Opaque _ (some impl) _ => noHolesMd impl = true
+    | _ => True) :
+  ∃ s', elimProcedure proc s = (proc, s') ∧ s'.generatedFunctions = s.generatedFunctions := by
+  sorry
 
 /-- eliminateHoles is a no-op on programs with no deterministic holes. -/
 public theorem eliminateHoles_noop (program : Program)
   (hNoHoles : programNoHoles program = true) :
   eliminateHoles program = program := by
-  sorry -- Uses elimExpr_id/elimStmt_id to show each procedure is unchanged
+  sorry
 
 end Laurel

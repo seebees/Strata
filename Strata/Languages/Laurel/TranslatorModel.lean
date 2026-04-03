@@ -1321,6 +1321,17 @@ end
 @[expose] public def translateParamModel (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
   (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName p.type.val) [])
 
+/-- Model a transparent functional procedure as a Core function declaration -/
+@[expose] public def modelTransparentFuncDecl (_isFunction : String → Bool) (proc : Procedure) : Core.Decl :=
+  let inputs := proc.inputs.map translateParamModel
+  let outputTy := match proc.outputs.head? with
+    | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
+    | none => Lambda.LMonoTy.int
+  let body := match proc.body with
+    | .Transparent b => some (translateExprModel b.val)
+    | _ => none
+  Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body }
+
 /-- Assemble a Laurel procedure into a Core procedure declaration -/
 @[expose] public def translateProcModel
   (isFunction : String → Bool)
@@ -1372,7 +1383,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     let inputs := proc.inputs.map translateParamModel
     let outputTy := match proc.outputs.head? with
       | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
-      | none => Lambda.LMonoTy.tcons "bool" []
+      | none => Lambda.LMonoTy.int
     let body := match proc.body with
       | .Transparent b => some (translateExprModel b.val)
       | _ => none
@@ -1401,7 +1412,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     let inputs := proc.inputs.map translateParamModel
     let outputTy := match proc.outputs.head? with
       | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
-      | none => Lambda.LMonoTy.tcons "bool" []
+      | none => Lambda.LMonoTy.int
     Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body := none }
   -- Non-external functions with transparent bodies
   let transparentFuncs := allProcs.filter (fun p => p.isFunctional && !p.body.isExternal)
@@ -1409,7 +1420,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     let inputs := proc.inputs.map translateParamModel
     let outputTy := match proc.outputs.head? with
       | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
-      | none => Lambda.LMonoTy.tcons "bool" []
+      | none => Lambda.LMonoTy.int
     let body := match proc.body with
       | .Transparent b => some (translateExprModel b.val)
       | _ => none

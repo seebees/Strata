@@ -997,4 +997,60 @@ theorem filterMap_empty_contains {α : Type} (items : List (String × String)) (
   | nil => rfl
   | cons x xs ih => obtain ⟨a, b⟩ := x; simp [List.filterMap, List.contains, List.elem, ih]
 
+/-! ### Function declaration correspondence
+
+The same mapM/map pattern as procedures, but for translateProcedureToFunction
+vs the model's direct function translation. -/
+
+/-- mapM translateProcedureToFunction for cons. -/
+@[simp] theorem mapM_translateFunc_cons
+  (x : Procedure) (xs : List Procedure)
+  (s s1 s2 : TranslateState)
+  (r1 : Core.Decl) (r2 : List Core.Decl)
+  (hHead : translateProcedureToFunction x s = (some r1, s1))
+  (hTail : (List.mapM translateProcedureToFunction xs : TranslateM _) s1 = (some r2, s2)) :
+  (List.mapM translateProcedureToFunction (x :: xs) : TranslateM _) s = (some (r1 :: r2), s2) := by
+  rw [List.mapM_cons]
+  simp only [TranslateM.bind_some _ _ _ _ _ hHead,
+    TranslateM.bind_some _ _ _ _ _ hTail, TranslateM.pure_eq]
+
+/-- If each functional procedure translates to a Core.Decl matching the model,
+    then mapM translateProcedureToFunction produces a list matching the model. -/
+theorem mapM_translateFunc_matches_model
+  (isFunction : String → Bool)
+  (procs : List Procedure) (s : TranslateState)
+  (hEach : ∀ proc ∈ procs, ∀ st : TranslateState,
+    ∃ (st' : TranslateState) (decl : Core.Decl),
+      translateProcedureToFunction proc st = (some decl, st') ∧
+      decl = modelTransparentFuncDecl isFunction proc) :
+  ∃ s' decls,
+    (List.mapM translateProcedureToFunction procs : TranslateM _) s = (some decls, s') ∧
+    decls = procs.map (modelTransparentFuncDecl isFunction) := by
+  induction procs generalizing s with
+  | nil => exact ⟨s, [], by simp [List.mapM_nil, TranslateM.pure_eq], rfl⟩
+  | cons x xs ih =>
+    have ⟨s1, d, hx, hxModel⟩ := hEach x (.head xs) s
+    have ⟨s2, ds, ih_eq, ih_model⟩ := ih s1 (fun proc hmem => hEach proc (.tail x hmem))
+    exact ⟨s2, d :: ds,
+      mapM_translateFunc_cons x xs s s1 s2 d ds hx ih_eq,
+      by simp [List.map, hxModel, ih_model]⟩
+
+/-- For a simple functional procedure (basic-typed params, transparent body,
+    no preconditions), if the body expression translates equivalently,
+    translateProcedureToFunction matches modelTransparentFuncDecl. -/
+theorem translateFunc_matches_model
+  (isFunction : String → Bool) (proc : Procedure)
+  (s : TranslateState) (coreBody : Core.Expression.Expr)
+  (bodyExpr : StmtExprMd)
+  (hTransparent : proc.body = .Transparent bodyExpr)
+  (hNoPre : proc.preconditions = [])
+  (hBody : (translateExpr bodyExpr [] true s).1 = some coreBody)
+  (hBodyMatch : coreBody.eraseTypes = translateExprModel bodyExpr.val)
+  (hInputs : ∀ p ∈ proc.inputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
+  (hOutput : ∀ p ∈ proc.outputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
+  ∃ (s' : TranslateState) (decl : Core.Decl),
+    translateProcedureToFunction proc s = (some decl, s') ∧
+    decl.eraseTypes = (modelTransparentFuncDecl isFunction proc).eraseTypes := by
+  sorry -- TODO: needs translateProcedureToFunction equation lemma
+
 end Strata.Laurel

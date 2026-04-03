@@ -260,4 +260,29 @@ public def constrainedTypeElim (_model : SemanticModel) (program : Program) : Pr
       | other => other },
    funcDiags)
 
+/-- constrainedTypeElim is a no-op when the program has no constrained types. -/
+@[simp] public theorem constrainedTypeElim_noop (_model : SemanticModel) (program : Program)
+  (hNoConstrained : program.types.all (fun td => match td with | .Constrained _ => false | _ => true) = true) :
+  constrainedTypeElim _model program = (program, []) := by
+  unfold constrainedTypeElim
+  -- Show buildConstrainedTypeMap produces empty map
+  suffices h : (buildConstrainedTypeMap program.types).isEmpty = true by
+    simp [h]
+  -- Prove buildConstrainedTypeMap produces empty map when no constrained types
+  have : ∀ (types : List TypeDefinition),
+    types.all (fun td => match td with | .Constrained _ => false | _ => true) = true →
+    (types.foldl (init := (∅ : ConstrainedTypeMap)) fun m td =>
+      match td with | .Constrained ct => m.insert ct.name.text ct | _ => m) = ∅ := by
+    intro types hAll
+    induction types with
+    | nil => rfl
+    | cons td tds ih =>
+      have hTd := List.all_eq_true.mp hAll td (.head tds)
+      have hTds := List.all_eq_true.mpr (fun x hx => List.all_eq_true.mp hAll x (.tail td hx))
+      simp only [List.foldl]
+      cases td <;> simp_all
+  unfold buildConstrainedTypeMap
+  rw [this _ hNoConstrained]
+  native_decide
+
 end Strata.Laurel

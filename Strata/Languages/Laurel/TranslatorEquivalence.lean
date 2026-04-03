@@ -1068,4 +1068,14 @@ theorem no_datatypes_no_decls
   groups.map (fun group => Core.Decl.type (.data group)) = [] := by
   simp [hNoDatatypes, groupDatatypes_nil]
 
+/-! ## Phase 7: Transformation pass no-op proofs
+
+For simple programs, the transformation passes in `translate` are no-ops.
+Each pass proven as a no-op shrinks the gap between `translate` and
+`translateProgramModel`.
+
+Proven so far:
+- constrainedTypeElim_noop (in ConstrainedTypeElim.lean): no constrained types → no-op
+-/
+
 end Strata.Laurel

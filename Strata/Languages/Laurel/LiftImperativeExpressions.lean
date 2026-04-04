@@ -524,7 +524,7 @@ private theorem transformProcedure_id (proc : Procedure) (s : LiftState)
       | .Transparent b => containsAssignmentOrImperativeCall s.model b = false ∧ containsNondetHole b = false
       | .Opaque _ (some impl) _ => containsAssignmentOrImperativeCall s.model impl = false ∧ containsNondetHole impl = false
       | _ => True) :
-    ∃ s', transformProcedure proc s = (proc, s') := by
+    ∃ s', transformProcedure proc s = (proc, s') ∧ s'.model = s.model := by
   unfold transformProcedure
   simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
   cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
@@ -534,7 +534,7 @@ private theorem transformProcedure_id (proc : Procedure) (s : LiftState)
     simp only [hb] at hBody; obtain ⟨ha, hh⟩ := hBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
     unfold transformProcedureBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
     have hs : containsAssignmentOrImperativeCall ({ s with subst := [], prependedStmts := [], varCounters := [] }).model b = false := by simp [ha]
-    rw [transformStmt_id b _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; exact ⟨_, rfl⟩
+    rw [transformStmt_id b _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; refine ⟨_, rfl, ?_⟩; rfl
   | Opaque posts impl mods =>
     simp only [hb] at hBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
     cases impl with
@@ -542,10 +542,10 @@ private theorem transformProcedure_id (proc : Procedure) (s : LiftState)
       obtain ⟨ha, hh⟩ := hBody; simp only [Option.mapM, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
       unfold transformProcedureBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
       have hs : containsAssignmentOrImperativeCall ({ s with subst := [], prependedStmts := [], varCounters := [] }).model i = false := by simp [ha]
-      rw [transformStmt_id i _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; exact ⟨_, rfl⟩
-    | none => simp only [Option.mapM, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; exact ⟨_, rfl⟩
-  | Abstract _ => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; exact ⟨_, rfl⟩
-  | External => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; exact ⟨_, rfl⟩
+      rw [transformStmt_id i _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; refine ⟨_, rfl, ?_⟩; rfl
+    | none => simp only [Option.mapM, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; refine ⟨_, rfl, ?_⟩; rfl
+  | Abstract _ => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; refine ⟨_, rfl, ?_⟩; rfl
+  | External => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; refine ⟨_, rfl, ?_⟩; rfl
 
 public theorem liftExpressionAssignments_noop (model : SemanticModel) (program : Program)
     (hPure : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
@@ -570,9 +570,7 @@ where
     induction procs generalizing s with
     | nil => exact ⟨s, rfl⟩
     | cons x xs ih =>
-      obtain ⟨s1, h1⟩ := transformProcedure_id x s (hAll x (.head xs))
-      -- After transformProcedure, s1.model = s.model (model is never modified)
-      have hModel : s1.model = s.model := by sorry
+      obtain ⟨s1, h1, hModel⟩ := transformProcedure_id x s (hAll x (.head xs))
       obtain ⟨s2, h2⟩ := ih s1 (by rw [hModel]; exact fun p hp => hAll p (.tail x hp))
       exact ⟨s2, by simp [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, h1, h2]⟩
 

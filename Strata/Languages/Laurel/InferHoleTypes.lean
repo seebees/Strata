@@ -291,7 +291,7 @@ end -- section
 private theorem inferProcedure_id (proc : Procedure) (s : InferHoleState)
     (hBody : match proc.body with | .Transparent b => noHolesMd b = true | .Opaque _ (some impl) _ => noHolesMd impl = true | _ => True) :
     ∃ s', inferProcedure proc s = (proc, s') := by
-  exact sorry
+  sorry
 
 private theorem mapM_inferProcedure_id (procs : List Procedure) (s : InferHoleState)
     (hAll : ∀ p ∈ procs, match p.body with | .Transparent b => noHolesMd b = true | .Opaque _ (some impl) _ => noHolesMd impl = true | _ => True) :

@@ -359,11 +359,30 @@ def noNewIsTypeMd : StmtExprMd → Bool
   termination_by e => sizeOf e
   decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
 
+private theorem mapM_plain_id (args : List StmtExprMd) (s : THState)
+    (h : ∀ a ∈ args, noNewIsTypeMd a = true)
+    (hf : ∀ (a : StmtExprMd) (s : THState), noNewIsTypeMd a = true → rewriteTypeHierarchyExpr a s = (a, s)) :
+    (args.mapM rewriteTypeHierarchyExpr) s = (args, s) := by
+  induction args generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hf x s (h x (.head xs)), ih s (fun a ha => h a (.tail x ha))]
+
+private theorem attach_mapM_eq_mapM (args : List StmtExprMd) (s : THState) :
+    (args.attach.mapM (fun x => rewriteTypeHierarchyExpr x.val)) s = (args.mapM rewriteTypeHierarchyExpr) s := by
+  induction args generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.attach_cons, List.mapM_cons, List.mapM_map, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
+    obtain ⟨a, s'⟩ := rewriteTypeHierarchyExpr x s; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
+    exact congrArg (fun p => match p with | (a₁, s) => (a :: a₁, s)) (ih s')
+
 private theorem mapM_th_id (args : List StmtExprMd) (s : THState)
     (h : args.attach.all (fun x => noNewIsTypeMd x.val) = true)
     (hf : ∀ (a : StmtExprMd) (s : THState), noNewIsTypeMd a = true → rewriteTypeHierarchyExpr a s = (a, s)) :
     (args.attach.mapM (fun x => rewriteTypeHierarchyExpr x.val)) s = (args, s) := by
-  sorry -- attach.mapM induction
+  rw [attach_mapM_eq_mapM]
+  exact mapM_plain_id args s (fun a ha => List.all_eq_true.mp h ⟨a, ha⟩ (List.mem_attach _ _)) hf
 
 set_option maxHeartbeats 800000 in
 /-- `rewriteTypeHierarchyExpr` is identity when the expression contains no `New` or `IsType`. -/

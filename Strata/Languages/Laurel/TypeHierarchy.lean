@@ -328,6 +328,15 @@ def typeHierarchyTransform (model: SemanticModel) (program : Program) : Program 
     types := [typeTagDatatype] ++ remainingTypes,
     constants := program.constants ++ typeHierarchyConstants }
 
+
+/-- `rewriteTypeHierarchyExpr` is identity when the expression contains no `New` or `IsType`.
+    Predicate: no `New` or `IsType` anywhere in the expression tree. -/
+theorem rewriteTypeHierarchyExpr_id (expr : StmtExprMd) (s : THState)
+    (h : ∀ sub : StmtExprMd, True → -- placeholder for "sub is a subexpression of expr"
+      (∀ n, sub.val ≠ .New n) ∧ (∀ t ty, sub.val ≠ .IsType t ty)) :
+    rewriteTypeHierarchyExpr expr s = (expr, s) := by
+  sorry
+
 end Strata.Laurel
 
 end -- public section

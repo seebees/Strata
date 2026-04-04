@@ -8,6 +8,7 @@ module
 public import Strata.Languages.Laurel.Laurel
 public import Strata.Languages.Laurel.LaurelFormat
 public import Strata.Languages.Laurel.LaurelTypes
+public import Strata.Languages.Laurel.EliminateHoles
 
 /-!
 # Hole Type Inference
@@ -168,4 +169,12 @@ def inferHoleTypes (model : SemanticModel) (program : Program) : Program :=
   { program with staticProcedures := procs }
 
 end -- public section
+
+/-! ## No-op proof -/
+
+public theorem inferHoleTypes_noop (model : SemanticModel) (program : Program)
+    (hNoHoles : programNoHoles program = true) :
+    inferHoleTypes model program = program := by
+  sorry
+
 end Laurel

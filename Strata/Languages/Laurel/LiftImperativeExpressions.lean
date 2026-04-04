@@ -488,4 +488,16 @@ def liftExpressionAssignments (model: SemanticModel) (program : Program) : Progr
   { program with staticProcedures := seqProcedures }
 
 end -- public section
+
+/-! ## No-op proof -/
+
+/-- `liftExpressionAssignments` is identity when no expression contains
+    assignments or imperative calls. -/
+public theorem liftExpressionAssignments_noop (model : SemanticModel) (program : Program)
+    (hPure : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
+      -- expr appears in proc's body →
+      containsAssignmentOrImperativeCall model expr = false) :
+    liftExpressionAssignments model program = program := by
+  sorry
+
 end Laurel

@@ -146,11 +146,11 @@ def eliminateHoles (program : Program) : Program :=
 end -- public section
 
 mutual
-def noHolesMd (e : StmtExprMd) : Bool := noHoles e.val
+public def noHolesMd (e : StmtExprMd) : Bool := noHoles e.val
   termination_by sizeOf e
   decreasing_by cases e; term_by_mem
 
-def noHoles : StmtExpr → Bool
+public def noHoles : StmtExpr → Bool
   | .Hole true _ => false
   | .Hole false _ => true
   | .PrimitiveOp _ args => args.attach.all fun ⟨a, _⟩ => noHolesMd a

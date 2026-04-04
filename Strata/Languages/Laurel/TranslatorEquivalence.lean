@@ -8,6 +8,13 @@ import Strata.Languages.Laurel.TranslatorModel
 import Strata.Languages.Laurel.TranslatorModelProperties
 import Strata.Languages.Laurel.LaurelToCoreTranslator
 import Strata.Languages.Laurel.DatatypeGrouping
+import Strata.Languages.Laurel.EliminateHoles
+import Strata.Languages.Laurel.InferHoleTypes
+import Strata.Languages.Laurel.DesugarShortCircuit
+import Strata.Languages.Laurel.LiftImperativeExpressions
+import Strata.Languages.Laurel.EliminateReturnsInExpression
+import Strata.Languages.Laurel.ConstrainedTypeElim
+import Strata.Languages.Laurel.Resolution
 
 /-!
 # Translator Equivalence
@@ -1067,6 +1074,44 @@ theorem no_datatypes_no_decls
   let groups := groupDatatypes laurelDatatypes ldatatypes
   groups.map (fun group => Core.Decl.type (.data group)) = [] := by
   simp [hNoDatatypes, groupDatatypes_nil]
+
+
+
+/-! ## Phase 7 composition: transformation passes are jointly identity -/
+
+/-- The 6 program-level transformation passes are jointly identity on simple programs.
+    This covers: inferHoleTypes, eliminateHoles, desugarShortCircuit,
+    liftExpressionAssignments, eliminateReturnsInExpressionTransform, constrainedTypeElim. -/
+theorem sixPassesNoop (model : SemanticModel) (program : Program)
+    (hNoHolesAll : programNoHolesAll program = true)
+    (hNoHoles : programNoHoles program = true)
+    (hPureShortCircuits : ∀ proc ∈ program.staticProcedures,
+      match proc.body with
+      | .Transparent b => pureShortCircuits model b = true
+      | .Opaque posts impl _ =>
+        posts.all (pureShortCircuits model) = true ∧
+        (match impl with | some i => pureShortCircuits model i = true | none => True)
+      | _ => True)
+    (hNoAssign : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
+      containsAssignmentOrImperativeCall model expr = false)
+    (hNoNondetHole : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
+      containsNondetHole expr = false)
+    (hAllNonFunctional : ∀ proc ∈ program.staticProcedures, proc.isFunctional = false)
+    (hNoConstrained : program.types.all (fun td => match td with | .Constrained _ => false | _ => true) = true) :
+    let p1 := inferHoleTypes model program
+    let p2 := eliminateHoles p1
+    let p3 := desugarShortCircuit model p2
+    let p4 := liftExpressionAssignments model p3
+    let p5 := eliminateReturnsInExpressionTransform p4
+    let (p6, _) := constrainedTypeElim model p5
+    p6 = program := by
+  simp only []
+  rw [inferHoleTypes_noop model program hNoHolesAll]
+  rw [eliminateHoles_noop program hNoHoles]
+  rw [desugarShortCircuit_noop model program hPureShortCircuits]
+  rw [liftExpressionAssignments_noop model program hNoAssign hNoNondetHole]
+  rw [eliminateReturnsInExpressionTransform_noop program hAllNonFunctional]
+  rw [constrainedTypeElim_noop model program hNoConstrained]
 
 /-! ## Phase 7: Transformation pass no-op proofs
 

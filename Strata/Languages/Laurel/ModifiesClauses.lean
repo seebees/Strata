@@ -178,4 +178,65 @@ def modifiesClausesTransform (model: SemanticModel) (program : Program) : Progra
   ({ program with staticProcedures := procs', types := types' }, errors ++ instErrors)
 
 end -- public section
+
+/-! ## No-op proof -/
+
+private theorem transformModifiesClauses_noHeap (model : SemanticModel) (proc : Procedure)
+    (h : hasHeapOut proc = false) :
+    transformModifiesClauses model proc = .ok proc := by
+  unfold transformModifiesClauses; cases proc.body <;> simp [h]
+
+private theorem foldl_procs_id (model : SemanticModel) (procs : List Procedure) (acc : List Procedure)
+    (hAll : ∀ p ∈ procs, hasHeapOut p = false) :
+    procs.foldl (fun (acc, errs) proc =>
+      match transformModifiesClauses model proc with
+      | .ok proc' => (acc ++ [proc'], errs)
+      | .error newErrs => (acc ++ [proc], errs ++ newErrs.toList)) (acc, []) =
+    (acc ++ procs, []) := by
+  induction procs generalizing acc with
+  | nil => simp
+  | cons x xs ih =>
+    simp only [List.foldl, transformModifiesClauses_noHeap model x (hAll x (.head xs))]
+    rw [ih (acc ++ [x]) (fun p hp => hAll p (.tail x hp))]
+    simp [List.append_assoc]
+
+private theorem foldl_types_noComposite (types : List TypeDefinition) (model : SemanticModel)
+    (acc : List TypeDefinition)
+    (hNoComp : ∀ td ∈ types, match td with | .Composite _ => False | _ => True) :
+    types.foldl (fun (accTypes, accErrs) td =>
+      match td with
+      | .Composite ct =>
+        let (instProcs', instErrs) := ct.instanceProcedures.foldl (fun (acc, errs) proc =>
+          match transformModifiesClauses model proc with
+          | .ok proc' => (acc ++ [proc'], errs)
+          | .error newErrs => (acc ++ [proc], errs ++ newErrs.toList)) ([], [])
+        (accTypes ++ [.Composite { ct with instanceProcedures := instProcs' }], accErrs ++ instErrs)
+      | other => (accTypes ++ [other], accErrs)) (acc, []) =
+    (acc ++ types, []) := by
+  induction types generalizing acc with
+  | nil => simp
+  | cons td tds ih =>
+    have htd := hNoComp td (.head tds)
+    have htds := fun t ht => hNoComp t (.tail td ht)
+    match td, htd with
+    | .Datatype dt, _ =>
+      have := ih (acc ++ [.Datatype dt]) htds
+      simp only [List.foldl, List.append_assoc, List.singleton_append] at this ⊢
+      exact this
+    | .Constrained ct, _ =>
+      have := ih (acc ++ [.Constrained ct]) htds
+      simp only [List.foldl, List.append_assoc, List.singleton_append] at this ⊢
+      exact this
+
+public theorem modifiesClausesTransform_noop (model : SemanticModel) (program : Program)
+    (hNoHeap : ∀ proc ∈ program.staticProcedures, hasHeapOut proc = false)
+    (hNoComposites : ∀ td ∈ program.types, match td with | .Composite _ => False | _ => True) :
+    modifiesClausesTransform model program = (program, []) := by
+  unfold modifiesClausesTransform
+  have hp := foldl_procs_id model program.staticProcedures [] hNoHeap
+  have ht := foldl_types_noComposite program.types model [] hNoComposites
+  simp at hp ht
+  cases program; simp_all
+
 end Strata.Laurel
+

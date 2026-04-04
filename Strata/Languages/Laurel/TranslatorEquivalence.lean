@@ -1076,6 +1076,16 @@ Each pass proven as a no-op shrinks the gap between `translate` and
 
 Proven so far:
 - constrainedTypeElim_noop (in ConstrainedTypeElim.lean): no constrained types → no-op
+- eliminateHoles_noop (in EliminateHoles.lean): no holes → no-op
+- desugarShortCircuit_noop (in DesugarShortCircuit.lean): no imperative short-circuits → no-op
+- eliminateReturnsInExpressionTransform_noop (in EliminateReturnsInExpression.lean): all non-functional → no-op
+
+Remaining:
+- liftExpressionAssignments: no assignments in expressions → no-op (complex, state monad)
+- inferHoleTypes: no holes → no-op (state monad, similar to eliminateHoles)
+- heapParameterization: no heap reads/writes → no-op (for simple programs)
+- typeHierarchyTransform: no composites → no-op
+- modifiesClausesTransform: no modifies needed → no-op
 -/
 
 end Strata.Laurel

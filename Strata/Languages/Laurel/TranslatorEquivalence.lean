@@ -1074,18 +1074,20 @@ For simple programs, the transformation passes in `translate` are no-ops.
 Each pass proven as a no-op shrinks the gap between `translate` and
 `translateProgramModel`.
 
-Proven so far:
-- constrainedTypeElim_noop (in ConstrainedTypeElim.lean): no constrained types → no-op
-- eliminateHoles_noop (in EliminateHoles.lean): no holes → no-op
-- desugarShortCircuit_noop (in DesugarShortCircuit.lean): no imperative short-circuits → no-op
-- eliminateReturnsInExpressionTransform_noop (in EliminateReturnsInExpression.lean): all non-functional → no-op
+Proven (0 sorry):
+- constrainedTypeElim_noop (ConstrainedTypeElim.lean): no constrained types → no-op
+- eliminateHoles_noop (EliminateHoles.lean): no holes → no-op
+- desugarShortCircuit_noop (DesugarShortCircuit.lean): no imperative short-circuits → no-op
+- eliminateReturnsInExpressionTransform_noop (EliminateReturnsInExpression.lean): all non-functional → no-op
+- modifiesClausesTransform_noop (ModifiesClauses.lean): no heap outputs + no composites → no-op
+- heapTransformProcedure_noHeap (HeapParameterization.lean): proc not in heapReaders/Writers → identity
 
-Remaining:
-- liftExpressionAssignments: no assignments in expressions → no-op (complex, state monad)
-- inferHoleTypes: no holes → no-op (state monad, similar to eliminateHoles)
-- heapParameterization: no heap reads/writes → no-op (for simple programs)
-- typeHierarchyTransform: no composites → no-op
-- modifiesClausesTransform: no modifies needed → no-op
+Stated (sorry, expression-level identity proofs needed):
+- inferHoleTypes_noop (InferHoleTypes.lean): no holes → no-op
+- rewriteTypeHierarchyExpr_id (TypeHierarchy.lean): no New/IsType → identity
+- liftExpressionAssignments_noop (LiftImperativeExpressions.lean): no assignments in exprs → no-op
+
+All 9 passes in the translate pipeline now have no-op/identity theorems.
 -/
 
 end Strata.Laurel

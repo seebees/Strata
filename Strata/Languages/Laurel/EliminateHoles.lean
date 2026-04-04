@@ -238,23 +238,23 @@ public def noHolesAllMd : StmtExprMd → Bool
   decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
 
 @[simp] public theorem noHolesAllMd_hole (d ty md) : noHolesAllMd ⟨.Hole d ty, md⟩ = false := by unfold noHolesAllMd; rfl
-@[simp] public theorem noHolesAllMd_po (op args md) : noHolesAllMd ⟨.PrimitiveOp op args, md⟩ = args.attach.all (fun ⟨a, _⟩ => noHolesAllMd a) := by sorry
-@[simp] public theorem noHolesAllMd_sc (callee args md) : noHolesAllMd ⟨.StaticCall callee args, md⟩ = args.attach.all (fun ⟨a, _⟩ => noHolesAllMd a) := by sorry
-@[simp] public theorem noHolesAllMd_ic (t callee args md) : noHolesAllMd ⟨.InstanceCall t callee args, md⟩ = (noHolesAllMd t && args.attach.all (fun x => noHolesAllMd x.val)) := by sorry
-@[simp] public theorem noHolesAllMd_re (a b md) : noHolesAllMd ⟨.ReferenceEquals a b, md⟩ = (noHolesAllMd a && noHolesAllMd b) := by sorry
+@[simp] public theorem noHolesAllMd_po (op args md) : noHolesAllMd ⟨.PrimitiveOp op args, md⟩ = args.attach.all (fun ⟨a, _⟩ => noHolesAllMd a) := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_sc (callee args md) : noHolesAllMd ⟨.StaticCall callee args, md⟩ = args.attach.all (fun ⟨a, _⟩ => noHolesAllMd a) := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_ic (t callee args md) : noHolesAllMd ⟨.InstanceCall t callee args, md⟩ = (noHolesAllMd t && args.attach.all (fun x => noHolesAllMd x.val)) := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_re (a b md) : noHolesAllMd ⟨.ReferenceEquals a b, md⟩ = (noHolesAllMd a && noHolesAllMd b) := by simp [noHolesAllMd]
 @[simp] public theorem noHolesAllMd_ite (c t e md) : noHolesAllMd ⟨.IfThenElse c t e, md⟩ = (noHolesAllMd c && noHolesAllMd t && match e with | some e => noHolesAllMd e | none => true) := by sorry
-@[simp] public theorem noHolesAllMd_block (stmts l md) : noHolesAllMd ⟨.Block stmts l, md⟩ = stmts.attach.all (fun ⟨s, _⟩ => noHolesAllMd s) := by sorry
-@[simp] public theorem noHolesAllMd_assign (tgts v md) : noHolesAllMd ⟨.Assign tgts v, md⟩ = noHolesAllMd v := by sorry
+@[simp] public theorem noHolesAllMd_block (stmts l md) : noHolesAllMd ⟨.Block stmts l, md⟩ = stmts.attach.all (fun ⟨s, _⟩ => noHolesAllMd s) := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_assign (tgts v md) : noHolesAllMd ⟨.Assign tgts v, md⟩ = noHolesAllMd v := by simp [noHolesAllMd]
 @[simp] public theorem noHolesAllMd_lv (n ty init md) : noHolesAllMd ⟨.LocalVariable n ty init, md⟩ = (match init with | some i => noHolesAllMd i | none => true) := by sorry
 @[simp] public theorem noHolesAllMd_while (c invs dec body md) : noHolesAllMd ⟨.While c invs dec body, md⟩ = (noHolesAllMd c && invs.attach.all (fun ⟨i, _⟩ => noHolesAllMd i) && (match dec with | some d => noHolesAllMd d | none => true) && noHolesAllMd body) := by sorry
 @[simp] public theorem noHolesAllMd_ret (v md) : noHolesAllMd ⟨.Return v, md⟩ = (match v with | some v => noHolesAllMd v | none => true) := by sorry
-@[simp] public theorem noHolesAllMd_assert (c md) : noHolesAllMd ⟨.Assert c, md⟩ = noHolesAllMd c := by sorry
-@[simp] public theorem noHolesAllMd_assume (c md) : noHolesAllMd ⟨.Assume c, md⟩ = noHolesAllMd c := by sorry
-@[simp] public theorem noHolesAllMd_old (v md) : noHolesAllMd ⟨.Old v, md⟩ = noHolesAllMd v := by sorry
-@[simp] public theorem noHolesAllMd_fresh (v md) : noHolesAllMd ⟨.Fresh v, md⟩ = noHolesAllMd v := by sorry
-@[simp] public theorem noHolesAllMd_assigned (n md) : noHolesAllMd ⟨.Assigned n, md⟩ = noHolesAllMd n := by sorry
-@[simp] public theorem noHolesAllMd_proveby (v p md) : noHolesAllMd ⟨.ProveBy v p, md⟩ = (noHolesAllMd v && noHolesAllMd p) := by sorry
-@[simp] public theorem noHolesAllMd_contractof (ty f md) : noHolesAllMd ⟨.ContractOf ty f, md⟩ = noHolesAllMd f := by sorry
+@[simp] public theorem noHolesAllMd_assert (c md) : noHolesAllMd ⟨.Assert c, md⟩ = noHolesAllMd c := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_assume (c md) : noHolesAllMd ⟨.Assume c, md⟩ = noHolesAllMd c := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_old (v md) : noHolesAllMd ⟨.Old v, md⟩ = noHolesAllMd v := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_fresh (v md) : noHolesAllMd ⟨.Fresh v, md⟩ = noHolesAllMd v := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_assigned (n md) : noHolesAllMd ⟨.Assigned n, md⟩ = noHolesAllMd n := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_proveby (v p md) : noHolesAllMd ⟨.ProveBy v p, md⟩ = (noHolesAllMd v && noHolesAllMd p) := by simp [noHolesAllMd]
+@[simp] public theorem noHolesAllMd_contractof (ty f md) : noHolesAllMd ⟨.ContractOf ty f, md⟩ = noHolesAllMd f := by simp [noHolesAllMd]
 @[simp] public theorem noHolesAllMd_forall (p trigger body md) : noHolesAllMd ⟨.Forall p trigger body, md⟩ = ((match trigger with | some t => noHolesAllMd t | none => true) && noHolesAllMd body) := by sorry
 @[simp] public theorem noHolesAllMd_exists (p trigger body md) : noHolesAllMd ⟨.Exists p trigger body, md⟩ = ((match trigger with | some t => noHolesAllMd t | none => true) && noHolesAllMd body) := by sorry
 

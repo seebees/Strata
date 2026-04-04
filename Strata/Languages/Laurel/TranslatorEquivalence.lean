@@ -1113,6 +1113,29 @@ theorem sixPassesNoop (model : SemanticModel) (program : Program)
   rw [eliminateReturnsInExpressionTransform_noop program hAllNonFunctional]
   rw [constrainedTypeElim_noop model program hNoConstrained]
 
+
+
+/-! ## Step 2: Procedure translation equivalence
+
+The next step toward full `translate = translateProgramModel` equivalence.
+Given that the 6 passes are no-ops (sixPassesNoop), the program reaching
+`translateLaurelToCore` has the same `staticProcedures` as the input.
+
+The remaining gap is proving that `translateProcedure` (monadic, uses SemanticModel)
+produces the same Core declarations as `translateProcModel` (pure).
+
+This requires proving `translateStmt` = `translateStmtModel` for all statement
+types, which in turn requires `translateExpr` = `translateExprModel` for all
+expression types. The expression-level equivalences are proven above
+(model_matches_real_*) for: literals, identifiers, primitive ops, static calls,
+if-then-else. The remaining expression types (blocks, local variables, assigns,
+returns, asserts, assumes, while, forall, exists) are the next proof targets.
+
+Once all expression/statement equivalences are proven, the procedure-level
+theorem `translateProcedure_matches_model` can be instantiated without
+the `hBody`/`hBodyMatch` hypotheses, completing the equivalence proof.
+-/
+
 /-! ## Phase 7: Transformation pass no-op proofs
 
 For simple programs, the transformation passes in `translate` are no-ops.

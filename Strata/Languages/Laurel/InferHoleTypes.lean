@@ -10,6 +10,7 @@ public import Strata.Languages.Laurel.LaurelFormat
 public import Strata.Languages.Laurel.LaurelTypes
 public import Strata.Languages.Laurel.EliminateHoles
 public import Strata.Languages.Laurel.EliminateHoles
+public import Strata.Languages.Laurel.EliminateHoles
 
 /-!
 # Hole Type Inference

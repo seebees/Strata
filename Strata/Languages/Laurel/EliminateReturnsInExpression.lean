@@ -117,4 +117,25 @@ def eliminateReturnsInExpressionTransform (program : Program) : Program :=
 
 end -- public section
 
+/-! ## No-op proof -/
+
+private theorem map_id_of_all' {α : Type} (l : List α) (f : α → α)
+    (hf : ∀ a ∈ l, f a = a) : l.map f = l := by
+  induction l with
+  | nil => rfl
+  | cons x xs ih => simp [hf x (.head xs), ih (fun a ha => hf a (.tail x ha))]
+
+theorem eliminateReturnsInExpression_nonFunc (proc : Procedure)
+    (h : proc.isFunctional = false) :
+    eliminateReturnsInExpression proc = proc := by
+  unfold eliminateReturnsInExpression; simp [h]
+
+public theorem eliminateReturnsInExpressionTransform_noop (program : Program)
+    (h : ∀ proc ∈ program.staticProcedures, proc.isFunctional = false) :
+    eliminateReturnsInExpressionTransform program = program := by
+  unfold eliminateReturnsInExpressionTransform
+  suffices program.staticProcedures.map eliminateReturnsInExpression =
+    program.staticProcedures by cases program; simp_all
+  exact map_id_of_all' _ _ (fun p hp => eliminateReturnsInExpression_nonFunc p (h p hp))
+
 end Laurel

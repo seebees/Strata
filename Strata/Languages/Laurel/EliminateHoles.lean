@@ -309,15 +309,15 @@ private theorem elimStmtList_id (stmts : List StmtExprMd) (s : ElimHoleState)
     rfl
 
 private theorem elimExprList_id (args : List StmtExprMd) (s : ElimHoleState)
-  (h : ∀ a ∈ args, noHolesMd a = true) : (args.mapM elimExpr) s = (args, s) := by
-  induction args generalizing s with
-  | nil => rfl
-  | cons x xs ih =>
+  (h : ∀ a ∈ args, noHolesMd a = true) : (args.mapM elimExpr) s = (args, s) :=
+  match args, h with
+  | [], _ => rfl
+  | x :: xs, h => by
     show (List.mapM elimExpr (x :: xs)) s = _
     rw [List.mapM_cons]
-    simp only [bind, StateT.bind, elimExpr_id x s (h x (.head xs)), pure, StateT.pure, ih s (fun a ha => h a (.tail x ha))]
+    simp only [bind, StateT.bind, elimExpr_id x s (h x (.head xs)), pure, StateT.pure,
+      elimExprList_id xs s (fun a ha => h a (.tail x ha))]
   termination_by sizeOf args
-  decreasing_by all_goals (simp_wf; first | term_by_mem | omega | exact sorry)
 end
 
 private theorem elimProcedure_id (proc : Procedure) (s : ElimHoleState)

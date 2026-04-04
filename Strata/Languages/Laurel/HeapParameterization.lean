@@ -616,6 +616,17 @@ def heapParameterization (model: SemanticModel) (program : Program) : Program :=
     staticProcedures := heapConstants.staticProcedures ++ procs',
     types := fieldDatatype :: heapConstants.types ++ [boxDatatype] ++ types' }
 
+theorem heapTransformProcedure_noHeap (model : SemanticModel) (proc : Procedure)
+    (s : TransformState)
+    (hNoRead : s.heapReaders.contains proc.name = false)
+    (hNoWrite : s.heapWriters.contains proc.name = false) :
+    (heapTransformProcedure model proc) s = (proc, s) := by
+  simp only [heapTransformProcedure, writesHeap, readsHeap,
+    bind, StateT.bind, get, MonadState.get, StateT.get,
+    pure, StateT.pure, getThe, MonadStateOf.get, hNoWrite, hNoRead, ite_false,
+    Functor.map, StateT.map, Id.run]
+  rfl
+
 end Strata.Laurel
 
 end -- public section

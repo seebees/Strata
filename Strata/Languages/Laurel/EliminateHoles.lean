@@ -146,7 +146,7 @@ def eliminateHoles (program : Program) : Program :=
 end -- public section
 
 mutual
-public def noHolesMd (e : StmtExprMd) : Bool := noHoles e.val
+@[simp] public def noHolesMd (e : StmtExprMd) : Bool := noHoles e.val
   termination_by sizeOf e
   decreasing_by cases e; term_by_mem
 
@@ -174,6 +174,30 @@ public def noHoles : StmtExpr → Bool
   termination_by e => sizeOf e
   decreasing_by all_goals (simp_wf; try term_by_mem)
 end
+
+-- Equation lemmas for cross-module use
+@[simp] public theorem noHolesMd_mk (val : StmtExpr) (md : MetaData) : noHolesMd ⟨val, md⟩ = noHoles val := by unfold noHolesMd; rfl
+@[simp] public theorem noHoles_hole_true (ty) : noHoles (.Hole true ty) = false := by unfold noHoles; rfl
+@[simp] public theorem noHoles_hole_false (ty) : noHoles (.Hole false ty) = true := by unfold noHoles; rfl
+@[simp] public theorem noHoles_po (op args) : noHoles (.PrimitiveOp op args) = args.attach.all (fun ⟨a, _⟩ => noHolesMd a) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_sc (c args) : noHoles (.StaticCall c args) = args.attach.all (fun ⟨a, _⟩ => noHolesMd a) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_ic (t c args) : noHoles (.InstanceCall t c args) = (noHolesMd t && args.attach.all (fun ⟨a, _⟩ => noHolesMd a)) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_re (l r) : noHoles (.ReferenceEquals l r) = (noHolesMd l && noHolesMd r) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_ite (c t e) : noHoles (.IfThenElse c t e) = (noHolesMd c && noHolesMd t && match e with | some e => noHolesMd e | none => true) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_block (stmts l) : noHoles (.Block stmts l) = stmts.attach.all (fun ⟨s, _⟩ => noHolesMd s) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_assign (ts v) : noHoles (.Assign ts v) = noHolesMd v := by unfold noHoles; rfl
+@[simp] public theorem noHoles_lv (n ty init) : noHoles (.LocalVariable n ty init) = (match init with | some i => noHolesMd i | none => true) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_while (c invs dec body) : noHoles (.While c invs dec body) = (noHolesMd c && invs.attach.all (fun ⟨i, _⟩ => noHolesMd i) && (match dec with | some d => noHolesMd d | none => true) && noHolesMd body) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_ret (v) : noHoles (.Return v) = (match v with | some v => noHolesMd v | none => true) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_assert (c) : noHoles (.Assert c) = noHolesMd c := by unfold noHoles; rfl
+@[simp] public theorem noHoles_assume (c) : noHoles (.Assume c) = noHolesMd c := by unfold noHoles; rfl
+@[simp] public theorem noHoles_old (v) : noHoles (.Old v) = noHolesMd v := by unfold noHoles; rfl
+@[simp] public theorem noHoles_fresh (v) : noHoles (.Fresh v) = noHolesMd v := by unfold noHoles; rfl
+@[simp] public theorem noHoles_assigned (n) : noHoles (.Assigned n) = noHolesMd n := by unfold noHoles; rfl
+@[simp] public theorem noHoles_proveby (v p) : noHoles (.ProveBy v p) = (noHolesMd v && noHolesMd p) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_contractof (ty f) : noHoles (.ContractOf ty f) = noHolesMd f := by unfold noHoles; rfl
+@[simp] public theorem noHoles_forall (p trigger body) : noHoles (.Forall p trigger body) = ((match trigger with | some t => noHolesMd t | none => true) && noHolesMd body) := by unfold noHoles; rfl
+@[simp] public theorem noHoles_exists (p trigger body) : noHoles (.Exists p trigger body) = ((match trigger with | some t => noHolesMd t | none => true) && noHolesMd body) := by unfold noHoles; rfl
 
 /-- A program has no deterministic holes. -/
 public def programNoHoles (program : Program) : Bool :=

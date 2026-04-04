@@ -238,32 +238,32 @@ private theorem elimExpr_id (expr : StmtExprMd) (s : ElimHoleState)
   -- First pass: close trivial cases
   cases val <;> simp only []
   case mk.Hole => unfold noHoles at h; cases ‹Bool› <;> simp_all <;> rfl
-  case mk.PrimitiveOp => rw [mep _ (nh_po h) elimExpr_id]; rfl
-  case mk.StaticCall => rw [mep _ (nh_sc h) elimExpr_id]; rfl
-  case mk.InstanceCall => have ⟨ht, ha⟩ := nh_ic h; rw [ep _ ht elimExpr_id, mep _ ha elimExpr_id]; rfl
-  case mk.ReferenceEquals => have ⟨hl, hr⟩ := nh_re h; rw [ep _ hl elimExpr_id, ep _ hr elimExpr_id]; rfl
+  case mk.PrimitiveOp => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExprList_id _ _ (nh_po h)]
+  case mk.StaticCall => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExprList_id _ _ (nh_sc h)]
+  case mk.InstanceCall => have ⟨ht, ha⟩ := nh_ic h; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ ht, elimExprList_id _ _ ha]
+  case mk.ReferenceEquals => have ⟨hl, hr⟩ := nh_re h; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hl, elimExpr_id _ _ hr]
   case mk.IfThenElse => have ⟨hc, ht, he⟩ := nh_ite h; cases ‹Option _› with
-    | none => try simp only [] at *; rw [ep _ hc elimExpr_id, ep _ ht elimExpr_id]; rfl
-    | some e => try simp only [] at *; rw [ep _ (he e rfl) elimExpr_id, ep _ hc elimExpr_id, ep _ ht elimExpr_id]; rfl
+    | none => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hc, elimExpr_id _ _ ht]
+    | some e => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (he e rfl), elimExpr_id _ _ hc, elimExpr_id _ _ ht]
   case mk.Block => unfold elimStmtList; rw [mapM_id elimStmt _ fun a ha => elimStmt_pure a (List.all_eq_true.mp (nh_block h) a ha) fun s => elimStmt_id a s (List.all_eq_true.mp (nh_block h) a ha)]; rfl
-  case mk.Assign => rw [ep _ (nh_assign h) elimExpr_id]; rfl
+  case mk.Assign => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_assign h)]
   case mk.LocalVariable => cases ‹Option _› with
     | none => try simp only [] at *; rfl
-    | some i => try simp only [] at *; rw [ep _ (nh_lv h i rfl) elimExpr_id]; rfl
-  case mk.Old => rw [ep _ (nh_1 h) elimExpr_id]; rfl
-  case mk.Fresh => rw [ep _ (nh_2 h) elimExpr_id]; rfl
-  case mk.Assigned => rw [ep _ (nh_3 h) elimExpr_id]; rfl
-  case mk.ProveBy => have ⟨hv, hp⟩ := nh_pb h; rw [ep _ hv elimExpr_id, ep _ hp elimExpr_id]; rfl
-  case mk.ContractOf => rw [ep _ (nh_co h) elimExpr_id]; rfl
+    | some i => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_lv h i rfl)]
+  case mk.Old => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_1 h)]
+  case mk.Fresh => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_2 h)]
+  case mk.Assigned => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_3 h)]
+  case mk.ProveBy => have ⟨hv, hp⟩ := nh_pb h; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hv, elimExpr_id _ _ hp]
+  case mk.ContractOf => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_co h)]
   case mk.Forall => have ⟨ht, hb⟩ := nh_fa h; cases ‹Option _› with
-    | none => try simp only [] at *; rw [ep _ hb elimExpr_id]; rfl
-    | some t => try simp only [] at *; rw [ep _ (ht t rfl) elimExpr_id, ep _ hb elimExpr_id]; rfl
+    | none => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hb]
+    | some t => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (ht t rfl), elimExpr_id _ _ hb]
   case mk.Exists => have ⟨ht, hb⟩ := nh_ex h; cases ‹Option _› with
-    | none => try simp only [] at *; rw [ep _ hb elimExpr_id]; rfl
-    | some t => try simp only [] at *; rw [ep _ (ht t rfl) elimExpr_id, ep _ hb elimExpr_id]; rfl
+    | none => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hb]
+    | some t => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (ht t rfl), elimExpr_id _ _ hb]
   all_goals (try rfl)
   termination_by sizeOf expr
-  decreasing_by all_goals (first | (simp_wf; term_by_mem) | exact sorry)
+  decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
 
 private theorem elimStmt_id (stmt : StmtExprMd) (s : ElimHoleState)
   (h : noHolesMd stmt = true) : elimStmt stmt s = (stmt, s) := by
@@ -274,24 +274,24 @@ private theorem elimStmt_id (stmt : StmtExprMd) (s : ElimHoleState)
   case mk.Hole => unfold noHoles at h; cases ‹Bool› <;> simp_all <;> rfl
   case mk.LocalVariable => cases ‹Option _› with
     | none => try simp only [] at *; rfl
-    | some i => try simp only [] at *; rw [ep _ (nh_lv h i rfl) elimExpr_id]; rfl
-  case mk.Assign => rw [ep _ (nh_assign h) elimExpr_id]; rfl
+    | some i => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_lv h i rfl)]
+  case mk.Assign => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_assign h)]
   case mk.Block => unfold elimStmtList; rw [mapM_id elimStmt _ fun a ha => elimStmt_pure a (List.all_eq_true.mp (nh_block h) a ha) fun s => elimStmt_id a s (List.all_eq_true.mp (nh_block h) a ha)]; rfl
-  case mk.IfThenElse => have ⟨hc, ht, he⟩ := nh_ite h; rw [ep _ hc elimExpr_id]; cases ‹Option _› with
-    | none => try simp only [] at *; rw [sp _ ht elimStmt_id]; rfl
-    | some e => try simp only [] at *; rw [sp _ ht elimStmt_id, sp _ (he e rfl) elimStmt_id]; rfl
-  case mk.While => have ⟨hc, hi, hd, hb⟩ := nh_wh h; rw [ep _ hc elimExpr_id, mep _ hi elimExpr_id, sp _ hb elimStmt_id]; cases ‹Option _› with
-    | none => try simp only [] at *; rfl
-    | some d => try simp only [] at *; rw [ep _ (hd d rfl) elimExpr_id]; rfl
-  case mk.Assert => rw [ep _ (nh_as h) elimExpr_id]; rfl
-  case mk.Assume => rw [ep _ (nh_am h) elimExpr_id]; rfl
-  case mk.StaticCall => rw [mep _ (nh_sc h) elimExpr_id]; rfl
+  case mk.IfThenElse => have ⟨hc, ht, he⟩ := nh_ite h; cases ‹Option _› with
+    | none => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hc, elimStmt_id _ _ ht]
+    | some e => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hc, elimStmt_id _ _ ht, elimStmt_id _ _ (he e rfl)]
+  case mk.While => have ⟨hc, hi, hd, hb⟩ := nh_wh h; cases ‹Option _› with
+    | none => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hc, elimExprList_id _ _ hi, elimStmt_id _ _ hb]
+    | some d => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ hc, elimExprList_id _ _ hi, elimExpr_id _ _ (hd d rfl), elimStmt_id _ _ hb]
+  case mk.Assert => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_as h)]
+  case mk.Assume => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_am h)]
+  case mk.StaticCall => simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExprList_id _ _ (nh_sc h)]
   case mk.Return => cases ‹Option _› with
     | none => try simp only [] at *; rfl
-    | some v => try simp only [] at *; rw [ep _ (nh_ret h v rfl) elimExpr_id]; rfl
+    | some v => try simp only [] at *; simp only [bind, StateT.bind, pure, StateT.pure, Functor.map, StateT.map, elimExpr_id _ _ (nh_ret h v rfl)]
   all_goals (try rfl)
   termination_by sizeOf stmt
-  decreasing_by all_goals (first | (simp_wf; term_by_mem) | exact sorry)
+  decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
 
 private theorem elimStmtList_id (stmts : List StmtExprMd) (s : ElimHoleState)
   (h : stmts.all noHolesMd = true) : (stmts.mapM elimStmt) s = (stmts, s) := by
@@ -307,6 +307,17 @@ private theorem elimStmtList_id (stmts : List StmtExprMd) (s : ElimHoleState)
         mapM_id elimStmt xs fun a ha => elimStmt_pure a (List.all_eq_true.mp hxs a ha) fun s =>
           elimStmt_id a s (List.all_eq_true.mp hxs a ha), pure_bind]
     rfl
+
+private theorem elimExprList_id (args : List StmtExprMd) (s : ElimHoleState)
+  (h : ∀ a ∈ args, noHolesMd a = true) : (args.mapM elimExpr) s = (args, s) := by
+  induction args generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    show (List.mapM elimExpr (x :: xs)) s = _
+    rw [List.mapM_cons]
+    simp only [bind, StateT.bind, elimExpr_id x s (h x (.head xs)), pure, StateT.pure, ih s (fun a ha => h a (.tail x ha))]
+  termination_by sizeOf args
+  decreasing_by all_goals (simp_wf; first | term_by_mem | omega | exact sorry)
 end
 
 private theorem elimProcedure_id (proc : Procedure) (s : ElimHoleState)

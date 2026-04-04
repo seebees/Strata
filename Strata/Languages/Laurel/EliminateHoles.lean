@@ -206,6 +206,13 @@ public def programNoHoles (program : Program) : Bool :=
     | .Opaque _ (some impl) _ => noHolesMd impl
     | _ => true
 
+@[simp] public theorem programNoHoles_eq (program : Program) :
+    programNoHoles program = program.staticProcedures.all fun proc => match proc.body with
+      | .Transparent b => noHolesMd b
+      | .Opaque _ (some impl) _ => noHolesMd impl
+      | _ => true := by
+  unfold programNoHoles; rfl
+
 
 private theorem wm_eta (e : WithMetadata α) : (⟨e.val, e.md⟩ : WithMetadata α) = e := by cases e; rfl
 

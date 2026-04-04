@@ -291,7 +291,24 @@ end -- section
 private theorem inferProcedure_id (proc : Procedure) (s : InferHoleState)
     (hBody : match proc.body with | .Transparent b => noHolesMd b = true | .Opaque _ (some impl) _ => noHolesMd impl = true | _ => True) :
     ∃ s', inferProcedure proc s = (proc, s') := by
-  sorry
+  unfold inferProcedure
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
+  cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
+  simp only [] at hBody ⊢
+  cases hb : body with
+  | Transparent b =>
+    simp only [hb] at hBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
+    have hStmt := inferStmt_id b ({ s with currentOutputType := match outputs with | [single] => single.type | _ => defaultHoleType }) hBody
+    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet, hStmt]; exact ⟨_, rfl⟩
+  | Opaque posts impl mods =>
+    simp only [hb] at hBody
+    cases impl with
+    | some i =>
+      have hStmt := inferStmt_id i ({ s with currentOutputType := match outputs with | [single] => single.type | _ => defaultHoleType }) hBody
+      simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet, hStmt]; exact ⟨_, rfl⟩
+    | none => exact ⟨_, rfl⟩
+  | Abstract _ => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; exact ⟨_, rfl⟩
+  | External => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; exact ⟨_, rfl⟩
 
 private theorem mapM_inferProcedure_id (procs : List Procedure) (s : InferHoleState)
     (hAll : ∀ p ∈ procs, match p.body with | .Transparent b => noHolesMd b = true | .Opaque _ (some impl) _ => noHolesMd impl = true | _ => True) :
@@ -303,6 +320,14 @@ private theorem mapM_inferProcedure_id (procs : List Procedure) (s : InferHoleSt
 public theorem inferHoleTypes_noop (model : SemanticModel) (program : Program)
     (hNoHoles : programNoHoles program = true) :
     inferHoleTypes model program = program := by
-  sorry
+  unfold inferHoleTypes
+  have hAll : ∀ p ∈ program.staticProcedures,
+      match p.body with | .Transparent b => noHolesMd b = true | .Opaque _ (some impl) _ => noHolesMd impl = true | _ => True := by
+    intro p hp
+    rw [programNoHoles_eq] at hNoHoles
+    have hmem := List.all_eq_true.mp hNoHoles p hp
+    split at hmem <;> simp_all
+  obtain ⟨s', hs⟩ := mapM_inferProcedure_id program.staticProcedures {model} hAll
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, StateT.run, hs]
 
 end Laurel

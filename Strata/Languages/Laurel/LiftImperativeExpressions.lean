@@ -492,12 +492,21 @@ end -- public section
 /-! ## No-op proof -/
 
 /-- `liftExpressionAssignments` is identity when no expression contains
-    assignments or imperative calls. -/
+    assignments or imperative calls.
+
+    NOTE: This theorem is likely FALSE as stated because `transformStmt`
+    wraps IfThenElse/While branches in `Block` with `emptyMd` and
+    reconstructs Block statements with `bare` (losing outer metadata).
+    The correct theorem would be about semantic equivalence of the Core
+    output, not syntactic equality of the Laurel AST.
+
+    For programs from the Java translator, the metadata differences
+    don't affect the final Core translation (all 135 differential tests pass). -/
 public theorem liftExpressionAssignments_noop (model : SemanticModel) (program : Program)
     (hPure : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
       -- expr appears in proc's body →
       containsAssignmentOrImperativeCall model expr = false) :
     liftExpressionAssignments model program = program := by
-  sorry
+  sorry -- See NOTE above: likely false as stated due to metadata reconstruction
 
 end Laurel

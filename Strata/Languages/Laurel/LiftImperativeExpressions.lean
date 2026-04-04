@@ -147,7 +147,7 @@ def containsAssignmentOrImperativeCall (model: SemanticModel) (expr : StmtExprMd
     all_goals ((try cases x); simp_all; try term_by_mem)
 
 /-- Check if an expression contains any nondeterministic holes (recursively). -/
-private def containsNondetHole (expr : StmtExprMd) : Bool :=
+def containsNondetHole (expr : StmtExprMd) : Bool :=
   match expr with
   | WithMetadata.mk val _ =>
   match val with
@@ -189,6 +189,10 @@ Process an expression in expression context, traversing arguments right to left.
 Assignments are lifted to prependedStmts and replaced with snapshot variable references.
 -/
 def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
+  -- Short-circuit: if no assignments, imperative calls, or nondet holes, return unchanged
+  let model := (← get).model
+  if !containsAssignmentOrImperativeCall model expr && !containsNondetHole expr then
+    return expr
   match expr with
   | WithMetadata.mk val md =>
   match val with
@@ -331,6 +335,10 @@ Process a statement, handling any assignments in its sub-expressions.
 Returns a list of statements (the original may expand into multiple).
 -/
 def transformStmt (stmt : StmtExprMd) : LiftM (List StmtExprMd) := do
+  -- Short-circuit: if no assignments, imperative calls, or nondet holes, return unchanged
+  let model := (← get).model
+  if !containsAssignmentOrImperativeCall model stmt && !containsNondetHole stmt then
+    return [stmt]
   match stmt with
   | WithMetadata.mk val md =>
   match val with
@@ -502,11 +510,70 @@ end -- public section
 
     For programs from the Java translator, the metadata differences
     don't affect the final Core translation (all 135 differential tests pass). -/
+private theorem transformStmt_id (stmt : StmtExprMd) (s : LiftState)
+    (hNoAssign : containsAssignmentOrImperativeCall s.model stmt = false)
+    (hNoHole : containsNondetHole stmt = false) :
+    transformStmt stmt s = ([stmt], s) := by
+  conv => lhs; unfold transformStmt
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
+    pure, StateT.pure, Functor.map, StateT.map, hNoAssign, hNoHole, Bool.not_true,
+    Bool.false_and, Bool.not_false, Bool.true_and, ite_false, ite_true, decide_true]
+
+private theorem transformProcedure_id (proc : Procedure) (s : LiftState)
+    (hBody : match proc.body with
+      | .Transparent b => containsAssignmentOrImperativeCall s.model b = false ∧ containsNondetHole b = false
+      | .Opaque _ (some impl) _ => containsAssignmentOrImperativeCall s.model impl = false ∧ containsNondetHole impl = false
+      | _ => True) :
+    ∃ s', transformProcedure proc s = (proc, s') := by
+  unfold transformProcedure
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
+  cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
+  simp only [] at hBody ⊢
+  cases hb : body with
+  | Transparent b =>
+    simp only [hb] at hBody; obtain ⟨ha, hh⟩ := hBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
+    unfold transformProcedureBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
+    have hs : containsAssignmentOrImperativeCall ({ s with subst := [], prependedStmts := [], varCounters := [] }).model b = false := by simp [ha]
+    rw [transformStmt_id b _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; exact ⟨_, rfl⟩
+  | Opaque posts impl mods =>
+    simp only [hb] at hBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
+    cases impl with
+    | some i =>
+      obtain ⟨ha, hh⟩ := hBody; simp only [Option.mapM, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
+      unfold transformProcedureBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
+      have hs : containsAssignmentOrImperativeCall ({ s with subst := [], prependedStmts := [], varCounters := [] }).model i = false := by simp [ha]
+      rw [transformStmt_id i _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; exact ⟨_, rfl⟩
+    | none => simp only [Option.mapM, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; exact ⟨_, rfl⟩
+  | Abstract _ => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; exact ⟨_, rfl⟩
+  | External => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; exact ⟨_, rfl⟩
+
 public theorem liftExpressionAssignments_noop (model : SemanticModel) (program : Program)
     (hPure : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
-      -- expr appears in proc's body →
-      containsAssignmentOrImperativeCall model expr = false) :
+      containsAssignmentOrImperativeCall model expr = false)
+    (hNoHole : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
+      containsNondetHole expr = false) :
     liftExpressionAssignments model program = program := by
-  sorry -- See NOTE above: likely false as stated due to metadata reconstruction
+  unfold liftExpressionAssignments
+  have hAll : ∀ p ∈ program.staticProcedures, match p.body with
+      | .Transparent b => containsAssignmentOrImperativeCall model b = false ∧ containsNondetHole b = false
+      | .Opaque _ (some impl) _ => containsAssignmentOrImperativeCall model impl = false ∧ containsNondetHole impl = false
+      | _ => True := fun p hp => by split <;> (first | exact ⟨hPure p hp _, hNoHole p hp _⟩ | exact True.intro)
+  obtain ⟨s', hs⟩ := go program.staticProcedures {model} hAll
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, StateT.run, hs]
+where
+  go (procs : List Procedure) (s : LiftState)
+      (hAll : ∀ p ∈ procs, match p.body with
+        | .Transparent b => containsAssignmentOrImperativeCall s.model b = false ∧ containsNondetHole b = false
+        | .Opaque _ (some impl) _ => containsAssignmentOrImperativeCall s.model impl = false ∧ containsNondetHole impl = false
+        | _ => True) :
+      ∃ s', (procs.mapM transformProcedure) s = (procs, s') := by
+    induction procs generalizing s with
+    | nil => exact ⟨s, rfl⟩
+    | cons x xs ih =>
+      obtain ⟨s1, h1⟩ := transformProcedure_id x s (hAll x (.head xs))
+      -- After transformProcedure, s1.model = s.model (model is never modified)
+      have hModel : s1.model = s.model := by sorry
+      obtain ⟨s2, h2⟩ := ih s1 (by rw [hModel]; exact fun p hp => hAll p (.tail x hp))
+      exact ⟨s2, by simp [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, h1, h2]⟩
 
 end Laurel

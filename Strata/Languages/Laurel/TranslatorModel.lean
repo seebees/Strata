@@ -1018,6 +1018,12 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
     .app () (.op () ⟨"Bool.Not", ()⟩ none) (.eq () (translateExprModelMd e1) (translateExprModelMd e2))
   | .PrimitiveOp .Not [e] =>
     .app () (.op () ⟨"Bool.Not", ()⟩ none) (translateExprModelMd e)
+  | .PrimitiveOp .Neg [e] =>
+    .app () (.op () ⟨"Int.Neg", ()⟩ none) (translateExprModelMd e)
+  | .PrimitiveOp .AndThen [e1, e2] =>
+    .ite () (translateExprModelMd e1) (translateExprModelMd e2) (.boolConst () false)
+  | .PrimitiveOp .OrElse [e1, e2] =>
+    .ite () (translateExprModelMd e1) (.boolConst () true) (translateExprModelMd e2)
   | .PrimitiveOp op [e1, e2] =>
     let opName := match op with
       | .Add => "Int.Add" | .Sub => "Int.Sub" | .Mul => "Int.Mul"

@@ -1646,7 +1646,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
   { decls := [exceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ readFuncAxioms ++
     ancestorDecls ++ constraintFuncDecls ++ heapFuncDecls ++
     externalFuncDecls ++ transparentFuncDecls ++ instanceFuncDecls ++
-    procDecls ++ instanceProcDecls ++ witnessProcDecls }
+    procDecls ++ witnessProcDecls ++ instanceProcDecls }
 
 /-- The decls list produced by translateProgramModel, exposed for cross-module proofs. -/
 public def translateProgramModelDecls (program : Program) : List Core.Decl :=

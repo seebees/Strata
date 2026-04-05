@@ -1203,15 +1203,15 @@ public def translateStmtModel
     | .StaticCall callee args =>
       if isFunction callee.text then
         let coreExpr := translateExprModel init.val
-        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some coreExpr) .empty]
+        [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some coreExpr) .empty]
       else
         let coreArgs := args.map fun a => translateExprModel a.val
-        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
+        [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
          Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
          modelExceptionPropagation]
     | _ =>
       let coreExpr := translateExprModel init.val
-      [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some coreExpr) .empty]
+      [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some coreExpr) .empty]
   | .LocalVariable id _ none =>
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty]
   | .Assign [⟨.FieldSelect target fieldName, _⟩] value =>
@@ -1285,7 +1285,8 @@ end
   (id : Identifier) (ty : WithMetadata HighType) (init : StmtExprMd)
   (hNotStaticCall : ∀ c a, init.val ≠ .StaticCall c a)
   (hNotInstanceCall : ∀ t c a, init.val ≠ .InstanceCall t c a)
-  (hNotHole : ∀ n t, init.val ≠ .Hole n t) :
+  (hNotHole : ∀ n t, init.val ≠ .Hole n t)
+  (hNotUnused : id.text.startsWith "$unused_" = false) :
   translateStmtModel isFunction outputParams (.LocalVariable id ty (some init)) =
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (translateExprModel init.val)) .empty] := by
   rw [translateStmtModel.eq_def]
@@ -1464,7 +1465,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
   -- Procedure declarations (non-functional, non-external)
   let procDecls := procProcs.map (fun p => translateProcModel isFunc compositeNames p)
   -- Instance procedure declarations
-  let instanceProcs := withDefs.types.foldl (fun acc td =>
+  let instanceProcs := withDefs.types.foldl (fun (acc, outerCtr) td =>
     match td with
     | .Composite ct =>
       let pfx := ct.name.text ++ "."
@@ -1496,15 +1497,37 @@ public def translateProgramModel (program : Program) : Core.Program :=
         | s => s
         termination_by s => sizeOf s
         decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
-      let qualifyBody (body : Body) : Body := match body with
+      -- Count bare expression statements in a body
+      let countBareExprs (body : Body) : Nat := match body with
+        | .Transparent ⟨.Block stmts _, _⟩ =>
+          stmts.filter (fun s => match s.val with
+            | .Return _ | .Assign _ _ | .LocalVariable _ _ _ | .Assert _ | .Assume _
+            | .Block _ _ | .IfThenElse _ _ _ | .While _ _ _ _ | .StaticCall _ _
+            | .InstanceCall _ _ _ => false
+            | _ => true) |>.length
+        | _ => 0
+      let qualifyBody (counter : Nat) (body : Body) : Body := match body with
         | .Transparent ⟨.Block stmts label, md⟩ =>
-          .Transparent ⟨.Block (stmts.map qualifyStmt) label, md⟩
+          let (stmts', _) := stmts.foldl (fun (acc, cnt) s =>
+            match s.val with
+            | .Return _ | .Assign _ _ | .LocalVariable _ _ _ | .Assert _ | .Assume _
+            | .Block _ _ | .IfThenElse _ _ _ | .While _ _ _ _ | .StaticCall _ _
+            | .InstanceCall _ _ _ => (acc ++ [qualifyStmt s], cnt)
+            | _ =>
+              let unusedName := s!"$unused_{cnt}"
+              let newStmt : StmtExprMd := ⟨.LocalVariable { text := unusedName } ⟨.TInt, .empty⟩ (some (qualifyMd s)), .empty⟩
+              (acc ++ [newStmt], cnt + 1)) ([], counter + 1)
+          .Transparent ⟨.Block stmts' label, md⟩
         | other => other
-      acc ++ (ct.instanceProcedures.filter (!·.body.isExternal)
-      |>.map fun proc => { proc with
-        name := { proc.name with text := qualifiedName ct.name.text proc.name.text }
-        body := qualifyBody proc.body })
-    | _ => acc) ([] : List Procedure)
+      let (procs, nextCounter) := (ct.instanceProcedures.filter (!·.body.isExternal)).foldl
+        (fun (acc, ctr) proc =>
+          let p := { proc with
+            name := { proc.name with text := qualifiedName ct.name.text proc.name.text }
+            body := qualifyBody ctr proc.body }
+          (acc ++ [p], ctr + countBareExprs proc.body)) ([], outerCtr)
+      (acc ++ procs, nextCounter)
+    | _ => (acc, outerCtr)) (([] : List Procedure), 0)
+  let instanceProcs := instanceProcs.1
   let instanceProcDecls := instanceProcs.map (fun p => translateProcModel isFunc compositeNames p)
 
   -- Datatypes: translate each Laurel datatype to a Core type decl

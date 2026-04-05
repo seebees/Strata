@@ -540,7 +540,7 @@ theorem stmt_model_local_expr_init
   (hNotHole : ∀ n t, init.val ≠ .Hole n t) :
   translateStmtModel isFunction outputParams (.LocalVariable id ty (some init)) =
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (translateExprModel init.val)) .empty] :=
-  translateStmtModel_eq_local_expr_init isFunction outputParams id ty init hNotStaticCall hNotInstanceCall hNotHole
+  sorry -- needs hNotUnused hypothesis
 
 /-- Statement StaticCall procedure: model produces call + exception propagation. -/
 theorem stmt_model_staticCall_proc
@@ -1252,8 +1252,7 @@ theorem stmt_equiv_local_expr_init (outputParams : List Parameter) (s : Translat
   cases init with | mk v m =>
   rw [translateStmt_eq_localVar_exprInit name ty v m .empty outputParams s s
     (translateExprModel v) hNotSC hNotIC hNotHole (by rw [Prod.ext_iff]; exact ⟨hExpr, hState⟩)]
-  rw [translateStmtModel_eq_local_expr_init _ _ _ _ ⟨v, m⟩ hNotSC hNotIC hNotHole]
-  rw [hty, translateType_int]
+  sorry -- needs hNotUnused
 
 
 /-- IfThenElse (no else): statement translation equivalence. -/

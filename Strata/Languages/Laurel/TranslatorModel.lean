@@ -1284,6 +1284,9 @@ public def translateStmtModel
   | .Assume c =>
     let coreExpr := translateExprModel c.val
     [Core.Statement.assume "assume(0)" coreExpr .empty]
+  | .InstanceCall _ _ _ =>
+    -- Unresolved instance call in static proc → havoc $heap
+    [Core.Statement.havoc ⟨"$heap", ()⟩ .empty]
   | _ => []
   termination_by sizeOf stmt
   decreasing_by all_goals (simp_wf; try term_by_mem)

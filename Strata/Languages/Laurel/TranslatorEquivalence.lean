@@ -1141,6 +1141,34 @@ The equivalence holds because:
 /-- The main equivalence theorem (unconditional).
     For any Laurel program, translate produces the same Core program
     as translateProgramModel. -/
+/-
+Proof strategy for translate_eq_translateProgramModel:
+
+1. Unfold `translate` into its pipeline:
+   addCoreDefs → resolve → heapParam → resolve → typeHierarchy → resolve →
+   modifiesClauses → resolve → resolve → inferHoleTypes → eliminateHoles →
+   desugarShortCircuit → liftExpressionAssignments → eliminateReturnsInExpression →
+   resolve → constrainedTypeElim → resolve → translateLaurelToCore
+
+2. The key decomposition:
+   a) `translateLaurelToCore_eq_model`: translateLaurelToCore on the final
+      (resolved + transformed) program = translateProgramModel on the original.
+      This is the CORE lemma. It requires showing that:
+      - The procedure list after all passes + resolution has the same
+        non-external procedures as the original (modulo heap/type additions)
+      - Each procedure translates the same way in both paths
+      - The type/constant declarations match
+
+   b) The pass pipeline produces a specific program structure that
+      translateLaurelToCore can work with.
+
+3. The proof of (a) uses:
+   - Expression equivalences (model_matches_real_*)
+   - Statement equivalences (stmt_equiv_*)
+   - Procedure equivalence (proc_equiv_simple)
+   - Resolution invariance (defineName_preserves_text)
+   - Heap/type hierarchy procedure preservation
+-/
 theorem translate_eq_translateProgramModel (program : Program) :
     (translate {} program).1 = some (translateProgramModel program) := by
   sorry

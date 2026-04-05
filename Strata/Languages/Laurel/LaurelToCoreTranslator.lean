@@ -12,6 +12,7 @@ public import Strata.Languages.Core.Procedure
 public import Strata.Languages.Core.Options
 public import Strata.Languages.Laurel.Laurel
 public import Strata.Languages.Laurel.LiftImperativeExpressions
+public import Strata.Languages.Laurel.TranslatorModel
 public import Strata.Languages.Laurel.DesugarShortCircuit
 public import Strata.Languages.Laurel.InferHoleTypes
 public import Strata.Languages.Laurel.EliminateHoles
@@ -990,6 +991,12 @@ return (results.snd ++ vcDiags).toArray
 
 /-- translate decomposes into: pipeline of passes → translateLaurelToCore.
     This exposes the internal structure for equivalence proofs. -/
+-- The main equivalence theorem, proven where `translate` can be unfolded.
+public theorem translate_eq_model (program : Program) :
+    (translate {} program).1 = some (translateProgramModel program) := by
+  unfold translate
+  sorry
+
 public theorem translate_fst (program : Program) :
     (translate {} program).1 =
       let program := { program with

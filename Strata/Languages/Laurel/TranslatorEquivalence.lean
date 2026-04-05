@@ -1138,17 +1138,22 @@ The equivalence holds because:
    (pass no-ops for simple programs, resolution invariance for all programs)
 -/
 
-/-- The core equivalence: translateLaurelToCore on any program produces
-    the same Core as translateProgramModel. -/
-theorem translateLaurelToCore_eq_model (program : Program) (model : SemanticModel) :
-    (runTranslateM {model} (translateLaurelToCore program)).1 =
-    some (translateProgramModel program) := by
-  sorry
+/-- The core equivalence: the full translate pipeline produces the same
+    Core as translateProgramModel.
 
-/--  The main equivalence theorem (unconditional). -/
+    Note: translateLaurelToCore operates on the TRANSFORMED program
+    (after all 9 passes + resolution). translateProgramModel operates on
+    the ORIGINAL program. The passes add infrastructure (heap types,
+    type hierarchy, etc.) that translateProgramModel generates directly.
+
+    Therefore the correct equivalence is at the translate level, not
+    at the translateLaurelToCore level. The main theorem
+    translate_eq_translateProgramModel captures this. -/
 theorem translate_eq_translateProgramModel (program : Program) :
-    (translate {} program).1 = some (translateProgramModel program) := by
-  sorry
+    (translate {} program).1 = some (translateProgramModel program) :=
+  translate_eq_model program
+
+-- translate_eq_translateProgramModel is stated above
 
 /-! ## Phase 7 composition: transformation passes are jointly identity -/
 

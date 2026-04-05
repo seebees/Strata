@@ -1115,6 +1115,21 @@ theorem sixPassesNoop (model : SemanticModel) (program : Program)
 
 
 
+/-! ## Statement-level equivalences -/
+
+/-- Return none: statement translation equivalence. -/
+theorem stmt_equiv_return_none (outputParams : List Parameter) (s : TranslateState) :
+    (translateStmt outputParams ⟨.Return none, .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text)) (.Return none)) := by
+  rw [translateStmt_eq_return_none, translateStmtModel_eq_return_none]
+
+/-- Local variable (no init): statement translation equivalence. -/
+theorem stmt_equiv_local_no_init (outputParams : List Parameter) (s : TranslateState)
+    (name : Identifier) (ty : WithMetadata HighType) :
+    (translateStmt outputParams ⟨.LocalVariable name ty none, .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text)) (.LocalVariable name ty none)) := by
+  sorry
+
 /-! ## Step 2: Procedure translation equivalence
 
 The next step toward full `translate = translateProgramModel` equivalence.

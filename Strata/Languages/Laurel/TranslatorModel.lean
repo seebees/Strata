@@ -1385,13 +1385,16 @@ end
   let inputs := proc.inputs.map translateParam
   let heapInput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$heap_in", ()⟩, Lambda.LMonoTy.tcons "Heap" [])
+  let heapInputName := if writesHeap then "$heap_in" else "$heap"
+  let heapInput : Lambda.Identifier Unit × Lambda.LMonoTy :=
+    (⟨heapInputName, ()⟩, Lambda.LMonoTy.tcons "Heap" [])
   let inputs := if needsHeap then heapInput :: inputs else inputs
   let outputs := proc.outputs.map translateParam
   let heapOutput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$heap", ()⟩, Lambda.LMonoTy.tcons "Heap" [])
   let resultOutput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])
-  let outputs := if needsHeap then heapOutput :: outputs ++ [resultOutput]
+  let outputs := if writesHeap then heapOutput :: outputs ++ [resultOutput]
     else outputs ++ [resultOutput]
   let header : Core.Procedure.Header := {
     name := ⟨proc.name.text, ()⟩
@@ -1405,7 +1408,7 @@ end
     | .Opaque _ (some impl) _ => translateStmtModel isFunction outParams impl.val
     | _ => []
   let heapInit := Core.Statement.set ⟨"$heap", ()⟩ (.fvar () ⟨"$heap_in", ()⟩ none) .empty
-  let bodyStmts := if needsHeap then heapInit :: bodyStmts else bodyStmts
+  let bodyStmts := if writesHeap then heapInit :: bodyStmts else bodyStmts
   let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
   let setResult := Core.Statement.set ⟨"$result", ()⟩ successCtor .empty
   let body := [setResult, Imperative.Stmt.block "$body" bodyStmts .empty]
@@ -1440,11 +1443,20 @@ public def translateProgramModel (program : Program) : Core.Program :=
         | e => e
         termination_by e => sizeOf e
         decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
-      let qualifyStmt (s : StmtExprMd) : StmtExprMd := match s.val with
-        | .Assign [⟨.FieldSelect target fieldName, tmd⟩] value =>
+      let rec qualifyStmt : StmtExprMd → StmtExprMd
+        | ⟨.Assign [⟨.FieldSelect target fieldName, tmd⟩] value, md⟩ =>
           ⟨.Assign [⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text }, tmd⟩]
-            (qualifyMd value), s.md⟩
-        | _ => s
+            (qualifyMd value), md⟩
+        | ⟨.Assign targets value, md⟩ =>
+          ⟨.Assign (targets.map qualifyMd) (qualifyMd value), md⟩
+        | ⟨.Return (some v), md⟩ => ⟨.Return (some (qualifyMd v)), md⟩
+        | ⟨.LocalVariable id ty (some init), md⟩ =>
+          ⟨.LocalVariable id ty (some (qualifyMd init)), md⟩
+        | ⟨.Assert c, md⟩ => ⟨.Assert (qualifyMd c), md⟩
+        | ⟨.Block stmts label, md⟩ => ⟨.Block (stmts.attach.map fun ⟨s, _⟩ => qualifyStmt s) label, md⟩
+        | s => s
+        termination_by s => sizeOf s
+        decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
       let qualifyBody (body : Body) : Body := match body with
         | .Transparent ⟨.Block stmts label, md⟩ =>
           .Transparent ⟨.Block (stmts.map qualifyStmt) label, md⟩

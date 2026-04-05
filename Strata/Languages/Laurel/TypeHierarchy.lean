@@ -494,23 +494,62 @@ theorem rewriteTypeHierarchyProcedure_id (proc : Procedure) (s : THState)
     (hNoPre : proc.preconditions = [])
     (hBody : match proc.body with
       | .Transparent b => noNewIsTypeMd b = true
-      | .Opaque _ (some impl) _ => noNewIsTypeMd impl = true
-      | _ => True) :
+      | .Opaque posts (some impl) modifies =>
+        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
+        noNewIsTypeMd impl = true ∧
+        (∀ m ∈ modifies, noNewIsTypeMd m = true)
+      | .Opaque posts none modifies =>
+        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
+        (∀ m ∈ modifies, noNewIsTypeMd m = true)
+      | .Abstract posts => ∀ p ∈ posts, noNewIsTypeMd p = true
+      | .External => True) :
     rewriteTypeHierarchyProcedure proc s = (proc, s) := by
   unfold rewriteTypeHierarchyProcedure
   simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil]
   cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
   simp only [] at hBody hNoPre ⊢; subst hNoPre
-  split at hBody <;> (try (dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; done))
-  all_goals sorry
+  split at hBody
+  -- Transparent b
+  next hBody => dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id _ _ hBody]
+  -- Opaque posts (some impl) modifies
+  next hBody =>
+    obtain ⟨hPosts, hImpl, hModifies⟩ := hBody
+    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+      mapM_plain_id _ s hPosts rewriteTypeHierarchyExpr_id,
+      rewriteTypeHierarchyExpr_id _ s hImpl,
+      mapM_plain_id _ s hModifies rewriteTypeHierarchyExpr_id]
+  -- Opaque posts none modifies
+  next hBody =>
+    obtain ⟨hPosts, hModifies⟩ := hBody
+    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+      mapM_plain_id _ s hPosts rewriteTypeHierarchyExpr_id,
+      mapM_plain_id _ s hModifies rewriteTypeHierarchyExpr_id]
+  -- Abstract posts
+  next hBody =>
+    have h := mapM_plain_id _ s hBody rewriteTypeHierarchyExpr_id
+    -- h : mapM rewriteTypeHierarchyExpr posts s = (posts, s)
+    -- The goal has `match mapM ... s with | (a, s) => ...`
+    -- We need to show this equals the RHS.
+    -- Key: `match x with | (a, b) => f a b` is `Prod.casesOn x (fun a b => f a b)`
+    -- So we can use congrArg with Prod.casesOn
+    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, h]
+  -- External
+  next => dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
 
 /-- When no procedure has New/IsType, mapM rewriteTypeHierarchyProcedure is identity. -/
 theorem typeHierarchyProcs_noNewIsType (procs : List Procedure) (s : THState)
     (hNoPre : ∀ p ∈ procs, p.preconditions = [])
     (hBody : ∀ p ∈ procs, match p.body with
       | .Transparent b => noNewIsTypeMd b = true
-      | .Opaque _ (some impl) _ => noNewIsTypeMd impl = true
-      | _ => True) :
+      | .Opaque posts (some impl) modifies =>
+        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
+        noNewIsTypeMd impl = true ∧
+        (∀ m ∈ modifies, noNewIsTypeMd m = true)
+      | .Opaque posts none modifies =>
+        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
+        (∀ m ∈ modifies, noNewIsTypeMd m = true)
+      | .Abstract posts => ∀ p ∈ posts, noNewIsTypeMd p = true
+      | .External => True) :
     (procs.mapM rewriteTypeHierarchyProcedure) s = (procs, s) := by
   induction procs generalizing s with
   | nil => rfl

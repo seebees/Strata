@@ -1125,10 +1125,12 @@ theorem stmt_equiv_return_none (outputParams : List Parameter) (s : TranslateSta
 
 /-- Local variable (no init): statement translation equivalence. -/
 theorem stmt_equiv_local_no_init (outputParams : List Parameter) (s : TranslateState)
-    (name : Identifier) (ty : WithMetadata HighType) :
+    (name : Identifier) (ty : WithMetadata HighType)
+    (hTy : ty.val = .TInt) :
     (translateStmt outputParams ⟨.LocalVariable name ty none, .empty⟩ s).1 =
     some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text)) (.LocalVariable name ty none)) := by
-  sorry
+  have hty : ty = ⟨HighType.TInt, ty.md⟩ := by cases ty; simp_all
+  rw [translateStmt_eq_localVar_noInit, translateStmtModel_eq_local_no_init, hty, translateType_int]
 
 /-! ## Step 2: Procedure translation equivalence
 

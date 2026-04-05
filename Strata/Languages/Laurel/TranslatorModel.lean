@@ -1041,6 +1041,9 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
     .ite () (translateExprModelMd cond) (translateExprModelMd thenB) (translateExprModelMd elseB)
   | .Block [single] _ => translateExprModelMd single
   | .Return (some v) => translateExprModelMd v
+  | .FieldSelect target fieldName =>
+    -- readField($heap, target, fieldName)
+    .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) (.fvar () ⟨"$heap", ()⟩ none)) (translateExprModelMd target)) (.op () ⟨fieldName.text, ()⟩ none)
   | .Forall ⟨name, _⟩ _ body =>
     .all () name.text none (translateExprModelMd body)
   | .Exists ⟨name, _⟩ _ body =>
@@ -1363,21 +1366,36 @@ end
       | .UserDefined n => if compositeNames.contains n.text then "Composite" else coreTypeName p.type.val
       | _ => coreTypeName p.type.val
     (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons tyName [])
+  -- Determine if this procedure reads/writes heap
+  let bodyExpr := match proc.body with
+    | .Transparent b => some b | .Opaque _ (some impl) _ => some impl | _ => none
+  let readsHeap := bodyExpr.any directlyReadsHeapMd
+  let writesHeap := bodyExpr.any directlyWritesHeapMd
+  let needsHeap := readsHeap || writesHeap
   let inputs := proc.inputs.map translateParam
+  let heapInput : Lambda.Identifier Unit × Lambda.LMonoTy :=
+    (⟨"$heap_in", ()⟩, Lambda.LMonoTy.tcons "Heap" [])
+  let inputs := if needsHeap then heapInput :: inputs else inputs
   let outputs := proc.outputs.map translateParam
+  let heapOutput : Lambda.Identifier Unit × Lambda.LMonoTy :=
+    (⟨"$heap", ()⟩, Lambda.LMonoTy.tcons "Heap" [])
   let resultOutput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])
+  let outputs := if needsHeap then heapOutput :: outputs ++ [resultOutput]
+    else outputs ++ [resultOutput]
   let header : Core.Procedure.Header := {
     name := ⟨proc.name.text, ()⟩
     typeArgs := []
     inputs := inputs
-    outputs := outputs ++ [resultOutput]
+    outputs := outputs
   }
   let outParams := proc.outputs.map (fun (p : Parameter) => p.name.text)
   let bodyStmts : Core.Statements := match proc.body with
     | .Transparent bodyExpr => translateStmtModel isFunction outParams bodyExpr.val
     | .Opaque _ (some impl) _ => translateStmtModel isFunction outParams impl.val
     | _ => []
+  let heapInit := Core.Statement.set ⟨"$heap", ()⟩ (.fvar () ⟨"$heap_in", ()⟩ none) .empty
+  let bodyStmts := if needsHeap then heapInit :: bodyStmts else bodyStmts
   let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
   let setResult := Core.Statement.set ⟨"$result", ()⟩ successCtor .empty
   let body := [setResult, Imperative.Stmt.block "$body" bodyStmts .empty]

@@ -1489,6 +1489,15 @@ public def translateProgramModel (program : Program) : Core.Program :=
       inputs := [(⟨ct.valueName.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName ct.base.val) [])],
       output := Lambda.LMonoTy.bool, body := some body }
   let witnessProcDecls := constrainedTypes.map fun ct =>
+    let md : Imperative.MetaData Core.Expression := .empty
+    let witnessId : Identifier := { text := "$witness", uniqueId := none }
+    let baseType := ct.base
+    let witnessInit : StmtExprMd :=
+      ⟨.LocalVariable witnessId baseType (some ct.witness), md⟩
+    let constraintCall : StmtExprMd :=
+      ⟨.StaticCall { text := ct.name.text ++ "$constraint", uniqueId := none }
+        [⟨.Identifier { witnessId with uniqueId := none }, md⟩], md⟩
+    let assertStmt : StmtExprMd := ⟨.Assert constraintCall, md⟩
     let witnessProc : Procedure := {
       name := { text := "$witness_" ++ ct.name.text, uniqueId := none }
       inputs := []
@@ -1497,8 +1506,8 @@ public def translateProgramModel (program : Program) : Core.Program :=
       determinism := .deterministic none
       decreases := none
       isFunctional := false
-      body := .Transparent ⟨.LiteralBool true, .empty⟩
-      md := .empty
+      body := .Transparent ⟨.Block [witnessInit, assertStmt] none, md⟩
+      md := md
     }
     translateProcModel isFunc witnessProc
   -- Read function axioms: ∀ v: int. readIntN(BoxInt(v)) == v

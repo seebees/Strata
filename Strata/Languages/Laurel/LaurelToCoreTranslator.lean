@@ -994,10 +994,9 @@ return (results.snd ++ vcDiags).toArray
 -- The main equivalence theorem, proven where `translate` can be unfolded.
 public theorem translate_eq_model (program : Program) :
     (translate {} program).1 = some (translateProgramModel program) := by
+  rw [translateProgramModel_eq_decls]
   unfold translate
-  -- The proof requires matching the pipeline output with translateProgramModel.
-  -- Both functions are in module files and can't be cross-unfolded.
-  -- The 135 differential tests verify this computationally.
+  -- Goal: pipeline.1 = some { decls := translateProgramModelDecls program }
   sorry
 
 public theorem translate_fst (program : Program) :

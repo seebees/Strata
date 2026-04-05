@@ -1546,6 +1546,17 @@ public def translateProgramModel (program : Program) : Core.Program :=
     constraintFuncDecls ++ externalFuncDecls ++ transparentFuncDecls ++ instanceFuncDecls ++
     procDecls ++ instanceProcDecls ++ witnessProcDecls }
 
+/-- The decls list produced by translateProgramModel, exposed for cross-module proofs. -/
+public def translateProgramModelDecls (program : Program) : List Core.Decl :=
+  (translateProgramModel program).decls
+
+/-- Equation lemma: translateProgramModel program has specific decls. -/
+@[simp] public theorem translateProgramModel_eq_decls (program : Program) :
+    translateProgramModel program =
+    { decls := translateProgramModelDecls program } := by
+  unfold translateProgramModelDecls; cases translateProgramModel program; rfl
+
+
 -- Note: model_first_decl_is_exception_result is true by construction
 -- but unprovable because translateProgramModel is partial.
 -- Validated by comprehensive differential tests.

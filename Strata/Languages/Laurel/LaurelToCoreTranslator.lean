@@ -1416,4 +1416,16 @@ private theorem binOp_eq (op : Core.Expression.Expr) (e1 e2 : StmtExprMd) (md : 
     TranslateM.map_some _ _ _ _ _ hBody]
   rfl
 
+/-! ## Translate decomposition -/
+
+/-- translate decomposes into: pipeline of passes → translateLaurelToCore.
+    This exposes the internal structure for equivalence proofs. -/
+public theorem translate_decomposition (program : Program) :
+    ∃ finalProgram model,
+      (translate {} program).1 =
+        (runTranslateM {model} (translateLaurelToCore finalProgram)).1 := by
+  unfold translate
+  sorry
+
+
 end Laurel

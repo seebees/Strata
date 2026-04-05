@@ -12,10 +12,10 @@ public import Strata.Languages.Core.Procedure
 public import Strata.Languages.Core.Options
 public import Strata.Languages.Laurel.Laurel
 public import Strata.Languages.Laurel.LiftImperativeExpressions
-import Strata.Languages.Laurel.DesugarShortCircuit
+public import Strata.Languages.Laurel.DesugarShortCircuit
 public import Strata.Languages.Laurel.InferHoleTypes
 public import Strata.Languages.Laurel.EliminateHoles
-import Strata.Languages.Laurel.EliminateReturnsInExpression
+public import Strata.Languages.Laurel.EliminateReturnsInExpression
 public import Strata.Languages.Laurel.HeapParameterization
 public import Strata.Languages.Laurel.TypeHierarchy
 public import Strata.Languages.Laurel.LaurelTypes
@@ -27,7 +27,7 @@ import Strata.DL.Imperative.Stmt
 import Strata.DL.Imperative.MetaData
 import Strata.DL.Lambda.LExpr
 import Strata.Languages.Laurel.LaurelFormat
-import Strata.Languages.Laurel.ConstrainedTypeElim
+public import Strata.Languages.Laurel.ConstrainedTypeElim
 import Strata.Util.Tactics
 
 open Core (VCResult VCResults VerifyOptions)
@@ -986,6 +986,36 @@ let vcDiags := match results.fst with
 return (results.snd ++ vcDiags).toArray
 
 
+/-! ## Translate decomposition -/
+
+/-- translate decomposes into: pipeline of passes → translateLaurelToCore.
+    This exposes the internal structure for equivalence proofs. -/
+public theorem translate_fst (program : Program) :
+    (translate {} program).1 =
+      let withDefs := { program with
+        staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+        types := coreDefinitionsForLaurel.types ++ program.types }
+      let r1 := resolve withDefs
+      let p1 := heapParameterization r1.model r1.program
+      let r2 := resolve p1 (some r1.model)
+      let p2 := typeHierarchyTransform r2.model r2.program
+      let r3 := resolve p2 (some r2.model)
+      let (p3, _) := modifiesClausesTransform r3.model r3.program
+      let r4 := resolve p3 (some r3.model)
+      let r5 := resolve r4.program (some r4.model)
+      let p4 := inferHoleTypes r5.model r5.program
+      let p5 := eliminateHoles p4
+      let p6 := desugarShortCircuit r5.model p5
+      let p7 := liftExpressionAssignments r5.model p6
+      let p8 := eliminateReturnsInExpressionTransform p7
+      let r6 := resolve p8 (some r5.model)
+      let (p9, _) := constrainedTypeElim r6.model r6.program
+      let r7 := resolve p9 (some r6.model)
+      (runTranslateM {model := r7.model} (translateLaurelToCore r7.program)).1 := by
+  unfold translate
+  sorry
+
+
 end -- public section
 
 /-! ### Equation lemmas for translateExpr (exported for equivalence proofs) -/
@@ -1415,17 +1445,6 @@ private theorem binOp_eq (op : Core.Expression.Expr) (e1 e2 : StmtExprMd) (md : 
   simp only [bind, OptionT.bind, StateT.bind, OptionT.mk, TranslateM.pure_eq,
     TranslateM.map_some _ _ _ _ _ hBody]
   rfl
-
-/-! ## Translate decomposition -/
-
-/-- translate decomposes into: pipeline of passes → translateLaurelToCore.
-    This exposes the internal structure for equivalence proofs. -/
-public theorem translate_decomposition (program : Program) :
-    ∃ finalProgram model,
-      (translate {} program).1 =
-        (runTranslateM {model} (translateLaurelToCore finalProgram)).1 := by
-  unfold translate
-  sorry
 
 
 end Laurel

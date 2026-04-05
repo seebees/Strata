@@ -74,7 +74,7 @@ private def desugarShortCircuitProcedure (model : SemanticModel) (proc : Procedu
     | other => other }
 
 /-- Desugar short-circuit operators in a program. -/
-def desugarShortCircuit (model : SemanticModel) (program : Program) : Program :=
+public def desugarShortCircuit (model : SemanticModel) (program : Program) : Program :=
   { program with staticProcedures := program.staticProcedures.map (desugarShortCircuitProcedure model) }
 
 end -- public section

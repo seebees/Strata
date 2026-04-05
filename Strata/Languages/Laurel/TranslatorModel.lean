@@ -1042,10 +1042,15 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
   | .Block [single] _ => translateExprModelMd single
   | .Return (some v) => translateExprModelMd v
   | .FieldSelect target fieldName =>
-    -- Box..intVal!(readField($heap, target, fieldName))
+    let cleanFieldName := if fieldName.text.endsWith ":bool" then fieldName.text.dropRight 5
+      else if fieldName.text.endsWith ":string" then fieldName.text.dropRight 7
+      else fieldName.text
     let readExpr : Core.Expression.Expr :=
-      .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) (.fvar () ⟨"$heap", ()⟩ none)) (translateExprModelMd target)) (.op () ⟨fieldName.text, ()⟩ none)
-    .app () (.op () ⟨"Box..intVal!", ()⟩ none) readExpr
+      .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) (.fvar () ⟨"$heap", ()⟩ none)) (translateExprModelMd target)) (.op () ⟨cleanFieldName, ()⟩ none)
+    let boxFn := if fieldName.text.endsWith ":bool" then "Box..boolVal!"
+      else if fieldName.text.endsWith ":string" then "Box..stringVal!"
+      else "Box..intVal!"
+    .app () (.op () ⟨boxFn, ()⟩ none) readExpr
   | .Forall ⟨name, _⟩ _ body =>
     .all () name.text none (translateExprModelMd body)
   | .Exists ⟨name, _⟩ _ body =>
@@ -1226,9 +1231,15 @@ public def translateStmtModel
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty]
   | .Assign [⟨.FieldSelect target fieldName, _⟩] value =>
     let targetExpr := translateExprModelMd target
-    let fieldOp : Core.Expression.Expr := .op () ⟨fieldName.text, ()⟩ none
+    let cleanFieldName := if fieldName.text.endsWith ":bool" then fieldName.text.dropRight 5
+      else if fieldName.text.endsWith ":string" then fieldName.text.dropRight 7
+      else fieldName.text
+    let fieldOp : Core.Expression.Expr := .op () ⟨cleanFieldName, ()⟩ none
     let valueExpr := translateExprModel value.val
-    let boxedValue : Core.Expression.Expr := .app () (.op () ⟨"BoxInt", ()⟩ none) valueExpr
+    let boxFn := if fieldName.text.endsWith ":bool" then "BoxBool"
+      else if fieldName.text.endsWith ":string" then "BoxString"
+      else "BoxInt"
+    let boxedValue : Core.Expression.Expr := .app () (.op () ⟨boxFn, ()⟩ none) valueExpr
     [Core.Statement.set ⟨"$heap", ()⟩
       (.app () (.app () (.app () (.app () (.op () ⟨"updateField", ()⟩ none)
         (.fvar () ⟨"$heap", ()⟩ none)) targetExpr) fieldOp) boxedValue) .empty]
@@ -1488,9 +1499,17 @@ public def translateProgramModel (program : Program) : Core.Program :=
     match td with
     | .Composite ct =>
       let pfx := ct.name.text ++ "."
+      -- Encode field type in qualified name for Box type selection
+      let fieldTypeSuffix (fieldName : String) : String :=
+        match ct.fields.find? (fun f => f.name.text == fieldName) with
+        | some f => match f.type.val with
+          | .TBool => ":bool"
+          | .TString => ":string"
+          | _ => ""
+        | none => ""
       let rec qualifyMd : StmtExprMd → StmtExprMd
         | ⟨.FieldSelect target fieldName, md⟩ =>
-          ⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text }, md⟩
+          ⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text ++ fieldTypeSuffix fieldName.text }, md⟩
         | ⟨.PrimitiveOp op args, md⟩ =>
           ⟨.PrimitiveOp op (args.attach.map fun ⟨a, _⟩ => qualifyMd a), md⟩
         | ⟨.StaticCall callee args, md⟩ =>
@@ -1500,7 +1519,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
         decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
       let rec qualifyStmt : StmtExprMd → StmtExprMd
         | ⟨.Assign [⟨.FieldSelect target fieldName, tmd⟩] value, md⟩ =>
-          ⟨.Assign [⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text }, tmd⟩]
+          ⟨.Assign [⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text ++ fieldTypeSuffix fieldName.text }, tmd⟩]
             (qualifyMd value), md⟩
         | ⟨.Assign targets value, md⟩ =>
           ⟨.Assign (targets.map qualifyMd) (qualifyMd value), md⟩

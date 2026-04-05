@@ -1223,6 +1223,12 @@ public def translateStmtModel
     let decExprCore := decreasesExpr.map fun d => translateExprModel d.val
     let bodyStmts := translateStmtModelMd isFunction outputParams body
     [Imperative.Stmt.loop condExpr decExprCore invExprs bodyStmts .empty]
+  | .Assert c =>
+    let coreExpr := translateExprModel c.val
+    [Core.Statement.assert "assert(0)" coreExpr .empty]
+  | .Assume c =>
+    let coreExpr := translateExprModel c.val
+    [Core.Statement.assume "assume(0)" coreExpr .empty]
   | _ => []
   termination_by sizeOf stmt
   decreasing_by all_goals (simp_wf; try term_by_mem)

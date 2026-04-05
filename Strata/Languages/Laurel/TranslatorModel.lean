@@ -1356,9 +1356,15 @@ end
 /-- Assemble a Laurel procedure into a Core procedure declaration -/
 @[expose] public def translateProcModel
   (isFunction : String → Bool)
+  (compositeNames : List String)
   (proc : Procedure) : Core.Decl :=
-  let inputs := proc.inputs.map translateParamModel
-  let outputs := proc.outputs.map translateParamModel
+  let translateParam (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
+    let tyName := match p.type.val with
+      | .UserDefined n => if compositeNames.contains n.text then "Composite" else coreTypeName p.type.val
+      | _ => coreTypeName p.type.val
+    (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons tyName [])
+  let inputs := proc.inputs.map translateParam
+  let outputs := proc.outputs.map translateParam
   let resultOutput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])
   let header : Core.Procedure.Header := {
@@ -1384,12 +1390,13 @@ public def translateProgramModel (program : Program) : Core.Program :=
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
     types := coreDefinitionsForLaurel.types ++ program.types
   }
+  let compositeNames := (allComposites withDefs).map (·.name.text)
   let allProcs := withDefs.staticProcedures.filter (fun p => !p.body.isExternal)
   let funcNames := allProcs.filter (·.isFunctional) |>.map (·.name.text)
   let isFunc := fun n => funcNames.contains n
   let (_, procProcs) := allProcs.partition (·.isFunctional)
   -- Procedure declarations (non-functional, non-external)
-  let procDecls := procProcs.map (translateProcModel isFunc)
+  let procDecls := procProcs.map (fun p => translateProcModel isFunc compositeNames p)
   -- Instance procedure declarations
   let instanceProcs := withDefs.types.foldl (fun acc td =>
     match td with
@@ -1398,7 +1405,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
         name := { proc.name with text := qualifiedName ct.name.text proc.name.text } })
     | _ => acc) ([] : List Procedure)
   let (instanceFuncProcs, instanceProcProcs) := instanceProcs.partition (·.isFunctional)
-  let instanceProcDecls := instanceProcProcs.map (translateProcModel isFunc)
+  let instanceProcDecls := instanceProcProcs.map (fun p => translateProcModel isFunc compositeNames p)
   -- Instance function declarations (isFunctional instance procedures → Core functions)
   let instanceFuncDecls := instanceFuncProcs.map fun proc =>
     let inputs := proc.inputs.map translateParamModel
@@ -1471,12 +1478,31 @@ public def translateProgramModel (program : Program) : Core.Program :=
     name := "Field", typeArgs := [], constrs := fieldConstrs,
     constrs_ne := by simp [fieldConstrs]; grind }])
 
-  -- Box: always synthetic MkBox for now.
-  -- The real translator only adds Box constructors (BoxInt, BoxBool, etc.)
-  -- when procedures actually access fields during heap transformation.
+  -- Box: generate constructors based on field types when procedures access fields.
+  let hasFieldAccess := composites.any fun ct =>
+    ct.instanceProcedures.any fun p => !p.body.isExternal
+  let boxConstrNames : List String := if !hasFieldAccess then [] else
+    composites.foldl (fun acc ct =>
+      ct.fields.foldl (fun acc f =>
+        let name := match f.type.val with
+          | .TInt => "BoxInt"
+          | .TBool => "BoxBool"
+          | .TString => "BoxString"
+          | .UserDefined _ => "BoxComposite"
+          | _ => "BoxInt"
+        if acc.contains name then acc else acc ++ [name]) acc) []
+  let boxConstrs : List (Lambda.LConstr Unit) := boxConstrNames.map fun n =>
+    let (argName, argTy) := match n with
+      | "BoxInt" => ("intVal", Lambda.LMonoTy.int)
+      | "BoxBool" => ("boolVal", Lambda.LMonoTy.bool)
+      | "BoxString" => ("stringVal", Lambda.LMonoTy.string)
+      | _ => ("compositeVal", Lambda.LMonoTy.tcons "Composite" [])
+    { name := ⟨n, ()⟩, args := [(⟨argName, ()⟩, argTy)], testerName := "Box..is" ++ n }
+  let boxConstrs := if boxConstrs.isEmpty then
+    [{ name := ⟨"MkBox", ()⟩, args := [] }] else boxConstrs
   let boxDecl := Core.Decl.type (.data [{
-    name := "Box", typeArgs := [], constrs := [{ name := ⟨"MkBox", ()⟩, args := [] }],
-    constrs_ne := by decide }])
+    name := "Box", typeArgs := [], constrs := boxConstrs,
+    constrs_ne := by simp only [boxConstrs]; split <;> simp_all [List.isEmpty_iff] }])
   -- Translate heapConstants.types (Composite, NotSupportedYet, Heap) through the same
   -- datatype translation as user types, but with typeTag field added to Composite
   -- Type mapper for heapConstants.types: maps UserDefined to the correct Core type
@@ -1563,7 +1589,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
       body := .Transparent ⟨.Block [witnessInit, assertStmt] none, md⟩
       md := md
     }
-    translateProcModel isFunc witnessProc
+    translateProcModel isFunc compositeNames witnessProc
   -- Read function axioms: ∀ v: int. readIntN(BoxInt(v)) == v
   -- Emitted when there are int fields on composites (which means BoxInt will exist).
   -- Also emitted for constrained int types (int8, int16, int32, etc.) since they

@@ -430,8 +430,8 @@ theorem real_not_composite : coreTypeName .TReal ≠ "Composite" := by
 
 theorem heap_is_heap : coreTypeName .THeap = "Heap" := coreTypeName_heap
 
-theorem userDefined_is_composite (name : Identifier) :
-  coreTypeName (.UserDefined name) = "Composite" := by
+theorem userDefined_is_name (name : Identifier) :
+  coreTypeName (.UserDefined name) = name.text := by
   simp [coreTypeName]
 
 theorem void_maps_to_bool : coreTypeName .TVoid = "bool" := coreTypeName_void

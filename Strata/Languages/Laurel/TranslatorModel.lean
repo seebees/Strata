@@ -802,7 +802,7 @@ inputs and outputs be?
   | .TTypedField _ => "Field"
   | .TCore s => s
   | .Unknown => "Any"
-  | .UserDefined _ => "Composite"  -- conservative: needs SemanticModel for datatypes
+  | .UserDefined name => name.text  -- use the type name directly
   | _ => "Composite"  -- TSet, TMap, TSequence need recursive translation
 
 /-- Core type name properties -/

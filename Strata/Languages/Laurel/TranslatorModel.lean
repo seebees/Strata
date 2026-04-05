@@ -1569,8 +1569,8 @@ public def translateProgramModel (program : Program) : Core.Program :=
   -- datatype translation as user types, but with typeTag field added to Composite
   -- Type mapper for heapConstants.types: maps UserDefined to the correct Core type
   -- based on what's known at translation time (before Box is generated)
-  let knownDatatypeNames := ["Field", "Box"] ++ (heapConstants.types ++ coreDefinitionsForLaurel.types).filterMap fun td =>
-    match td with | .Datatype dt => some dt.name.text | _ => none
+  let knownDatatypeNames := (["Field", "Box"] ++ (heapConstants.types ++ coreDefinitionsForLaurel.types).filterMap fun td =>
+    match td with | .Datatype dt => some dt.name.text | _ => none).filter fun n => !compositeNames.contains n
   let heapCoreTypeName (ty : HighType) : String :=
     match ty with
     | .UserDefined name =>
@@ -1613,9 +1613,16 @@ public def translateProgramModel (program : Program) : Core.Program :=
   -- Translate heap functions from heapConstants (non-external, isFunctional)
   let heapProcs := heapConstants.staticProcedures.filter (fun p => !p.body.isExternal && p.isFunctional)
   let heapFuncDecls := heapProcs.map fun proc =>
-    let inputs := proc.inputs.map translateParamModel
+    let translateHeapParam (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
+      let tyName := match p.type.val with
+        | .UserDefined n => if compositeNames.contains n.text then "Composite" else coreTypeName p.type.val
+        | _ => coreTypeName p.type.val
+      (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons tyName [])
+    let inputs := proc.inputs.map translateHeapParam
     let outputTy := match proc.outputs.head? with
-      | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
+      | some p => Lambda.LMonoTy.tcons (match p.type.val with
+          | .UserDefined n => if compositeNames.contains n.text then "Composite" else coreTypeName p.type.val
+          | _ => coreTypeName p.type.val) []
       | none => Lambda.LMonoTy.int
     let body := match proc.body with
       | .Transparent b => some (translateExprModel b.val)

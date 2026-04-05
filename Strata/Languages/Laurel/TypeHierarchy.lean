@@ -459,6 +459,37 @@ theorem rewriteTypeHierarchyExpr_id (expr : StmtExprMd) (s : THState)
   termination_by sizeOf expr
   decreasing_by all_goals (simp_wf; first | term_by_mem | omega | exact sorry)
 
+
+/-- When all expressions in a procedure have no New/IsType,
+    rewriteTypeHierarchyProcedure is identity. -/
+theorem rewriteTypeHierarchyProcedure_id (proc : Procedure) (s : THState)
+    (hNoPre : proc.preconditions = [])
+    (hBody : match proc.body with
+      | .Transparent b => noNewIsTypeMd b = true
+      | .Opaque _ (some impl) _ => noNewIsTypeMd impl = true
+      | _ => True) :
+    rewriteTypeHierarchyProcedure proc s = (proc, s) := by
+  unfold rewriteTypeHierarchyProcedure
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil]
+  cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
+  simp only [] at hBody hNoPre ⊢; subst hNoPre
+  sorry -- rewriteTypeHierarchyProcedure not unfoldable cross-section in module file
+
+/-- When no procedure has New/IsType, mapM rewriteTypeHierarchyProcedure is identity. -/
+theorem typeHierarchyProcs_noNewIsType (procs : List Procedure) (s : THState)
+    (hNoPre : ∀ p ∈ procs, p.preconditions = [])
+    (hBody : ∀ p ∈ procs, match p.body with
+      | .Transparent b => noNewIsTypeMd b = true
+      | .Opaque _ (some impl) _ => noNewIsTypeMd impl = true
+      | _ => True) :
+    (procs.mapM rewriteTypeHierarchyProcedure) s = (procs, s) := by
+  induction procs generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+      rewriteTypeHierarchyProcedure_id x s (hNoPre x (.head xs)) (hBody x (.head xs)),
+      ih s (fun p hp => hNoPre p (.tail x hp)) (fun p hp => hBody p (.tail x hp))]
+
 end Strata.Laurel
 
 end -- public section

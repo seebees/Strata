@@ -826,4 +826,10 @@ def resolve (program : Program) (existingModel: Option SemanticModel := none) : 
     errors := finalState.errors
   }
 
+
+/-- resolve preserves the number of static procedures. -/
+public theorem resolve_preserves_proc_count (program : Program) (existing : Option SemanticModel) :
+    (resolve program existing).program.staticProcedures.length = program.staticProcedures.length := by
+  sorry
+
 end

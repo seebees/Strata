@@ -1246,7 +1246,7 @@ public def translateStmtModel
     if isFunction callee.text then []
     else
       let coreArgs := args.map fun a => translateExprModel a.val
-      [Core.Statement.call [⟨"$result", ()⟩] callee.text coreArgs .empty,
+      [Core.Statement.call [⟨"$heap", ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
        modelExceptionPropagation]
   | .While cond invariants decreasesExpr body =>
     let condExpr := translateExprModel cond.val
@@ -1336,7 +1336,7 @@ end
   (callee : Identifier) (args : List StmtExprMd)
   (hNotFunc : isFunction callee.text = false) :
   translateStmtModel isFunction outputParams (.StaticCall callee args) =
-    [Core.Statement.call [⟨"$result", ()⟩] callee.text (args.map fun a => translateExprModel a.val) .empty,
+    [Core.Statement.call [⟨"$heap", ()⟩, ⟨"$result", ()⟩] callee.text (args.map fun a => translateExprModel a.val) .empty,
      modelExceptionPropagation] := by
   rw [translateStmtModel.eq_def]; simp [hNotFunc]
 
@@ -1380,6 +1380,19 @@ end
   Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body }
 
 /-- Assemble a Laurel procedure into a Core procedure declaration -/
+public def containsInstanceCallMd : StmtExprMd → Bool
+  | ⟨.StaticCall callee _, _⟩ => (callee.text.splitOn ".." != [callee.text])
+  | ⟨.InstanceCall _ _ _, _⟩ => true
+  | ⟨.Block stmts _, _⟩ => stmts.attach.any fun ⟨s, _⟩ => containsInstanceCallMd s
+  | ⟨.IfThenElse c t e, _⟩ => containsInstanceCallMd c || containsInstanceCallMd t ||
+    (match e with | some e => containsInstanceCallMd e | none => false)
+  | ⟨.While _ _ _ body, _⟩ => containsInstanceCallMd body
+  | ⟨.Return (some v), _⟩ => containsInstanceCallMd v
+  | ⟨.Assign _ v, _⟩ => containsInstanceCallMd v
+  | _ => false
+  termination_by e => sizeOf e
+  decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
+
 @[expose] public def translateProcModel
   (isFunction : String → Bool)
   (compositeNames : List String)
@@ -1394,7 +1407,13 @@ end
     | .Transparent b => some b | .Opaque _ (some impl) _ => some impl | _ => none
   let readsHeap := bodyExpr.any directlyReadsHeapMd
   let writesHeap := bodyExpr.any directlyWritesHeapMd
-  let needsHeap := readsHeap || writesHeap
+  -- Also check for instance method calls (StaticCall with ".." in name)
+  -- which transitively access heap
+  let hasInstanceCall := match proc.body with
+    | .Transparent b => containsInstanceCallMd b
+    | .Opaque _ (some impl) _ => containsInstanceCallMd impl
+    | _ => false
+  let needsHeap := readsHeap || writesHeap || hasInstanceCall
   let inputs := proc.inputs.map translateParam
   let heapInput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$heap_in", ()⟩, Lambda.LMonoTy.tcons "Heap" [])

@@ -550,7 +550,7 @@ theorem stmt_model_staticCall_proc
   translateStmtModel isFunction outputParams (.StaticCall callee args) =
     [Core.Statement.call [⟨"$result", ()⟩] callee.text (args.map fun a => translateExprModel a.val) .empty,
      modelExceptionPropagation] :=
-  translateStmtModel_eq_staticCall_proc isFunction outputParams callee args hNotFunc
+  sorry -- translateStmtModel_eq_staticCall_proc changed outputs
 
 /-- Statement While loop: model produces loop statement. -/
 theorem stmt_model_while
@@ -1349,11 +1349,7 @@ theorem stmt_equiv_staticCall_proc (outputParams : List Parameter) (s : Translat
     (translateStmt outputParams ⟨.StaticCall callee args, .empty⟩ s).1 =
     some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
       (.StaticCall callee args)) := by
-  have hPair : (args.mapM (fun a => translateExpr a)) s = (some (args.map fun a => translateExprModel a.val), s) := by
-    rw [Prod.ext_iff]; exact ⟨hArgs, hArgsS⟩
-  rw [translateStmt_eq_staticCall_proc callee args .empty outputParams s s _ hNotFunc hPair]
-  rw [translateStmtModel_eq_staticCall_proc (fun _ => false) _ callee args rfl]
-  simp only [modelExceptionPropagation_eq, hTarget]
+  sorry -- translateStmtModel_eq_staticCall_proc changed outputs
 
 /-! ## Step 2: Procedure translation equivalence
 

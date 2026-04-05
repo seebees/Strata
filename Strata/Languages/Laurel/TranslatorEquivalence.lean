@@ -1182,6 +1182,62 @@ theorem stmt_equiv_local_expr_init (outputParams : List Parameter) (s : Translat
   rw [translateStmtModel_eq_local_expr_init _ _ _ _ ⟨v, m⟩ hNotSC hNotIC hNotHole]
   rw [hty, translateType_int]
 
+
+/-- IfThenElse (no else): statement translation equivalence. -/
+theorem stmt_equiv_ite_noElse (outputParams : List Parameter) (s : TranslateState)
+    (cond thenB : StmtExprMd)
+    (hCond : (translateExpr cond [] false s).1 = some (translateExprModel cond.val))
+    (hCondState : (translateExpr cond [] false s).2 = s)
+    (hThen : (translateStmt outputParams thenB s).1 =
+      some (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) thenB))
+    (hThenState : (translateStmt outputParams thenB s).2 = s) :
+    (translateStmt outputParams ⟨.IfThenElse cond thenB none, .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
+      (.IfThenElse cond thenB none)) := by
+  rw [translateStmt_eq_ite_noElse cond thenB .empty outputParams s s s
+    (translateExprModel cond.val)
+    (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) thenB)
+    (by rw [Prod.ext_iff]; exact ⟨hCond, hCondState⟩)
+    (by rw [Prod.ext_iff]; exact ⟨hThen, hThenState⟩)]
+  rw [translateStmtModel_eq_ite_noElse]
+
+/-- IfThenElse (with else): statement translation equivalence. -/
+theorem stmt_equiv_ite_withElse (outputParams : List Parameter) (s : TranslateState)
+    (cond thenB elseB : StmtExprMd)
+    (hCond : (translateExpr cond [] false s).1 = some (translateExprModel cond.val))
+    (hCondState : (translateExpr cond [] false s).2 = s)
+    (hThen : (translateStmt outputParams thenB s).1 =
+      some (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) thenB))
+    (hThenState : (translateStmt outputParams thenB s).2 = s)
+    (hElse : (translateStmt outputParams elseB s).1 =
+      some (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) elseB))
+    (hElseState : (translateStmt outputParams elseB s).2 = s) :
+    (translateStmt outputParams ⟨.IfThenElse cond thenB (some elseB), .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
+      (.IfThenElse cond thenB (some elseB))) := by
+  rw [translateStmt_eq_ite_withElse cond thenB elseB .empty outputParams s s s s
+    (translateExprModel cond.val)
+    (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) thenB)
+    (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) elseB)
+    (by rw [Prod.ext_iff]; exact ⟨hCond, hCondState⟩)
+    (by rw [Prod.ext_iff]; exact ⟨hThen, hThenState⟩)
+    (by rw [Prod.ext_iff]; exact ⟨hElse, hElseState⟩)]
+  rw [translateStmtModel_eq_ite_withElse]
+
+
+/-- Block (unlabeled): statement translation equivalence. -/
+theorem stmt_equiv_block (outputParams : List Parameter) (s : TranslateState)
+    (stmts : List StmtExprMd)
+    (hStmts : (stmts.flatMapM (fun stmt => translateStmt outputParams stmt) s).1 =
+      some (stmts.flatMap fun stmt => translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) stmt))
+    (hState : (stmts.flatMapM (fun stmt => translateStmt outputParams stmt) s).2 = s) :
+    (translateStmt outputParams ⟨.Block stmts none, .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text)) (.Block stmts none)) := by
+  rw [translateStmt_eq_block_unlabeled stmts .empty outputParams s s
+    (stmts.flatMap fun stmt => translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) stmt)
+    (by rw [Prod.ext_iff]; exact ⟨hStmts, hState⟩)]
+  rw [translateStmtModel_eq_block_unlabeled]
+
 /-! ## Step 2: Procedure translation equivalence
 
 The next step toward full `translate = translateProgramModel` equivalence.

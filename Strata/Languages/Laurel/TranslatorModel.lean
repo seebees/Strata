@@ -1469,6 +1469,7 @@ public def containsInstanceCallMd : StmtExprMd → Bool
     outputs := outputs
   }
   let outParams := proc.outputs.map (fun (p : Parameter) => p.name.text)
+  let outParams := if writesHeap then "$heap" :: outParams else outParams
   let bodyStmts : Core.Statements := match proc.body with
     | .Transparent bodyExpr => translateStmtModel isFunction outParams bodyExpr.val
     | .Opaque _ (some impl) _ => translateStmtModel isFunction outParams impl.val

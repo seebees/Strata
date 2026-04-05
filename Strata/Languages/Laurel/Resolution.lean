@@ -830,6 +830,31 @@ def resolve (program : Program) (existingModel: Option SemanticModel := none) : 
 /-- resolve preserves the number of static procedures. -/
 public theorem resolve_preserves_proc_count (program : Program) (existing : Option SemanticModel) :
     (resolve program existing).program.staticProcedures.length = program.staticProcedures.length := by
-  sorry
-
+  unfold resolve
+  simp only []
+  -- The result program has staticProcedures := (program.staticProcedures.mapM resolveProcedure).run(state).1
+  -- Direct approach: simp the match away, then show mapM preserves length
+  -- resolve runs mapM resolveProcedure on program.staticProcedures.
+  -- mapM preserves length.
+  -- We prove this by showing resolve.program.staticProcedures comes from mapM.
+  -- Prove via a general mapM length lemma for StateM
+  suffices h : ∀ (f : Procedure → StateM ResolveState Procedure) (xs : List Procedure) (s : ResolveState),
+      (List.mapM f xs s).1.length = xs.length by
+    exact h resolveProcedure program.staticProcedures _
+  intro f xs s
+  induction xs generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.mapM_cons, bind, StateT.bind]
+    show (match f x s with | (a, s') => match List.mapM f xs s' with | (a_1, s'') => (a :: a_1, s'')).1.length = xs.length + 1
+    match hfx : f x s with
+    | (a, s') =>
+      simp only []
+      match hmxs : List.mapM f xs s' with
+      | (as', s'') =>
+        simp only [List.length_cons]
+        have := ih s'
+        rw [hmxs] at this
+        simp only [] at this
+        omega
 end

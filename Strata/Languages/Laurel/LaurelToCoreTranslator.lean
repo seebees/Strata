@@ -992,28 +992,34 @@ return (results.snd ++ vcDiags).toArray
     This exposes the internal structure for equivalence proofs. -/
 public theorem translate_fst (program : Program) :
     (translate {} program).1 =
-      let withDefs := { program with
+      let program := { program with
         staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
         types := coreDefinitionsForLaurel.types ++ program.types }
-      let r1 := resolve withDefs
-      let p1 := heapParameterization r1.model r1.program
-      let r2 := resolve p1 (some r1.model)
-      let p2 := typeHierarchyTransform r2.model r2.program
-      let r3 := resolve p2 (some r2.model)
-      let (p3, _) := modifiesClausesTransform r3.model r3.program
-      let r4 := resolve p3 (some r3.model)
-      let r5 := resolve r4.program (some r4.model)
-      let p4 := inferHoleTypes r5.model r5.program
-      let p5 := eliminateHoles p4
-      let p6 := desugarShortCircuit r5.model p5
-      let p7 := liftExpressionAssignments r5.model p6
-      let p8 := eliminateReturnsInExpressionTransform p7
-      let r6 := resolve p8 (some r5.model)
-      let (p9, _) := constrainedTypeElim r6.model r6.program
-      let r7 := resolve p9 (some r6.model)
-      (runTranslateM {model := r7.model} (translateLaurelToCore r7.program)).1 := by
-  unfold translate
-  sorry
+      let result := resolve program
+      let (program, model) := (result.program, result.model)
+      let program := heapParameterization model program
+      let result := resolve program (some model)
+      let (program, model) := (result.program, result.model)
+      let program := typeHierarchyTransform model program
+      let result := resolve program (some model)
+      let (program, model) := (result.program, result.model)
+      let (program, _) := modifiesClausesTransform model program
+      let result := resolve program (some model)
+      let (program, model) := (result.program, result.model)
+      let result := resolve program (some model)
+      let (program, model) := (result.program, result.model)
+      let program := inferHoleTypes model program
+      let program := eliminateHoles program
+      let program := desugarShortCircuit model program
+      let program := liftExpressionAssignments model program
+      let program := eliminateReturnsInExpressionTransform program
+      let result := resolve program (some model)
+      let (program, model) := (result.program, result.model)
+      let (program, _) := constrainedTypeElim model program
+      let result := resolve program (some model)
+      let (program, model) := (result.program, result.model)
+      (runTranslateM {model} (translateLaurelToCore program)).1 := by
+  unfold translate; sorry
 
 
 end -- public section

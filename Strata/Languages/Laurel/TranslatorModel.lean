@@ -1471,25 +1471,12 @@ public def translateProgramModel (program : Program) : Core.Program :=
     name := "Field", typeArgs := [], constrs := fieldConstrs,
     constrs_ne := by simp [fieldConstrs]; grind }])
 
-  -- Box: constructors based on field types used in composites
-  let boxConstrNames := composites.foldl (fun acc ct =>
-    acc ++ ct.fields.filterMap (fun f => match f.type.val with
-      | .TInt => if acc.contains "BoxInt" then none else some "BoxInt"
-      | .TBool => if acc.contains "BoxBool" then none else some "BoxBool"
-      | .UserDefined _ => if acc.contains "BoxComposite" then none else some "BoxComposite"
-      | _ => none)) ([] : List String)
-  let boxConstrs : List (Lambda.LConstr Unit) := boxConstrNames.map fun n =>
-    { name := ⟨n, ()⟩, args := [(⟨"val", ()⟩, match n with
-        | "BoxInt" => Lambda.LMonoTy.int
-        | "BoxBool" => Lambda.LMonoTy.bool
-        | "BoxComposite" => Lambda.LMonoTy.tcons "Composite" []
-        | _ => Lambda.LMonoTy.int)],
-      testerName := "Box..is" ++ n }
-  let boxConstrs := if boxConstrs.isEmpty then
-    [{ name := ⟨"MkBox", ()⟩, args := [] }] else boxConstrs
+  -- Box: always synthetic MkBox for now.
+  -- The real translator only adds Box constructors (BoxInt, BoxBool, etc.)
+  -- when procedures actually access fields during heap transformation.
   let boxDecl := Core.Decl.type (.data [{
-    name := "Box", typeArgs := [], constrs := boxConstrs,
-    constrs_ne := by simp [boxConstrs]; grind }])
+    name := "Box", typeArgs := [], constrs := [{ name := ⟨"MkBox", ()⟩, args := [] }],
+    constrs_ne := by decide }])
   -- Translate heapConstants.types (Composite, NotSupportedYet, Heap) through the same
   -- datatype translation as user types, but with typeTag field added to Composite
   -- Type mapper for heapConstants.types: maps UserDefined to the correct Core type
@@ -1604,18 +1591,31 @@ public def translateProgramModel (program : Program) : Core.Program :=
   -- Ancestor functions: one per composite + ancestorsPerType
   let composites := allComposites withDefs
   let ancestorDecls : List Core.Decl := if composites.isEmpty then [] else
+    -- ancestorsForX() = update(const(false), X_TypeTag, true)
+    let constFalse : Core.Expression.Expr := .app () (.op () ⟨"const", ()⟩ none) (.boolConst () false)
     let perType := composites.map fun ct =>
+      let typeTag : Core.Expression.Expr := .op () ⟨ct.name.text ++ "_TypeTag", ()⟩ none
+      let body : Core.Expression.Expr :=
+        .app () (.app () (.app () (.op () ⟨"update", ()⟩ none) constFalse) typeTag) (.boolConst () true)
       Core.Decl.func {
         name := ⟨"ancestorsFor" ++ ct.name.text, ()⟩, typeArgs := [],
         inputs := [],
         output := Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "TypeTag" [], Lambda.LMonoTy.bool],
-        body := none }
+        body := some body }
+    -- ancestorsPerType() = update(update(..., const(const(false))), X_TypeTag, ancestorsForX)
+    let constConstFalse : Core.Expression.Expr :=
+      .app () (.op () ⟨"const", ()⟩ none) constFalse
+    let combinedBody := composites.foldl (fun acc ct =>
+      let typeTag : Core.Expression.Expr := .op () ⟨ct.name.text ++ "_TypeTag", ()⟩ none
+      let ancestorsFor : Core.Expression.Expr := .op () ⟨"ancestorsFor" ++ ct.name.text, ()⟩ none
+      .app () (.app () (.app () (.op () ⟨"update", ()⟩ none) acc) typeTag) ancestorsFor)
+      constConstFalse
     let combined := Core.Decl.func {
       name := ⟨"ancestorsPerType", ()⟩, typeArgs := [],
       inputs := [],
       output := Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "TypeTag" [],
         Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "TypeTag" [], Lambda.LMonoTy.bool]],
-      body := none }
+      body := some combinedBody }
     perType ++ [combined]
   { decls := [exceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ readFuncAxioms ++
     ancestorDecls ++ constraintFuncDecls ++ heapFuncDecls ++

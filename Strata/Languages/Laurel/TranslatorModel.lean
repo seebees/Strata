@@ -1218,7 +1218,7 @@ public def translateStmtModel
          Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
          modelExceptionPropagation]
     | .InstanceCall target callee args =>
-      let qualName := callee.text  -- already qualified if from qualifyStmt
+      let qualName := callee.text  -- qualified by resolveInstanceCalls in translateProcModel
       let coreTarget := translateExprModelMd target
       let coreArgs := args.map fun a => translateExprModel a.val
       [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
@@ -1420,6 +1420,18 @@ public def containsInstanceCallMd : StmtExprMd → Bool
   | ⟨.While _ _ _ body, _⟩ => containsInstanceCallMd body
   | ⟨.Return (some v), _⟩ => containsInstanceCallMd v
   | ⟨.Assign _ v, _⟩ => containsInstanceCallMd v
+  | ⟨.LocalVariable _ _ (some init), _⟩ => containsInstanceCallMd init
+  | _ => false
+  termination_by e => sizeOf e
+  decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
+
+public def containsBareInstanceCallMd : StmtExprMd → Bool
+  | ⟨.InstanceCall _ _ _, _⟩ => true
+  | ⟨.StaticCall callee _, _⟩ => (callee.text.splitOn ".." != [callee.text])
+  | ⟨.Block stmts _, _⟩ => stmts.attach.any fun ⟨s, _⟩ => containsBareInstanceCallMd s
+  | ⟨.While _ _ _ body, _⟩ => containsBareInstanceCallMd body
+  | ⟨.IfThenElse c t e, _⟩ => containsBareInstanceCallMd c || containsBareInstanceCallMd t ||
+    (match e with | some e => containsBareInstanceCallMd e | none => false)
   | _ => false
   termination_by e => sizeOf e
   decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
@@ -1444,10 +1456,13 @@ public def containsInstanceCallMd : StmtExprMd → Bool
     | .Transparent b => containsInstanceCallMd b
     | .Opaque _ (some impl) _ => containsInstanceCallMd impl
     | _ => false
+  let hasBareInstanceCall := match proc.body with
+    | .Transparent b => containsBareInstanceCallMd b
+    | .Opaque _ (some impl) _ => containsBareInstanceCallMd impl
+    | _ => false
   let needsHeap := readsHeap || writesHeap || hasInstanceCall
-  -- Instance calls conservatively both read and write heap
   let readsHeap := readsHeap || hasInstanceCall
-  let writesHeap := writesHeap || hasInstanceCall
+  let writesHeap := writesHeap || hasBareInstanceCall
   let inputs := proc.inputs.map translateParam
   let heapInput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$heap_in", ()⟩, Lambda.LMonoTy.tcons "Heap" [])
@@ -1470,9 +1485,24 @@ public def containsInstanceCallMd : StmtExprMd → Bool
   }
   let outParams := proc.outputs.map (fun (p : Parameter) => p.name.text)
   let outParams := if writesHeap then "$heap" :: outParams else outParams
+  -- Resolve InstanceCalls in LocalVariable inits
+  let paramTypeMap := proc.inputs.filterMap fun p =>
+    match p.type.val with | .UserDefined name => some (p.name.text, name.text) | _ => none
+  let resolveIC (s : StmtExpr) : StmtExpr := match s with
+    | .LocalVariable id ty (some ⟨.InstanceCall target callee args, imd⟩) =>
+      let qualName := match target.val with
+        | .Identifier name => match paramTypeMap.filter (·.1 == name.text) with
+          | (_, tn) :: _ => tn ++ ".." ++ callee.text
+          | [] => callee.text
+        | _ => callee.text
+      .LocalVariable id ty (some ⟨.InstanceCall target { callee with text := qualName } args, imd⟩)
+    | other => other
+  let resolveBody (body : StmtExpr) : StmtExpr := match body with
+    | .Block stmts label => .Block (stmts.map fun s => ⟨resolveIC s.val, s.md⟩) label
+    | other => other
   let bodyStmts : Core.Statements := match proc.body with
-    | .Transparent bodyExpr => translateStmtModel isFunction outParams bodyExpr.val
-    | .Opaque _ (some impl) _ => translateStmtModel isFunction outParams impl.val
+    | .Transparent ⟨bodyExpr, _⟩ => translateStmtModel isFunction outParams (resolveBody bodyExpr)
+    | .Opaque _ (some ⟨impl, _⟩) _ => translateStmtModel isFunction outParams (resolveBody impl)
     | _ => []
   let heapInit := Core.Statement.set ⟨"$heap", ()⟩ (.fvar () ⟨"$heap_in", ()⟩ none) .empty
   let bodyStmts := if writesHeap then heapInit :: bodyStmts else bodyStmts

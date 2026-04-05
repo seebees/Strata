@@ -1438,7 +1438,8 @@ public def translateProgramModel (program : Program) : Core.Program :=
   }
   let compositeNames := (allComposites withDefs).map (·.name.text)
   let allProcs := withDefs.staticProcedures.filter (fun p => !p.body.isExternal)
-  let funcNames := allProcs.filter (·.isFunctional) |>.map (·.name.text)
+  -- funcNames includes ALL isFunctional procs (including external) for call/function distinction
+  let funcNames := withDefs.staticProcedures.filter (·.isFunctional) |>.map (·.name.text)
   let isFunc := fun n => funcNames.contains n
   let (_, procProcs) := allProcs.partition (·.isFunctional)
   -- Procedure declarations (non-functional, non-external)
@@ -1485,18 +1486,8 @@ public def translateProgramModel (program : Program) : Core.Program :=
         name := { proc.name with text := qualifiedName ct.name.text proc.name.text }
         body := qualifyBody proc.body })
     | _ => acc) ([] : List Procedure)
-  let (instanceFuncProcs, instanceProcProcs) := instanceProcs.partition (·.isFunctional)
-  let instanceProcDecls := instanceProcProcs.map (fun p => translateProcModel isFunc compositeNames p)
-  -- Instance function declarations (isFunctional instance procedures → Core functions)
-  let instanceFuncDecls := instanceFuncProcs.map fun proc =>
-    let inputs := proc.inputs.map translateParamModel
-    let outputTy := match proc.outputs.head? with
-      | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
-      | none => Lambda.LMonoTy.int
-    let body := match proc.body with
-      | .Transparent b => some (translateExprModel b.val)
-      | _ => none
-    Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body }
+  let instanceProcDecls := instanceProcs.map (fun p => translateProcModel isFunc compositeNames p)
+
   -- Datatypes: translate each Laurel datatype to a Core type decl
   let datatypes := withDefs.types.filterMap fun td => match td with
     | .Datatype dt => some dt | _ => none
@@ -1733,7 +1724,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     perType ++ [combined]
   { decls := [exceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ readFuncAxioms ++
     ancestorDecls ++ constraintFuncDecls ++ heapFuncDecls ++
-    externalFuncDecls ++ transparentFuncDecls ++ instanceFuncDecls ++
+    externalFuncDecls ++ transparentFuncDecls ++
     procDecls ++ witnessProcDecls ++ instanceProcDecls }
 
 /-- The decls list produced by translateProgramModel, exposed for cross-module proofs. -/

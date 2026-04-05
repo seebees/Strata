@@ -1076,8 +1076,11 @@ public theorem translate_fst (program : Program) :
       let (program, _) := constrainedTypeElim model program
       let result := resolve program (some model)
       let (program, model) := (result.program, result.model)
-      (runTranslateM {model} (translateLaurelToCore program)).1 := by
-  unfold translate; sorry
+      let initState : TranslateState := {model}
+      let (coreProgramOption, translateState) := runTranslateM initState (translateLaurelToCore program)
+      if translateState.coreProgramHasSuperfluousErrors then none else coreProgramOption := by
+  unfold translate
+  simp only [Prod.eta]
 
 
 end -- public section

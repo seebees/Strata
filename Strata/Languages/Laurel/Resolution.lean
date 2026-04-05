@@ -185,6 +185,15 @@ def defineName (iden : Identifier) (node : AstNode) (overrideResolutionName: Opt
   modify fun s => { s with scope := s.scope.insert resolutionName (uniqueId, node) }
   return name'
 
+/-- `defineName` preserves the text of an identifier. -/
+public theorem defineName_preserves_text (iden : Identifier) (node : AstNode)
+    (override : Option String) (s : ResolveState) :
+    ((defineName iden node override) s).1.text = iden.text := by
+  unfold defineName
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
+    pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet]
+  cases iden.uniqueId <;> rfl
+
 /-- Resolve a reference: look up the name in scope and assign the definition's ID.
     Returns the identifier with its ID filled in. -/
 def resolveRef (name : Identifier) (md : Imperative.MetaData Core.Expression := .empty) : ResolveM Identifier := do

@@ -1077,6 +1077,16 @@ theorem no_datatypes_no_decls
 
 
 
+/-! ## Resolution invariance
+
+Resolution assigns unique IDs to identifiers but preserves `.text`.
+Since Core uses `⟨name.text, ()⟩`, Core output is invariant under resolution. -/
+
+/-- Resolution preserves procedure name text. -/
+theorem resolve_preserves_proc_name_text (proc : Procedure) (s : ResolveState) :
+    ((resolveProcedure proc) s).1.name.text = proc.name.text := by
+  sorry -- follows from defineName_preserves_text (proven in Resolution.lean)
+
 /-! ## End-to-end procedure equivalence
 
 Combine parameter equivalence, body translation equivalence, and

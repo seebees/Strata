@@ -194,6 +194,7 @@ public theorem defineName_preserves_text (iden : Identifier) (node : AstNode)
     pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet]
   cases iden.uniqueId <;> rfl
 
+
 /-- Resolve a reference: look up the name in scope and assign the definition's ID.
     Returns the identifier with its ID filled in. -/
 def resolveRef (name : Identifier) (md : Imperative.MetaData Core.Expression := .empty) : ResolveM Identifier := do
@@ -488,7 +489,7 @@ def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
              preconditions := pres', determinism := det', decreases := dec',
              body := body', md := proc.md }
 
-/-- Resolve a field: define its name under the qualified key (OwnerType.fieldName) and resolve its type. -/
+/-- Resolution preserves procedure name text. -/
 def resolveField (ownerName : Identifier) (field : Field) : ResolveM Field := do
   let ty' ← resolveHighType field.type
   let qualifiedName := ownerName.text ++ "." ++ field.name.text
@@ -517,6 +518,14 @@ def resolveInstanceProcedure (typeName : Identifier) (proc : Procedure) : Resolv
              isFunctional := proc.isFunctional,
              preconditions := pres', determinism := det', decreases := dec',
              body := body', md := proc.md }
+
+/-- Resolution preserves procedure name text. -/
+public theorem resolveProcedure_preserves_name_text (proc : Procedure) (s : ResolveState) :
+    ((resolveProcedure proc) s).1.name.text = proc.name.text := by
+  unfold resolveProcedure withScope
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
+    pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet]
+  exact defineName_preserves_text proc.name _ _ s
 
 /-- Resolve a type definition. -/
 def resolveTypeDefinition (td : TypeDefinition) : ResolveM TypeDefinition := do

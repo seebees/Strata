@@ -1238,6 +1238,50 @@ theorem stmt_equiv_block (outputParams : List Parameter) (s : TranslateState)
     (by rw [Prod.ext_iff]; exact ⟨hStmts, hState⟩)]
   rw [translateStmtModel_eq_block_unlabeled]
 
+
+/-- While loop: statement translation equivalence. -/
+theorem stmt_equiv_while (outputParams : List Parameter) (s : TranslateState)
+    (cond : StmtExprMd) (invariants : List StmtExprMd)
+    (decreasesExpr : Option StmtExprMd) (body : StmtExprMd)
+    (hCond : (translateExpr cond [] false s).1 = some (translateExprModel cond.val))
+    (hCondS : (translateExpr cond [] false s).2 = s)
+    (hInvs : (invariants.mapM (fun a => translateExpr a) s).1 = some (invariants.map fun i => translateExprModel i.val))
+    (hInvsS : (invariants.mapM (fun a => translateExpr a) s).2 = s)
+    (hDec : (decreasesExpr.mapM (fun a => translateExpr a) s).1 = some (decreasesExpr.map fun d => translateExprModel d.val))
+    (hDecS : (decreasesExpr.mapM (fun a => translateExpr a) s).2 = s)
+    (hBody : (translateStmt outputParams body s).1 =
+      some (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) body))
+    (hBodyS : (translateStmt outputParams body s).2 = s) :
+    (translateStmt outputParams ⟨.While cond invariants decreasesExpr body, .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
+      (.While cond invariants decreasesExpr body)) := by
+  rw [translateStmt_eq_while cond invariants decreasesExpr body .empty outputParams
+    s s (translateExprModel cond.val)
+    s (invariants.map fun i => translateExprModel i.val)
+    s (decreasesExpr.map fun d => translateExprModel d.val)
+    s (translateStmtModelMd (fun _ => false) (outputParams.map (·.name.text)) body)
+    (by rw [Prod.ext_iff]; exact ⟨hCond, hCondS⟩)
+    (by rw [Prod.ext_iff]; exact ⟨hInvs, hInvsS⟩)
+    (by rw [Prod.ext_iff]; exact ⟨hDec, hDecS⟩)
+    (by rw [Prod.ext_iff]; exact ⟨hBody, hBodyS⟩)]
+  rw [translateStmtModel_eq_while]
+
+/-- StaticCall (procedure, not function): statement translation equivalence. -/
+theorem stmt_equiv_staticCall_proc (outputParams : List Parameter) (s : TranslateState)
+    (callee : Identifier) (args : List StmtExprMd)
+    (hNotFunc : s.model.isFunction callee = false)
+    (hTarget : s.exceptionTarget = "$body")
+    (hArgs : (args.mapM (fun a => translateExpr a) s).1 = some (args.map fun a => translateExprModel a.val))
+    (hArgsS : (args.mapM (fun a => translateExpr a) s).2 = s) :
+    (translateStmt outputParams ⟨.StaticCall callee args, .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
+      (.StaticCall callee args)) := by
+  have hPair : (args.mapM (fun a => translateExpr a)) s = (some (args.map fun a => translateExprModel a.val), s) := by
+    rw [Prod.ext_iff]; exact ⟨hArgs, hArgsS⟩
+  rw [translateStmt_eq_staticCall_proc callee args .empty outputParams s s _ hNotFunc hPair]
+  rw [translateStmtModel_eq_staticCall_proc (fun _ => false) _ callee args rfl]
+  simp only [modelExceptionPropagation_eq, hTarget]
+
 /-! ## Step 2: Procedure translation equivalence
 
 The next step toward full `translate = translateProgramModel` equivalence.

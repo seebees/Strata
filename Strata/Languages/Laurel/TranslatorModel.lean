@@ -1144,6 +1144,14 @@ public def modelExceptionPropagation : Core.Statement :=
     .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
   Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some "$body") .empty] [] .empty
 
+@[simp] public theorem modelExceptionPropagation_eq :
+    modelExceptionPropagation =
+    let resultIdent : Core.Expression.Ident := ⟨"$result", ()⟩
+    let isFailureCheck : Core.Expression.Expr :=
+      .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
+    Imperative.Stmt.ite isFailureCheck [Imperative.Stmt.exit (some "$body") .empty] [] .empty := by
+  unfold modelExceptionPropagation; rfl
+
 mutual
 public def translateStmtModelMd (isFunction : String → Bool) (outputParams : List String) (e : StmtExprMd) : Core.Statements :=
   translateStmtModel isFunction outputParams e.val

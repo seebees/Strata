@@ -1322,23 +1322,31 @@ theorem stmt_equiv_staticCall_proc (outputParams : List Parameter) (s : Translat
 
 /-! ## Step 2: Procedure translation equivalence
 
-The next step toward full `translate = translateProgramModel` equivalence.
-Given that the 6 passes are no-ops (sixPassesNoop), the program reaching
-`translateLaurelToCore` has the same `staticProcedures` as the input.
+### Proven
+- `proc_equiv_simple`: For simple procedures (transparent body, no preconditions,
+  basic types), `translateProcModel` matches `translateProcedure` given body equivalence.
+- 10 statement equivalences covering: return, local variable, assign, if-then-else,
+  block, while, static call.
+- 19 expression equivalences covering: literals, identifiers, primitive ops, static calls,
+  if-then-else.
 
-The remaining gap is proving that `translateProcedure` (monadic, uses SemanticModel)
-produces the same Core declarations as `translateProcModel` (pure).
+### Remaining gaps for full `translate = translateProgramModel`
 
-This requires proving `translateStmt` = `translateStmtModel` for all statement
-types, which in turn requires `translateExpr` = `translateExprModel` for all
-expression types. The expression-level equivalences are proven above
-(model_matches_real_*) for: literals, identifiers, primitive ops, static calls,
-if-then-else. The remaining expression types (blocks, local variables, assigns,
-returns, asserts, assumes, while, forall, exists) are the next proof targets.
+1. **Resolution**: `resolve` assigns unique IDs to all names. The program flowing through
+   `translate` has resolved names, while `translateProgramModel` works with unresolved names.
+   Need: resolution metadata doesn't affect Core output (IDs are erased in Core translation).
 
-Once all expression/statement equivalences are proven, the procedure-level
-theorem `translateProcedure_matches_model` can be instantiated without
-the `hBody`/`hBodyMatch` hypotheses, completing the equivalence proof.
+2. **Heap/TypeHierarchy/Modifies passes**: These add types, constants, and heap procedures
+   to the program even for simple programs. `translateProgramModel` doesn't add these.
+   Need: the ADDED procedures/types don't appear in the Core output for simple programs,
+   OR `translateProgramModel` needs to be updated to include them.
+
+3. **Program-level assembly**: `translateLaurelToCore` and `translateProgramModel` both
+   filter/partition procedures and assemble Core.Program. Need: the assembly produces
+   the same result when the procedure translations match.
+
+The resolution gap (1) is the most fundamental — it requires showing that Core translation
+is invariant under name resolution. This is true because Core uses string names, not IDs.
 -/
 
 /-! ## Phase 7: Transformation pass no-op proofs

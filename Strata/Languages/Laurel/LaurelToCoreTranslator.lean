@@ -994,16 +994,23 @@ return (results.snd ++ vcDiags).toArray
 -- The main equivalence theorem, proven where `translate` can be unfolded.
 public theorem translate_eq_model (program : Program) :
     (translate {} program).1 = some (translateProgramModel program) := by
-  -- The proof strategy:
-  -- 1. Unfold translate to expose the pipeline
-  -- 2. Show the pipeline produces a specific (finalProgram, model)
-  -- 3. Show translateLaurelToCore finalProgram produces the right Core
-  -- 4. Show the Core decls match translateProgramModelDecls
-  --
-  -- For now, we use sorry. The 135 differential tests verify this
-  -- computationally for all test programs including complex ones
-  -- with composites, heap operations, and type hierarchies.
-  sorry
+  sorry -- See translate_eq_model_simple for the restricted version
+
+/-- Restricted equivalence for programs with no composites and no types.
+    For these programs, all passes are no-ops or only add infrastructure,
+    and the Core procedure output matches translateProgramModel. -/
+public theorem translate_eq_model_simple (program : Program)
+    (hNoTypes : program.types = [])
+    (hNoConstants : program.constants = [])
+    (hNoFields : program.staticFields = [])
+    (hNoProcs : program.staticProcedures = []) :
+    (translate {} program).1 = some (translateProgramModel program) := by
+  unfold translate
+  cases program with | mk procs fields types constants =>
+  simp only [] at hNoTypes hNoConstants hNoFields hNoProcs
+  subst hNoTypes; subst hNoConstants; subst hNoFields; subst hNoProcs
+  sorry -- needs equation lemmas for resolve, heapParameterization, etc.
+
 
 -- Restricted equivalence: for programs where all passes are no-ops,
 -- the 6 middle passes don't change the program.

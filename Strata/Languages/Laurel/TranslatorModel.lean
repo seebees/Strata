@@ -7,6 +7,7 @@ module
 public import Strata.Languages.Laurel.Laurel
 public import Strata.Languages.Core.Program
 public import Strata.Languages.Laurel.CoreDefinitionsForLaurel
+public import Strata.Languages.Laurel.HeapParameterizationConstants
 
 /-!
 # Translator Functional Model
@@ -1467,19 +1468,17 @@ public def translateProgramModel (program : Program) : Core.Program :=
     constrs_ne := by decide }])
   let infraDatatypes := [typeTagDecl, fieldDecl, compositeDecl, notSupportedDecl, boxDecl, heapDecl]
   -- Heap functions (from heapConstants)
-  let readFieldDecl := Core.Decl.func {
-    name := ⟨"readField", ()⟩, typeArgs := [],
-    inputs := [(⟨"heap", ()⟩, .tcons "Heap" []), (⟨"obj", ()⟩, .tcons "Composite" []), (⟨"field", ()⟩, .tcons "Field" [])],
-    output := .tcons "Box" [], body := none }
-  let updateFieldDecl := Core.Decl.func {
-    name := ⟨"updateField", ()⟩, typeArgs := [],
-    inputs := [(⟨"heap", ()⟩, .tcons "Heap" []), (⟨"obj", ()⟩, .tcons "Composite" []), (⟨"field", ()⟩, .tcons "Field" []), (⟨"val", ()⟩, .tcons "Box" [])],
-    output := .tcons "Heap" [], body := none }
-  let incrementDecl := Core.Decl.func {
-    name := ⟨"increment", ()⟩, typeArgs := [],
-    inputs := [(⟨"heap", ()⟩, .tcons "Heap" [])],
-    output := .tcons "Heap" [], body := none }
-  let heapFuncDecls := [readFieldDecl, updateFieldDecl, incrementDecl]
+  -- Translate heap functions from heapConstants (non-external, isFunctional)
+  let heapProcs := heapConstants.staticProcedures.filter (fun p => !p.body.isExternal && p.isFunctional)
+  let heapFuncDecls := heapProcs.map fun proc =>
+    let inputs := proc.inputs.map translateParamModel
+    let outputTy := match proc.outputs.head? with
+      | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
+      | none => Lambda.LMonoTy.int
+    let body := match proc.body with
+      | .Transparent b => some (translateExprModel b.val)
+      | _ => none
+    Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body }
   -- Constrained type artifacts
   let constrainedTypes := withDefs.types.filterMap fun td => match td with
     | .Constrained ct => some ct | _ => none

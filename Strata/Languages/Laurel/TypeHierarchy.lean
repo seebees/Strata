@@ -294,6 +294,34 @@ def rewriteTypeHierarchyProcedure (proc : Procedure) : THM Procedure := do
     | .External => pure .External
   return { proc with preconditions := preconditions', body := body' }
 
+@[simp] theorem rewriteTypeHierarchyProcedure_transparent
+    (proc : Procedure) (b : StmtExprMd) (s : THState)
+    (hBody : proc.body = .Transparent b)
+    (hNoPre : proc.preconditions = []) :
+    rewriteTypeHierarchyProcedure proc s =
+    let (b', s') := rewriteTypeHierarchyExpr b s
+    ({ proc with preconditions := [], body := .Transparent b' }, s') := by
+  unfold rewriteTypeHierarchyProcedure
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil, hBody]; rfl
+
+@[simp] theorem rewriteTypeHierarchyProcedure_external
+    (proc : Procedure) (s : THState)
+    (hBody : proc.body = .External)
+    (hNoPre : proc.preconditions = []) :
+    rewriteTypeHierarchyProcedure proc s = ({ proc with preconditions := [], body := .External }, s) := by
+  unfold rewriteTypeHierarchyProcedure
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil, hBody]
+
+@[simp] theorem rewriteTypeHierarchyProcedure_abstract
+    (proc : Procedure) (posts : List StmtExprMd) (s : THState)
+    (hBody : proc.body = .Abstract posts)
+    (hNoPre : proc.preconditions = []) :
+    rewriteTypeHierarchyProcedure proc s =
+    let (posts', s') := (posts.mapM rewriteTypeHierarchyExpr) s
+    ({ proc with preconditions := [], body := .Abstract posts' }, s') := by
+  unfold rewriteTypeHierarchyProcedure
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil, hBody]; rfl
+
 /--
 Type hierarchy transformation pass (Laurel → Laurel).
 
@@ -473,7 +501,8 @@ theorem rewriteTypeHierarchyProcedure_id (proc : Procedure) (s : THState)
   simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil]
   cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
   simp only [] at hBody hNoPre ⊢; subst hNoPre
-  sorry -- rewriteTypeHierarchyProcedure not unfoldable cross-section in module file
+  split at hBody <;> (try (dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; done))
+  all_goals sorry
 
 /-- When no procedure has New/IsType, mapM rewriteTypeHierarchyProcedure is identity. -/
 theorem typeHierarchyProcs_noNewIsType (procs : List Procedure) (s : THState)

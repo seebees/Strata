@@ -1042,8 +1042,10 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
   | .Block [single] _ => translateExprModelMd single
   | .Return (some v) => translateExprModelMd v
   | .FieldSelect target fieldName =>
-    -- readField($heap, target, fieldName)
-    .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) (.fvar () ⟨"$heap", ()⟩ none)) (translateExprModelMd target)) (.op () ⟨fieldName.text, ()⟩ none)
+    -- Box..intVal!(readField($heap, target, fieldName))
+    let readExpr : Core.Expression.Expr :=
+      .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) (.fvar () ⟨"$heap", ()⟩ none)) (translateExprModelMd target)) (.op () ⟨fieldName.text, ()⟩ none)
+    .app () (.op () ⟨"Box..intVal!", ()⟩ none) readExpr
   | .Forall ⟨name, _⟩ _ body =>
     .all () name.text none (translateExprModelMd body)
   | .Exists ⟨name, _⟩ _ body =>
@@ -1200,6 +1202,14 @@ public def translateStmtModel
       [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some coreExpr) .empty]
   | .LocalVariable id _ none =>
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty]
+  | .Assign [⟨.FieldSelect target fieldName, _⟩] value =>
+    let targetExpr := translateExprModelMd target
+    let fieldOp : Core.Expression.Expr := .op () ⟨fieldName.text, ()⟩ none
+    let valueExpr := translateExprModel value.val
+    let boxedValue : Core.Expression.Expr := .app () (.op () ⟨"BoxInt", ()⟩ none) valueExpr
+    [Core.Statement.set ⟨"$heap", ()⟩
+      (.app () (.app () (.app () (.app () (.op () ⟨"updateField", ()⟩ none)
+        (.fvar () ⟨"$heap", ()⟩ none)) targetExpr) fieldOp) boxedValue) .empty]
   | .Assign [⟨.Identifier targetId, _⟩] value =>
     match value.val with
     | .StaticCall callee args =>
@@ -1418,9 +1428,31 @@ public def translateProgramModel (program : Program) : Core.Program :=
   -- Instance procedure declarations
   let instanceProcs := withDefs.types.foldl (fun acc td =>
     match td with
-    | .Composite ct => acc ++ (ct.instanceProcedures.filter (!·.body.isExternal)
+    | .Composite ct =>
+      let pfx := ct.name.text ++ "."
+      let rec qualifyMd : StmtExprMd → StmtExprMd
+        | ⟨.FieldSelect target fieldName, md⟩ =>
+          ⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text }, md⟩
+        | ⟨.PrimitiveOp op args, md⟩ =>
+          ⟨.PrimitiveOp op (args.attach.map fun ⟨a, _⟩ => qualifyMd a), md⟩
+        | ⟨.StaticCall callee args, md⟩ =>
+          ⟨.StaticCall callee (args.attach.map fun ⟨a, _⟩ => qualifyMd a), md⟩
+        | e => e
+        termination_by e => sizeOf e
+        decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
+      let qualifyStmt (s : StmtExprMd) : StmtExprMd := match s.val with
+        | .Assign [⟨.FieldSelect target fieldName, tmd⟩] value =>
+          ⟨.Assign [⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text }, tmd⟩]
+            (qualifyMd value), s.md⟩
+        | _ => s
+      let qualifyBody (body : Body) : Body := match body with
+        | .Transparent ⟨.Block stmts label, md⟩ =>
+          .Transparent ⟨.Block (stmts.map qualifyStmt) label, md⟩
+        | other => other
+      acc ++ (ct.instanceProcedures.filter (!·.body.isExternal)
       |>.map fun proc => { proc with
-        name := { proc.name with text := qualifiedName ct.name.text proc.name.text } })
+        name := { proc.name with text := qualifiedName ct.name.text proc.name.text }
+        body := qualifyBody proc.body })
     | _ => acc) ([] : List Procedure)
   let (instanceFuncProcs, instanceProcProcs) := instanceProcs.partition (·.isFunctional)
   let instanceProcDecls := instanceProcProcs.map (fun p => translateProcModel isFunc compositeNames p)
@@ -1450,7 +1482,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
       name := dt.name.text
       typeArgs := []
       constrs := constrs
-      constrs_ne := by simp [constrs]; grind
+      constrs_ne := by simp [constrs]; split <;> simp_all [List.isEmpty_iff]
     }])
   -- Functions: external functions become Core function decls (no body)
   let externalFuncs := allProcs.filter (fun p => p.isFunctional && p.body.isExternal)
@@ -1484,7 +1516,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     [{ name := ⟨"MkTypeTag", ()⟩, args := [] }] else typeTagConstrs
   let typeTagDecl := Core.Decl.type (.data [{
     name := "TypeTag", typeArgs := [], constrs := typeTagConstrs,
-    constrs_ne := by simp [typeTagConstrs]; grind }])
+    constrs_ne := by simp [typeTagConstrs]; split <;> simp_all [List.isEmpty_iff] }])
   -- Field: one constructor per field across all composites
   let fieldNames := composites.foldl (fun acc ct =>
     acc ++ ct.fields.map (fun f => ct.name.text ++ "." ++ f.name.text)) ([] : List String)
@@ -1494,7 +1526,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     [{ name := ⟨"MkField", ()⟩, args := [] }] else fieldConstrs
   let fieldDecl := Core.Decl.type (.data [{
     name := "Field", typeArgs := [], constrs := fieldConstrs,
-    constrs_ne := by simp [fieldConstrs]; grind }])
+    constrs_ne := by simp [fieldConstrs]; split <;> simp_all [List.isEmpty_iff] }])
 
   -- Box: generate constructors based on field types when procedures access fields.
   let hasFieldAccess := composites.any fun ct =>

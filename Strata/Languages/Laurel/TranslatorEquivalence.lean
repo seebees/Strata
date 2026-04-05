@@ -1132,6 +1132,56 @@ theorem stmt_equiv_local_no_init (outputParams : List Parameter) (s : TranslateS
   have hty : ty = ⟨HighType.TInt, ty.md⟩ := by cases ty; simp_all
   rw [translateStmt_eq_localVar_noInit, translateStmtModel_eq_local_no_init, hty, translateType_int]
 
+
+/-- Assign (non-call value): statement translation equivalence. -/
+theorem stmt_equiv_assign_expr (outputParams : List Parameter) (s : TranslateState)
+    (targetId : Identifier) (value : StmtExprMd)
+    (hNotSC : ∀ c a, value.val ≠ .StaticCall c a)
+    (hNotIC : ∀ t c a, value.val ≠ .InstanceCall t c a)
+    (hExpr : (translateExpr value [] false s).1 = some (translateExprModel value.val))
+    (hState : (translateExpr value [] false s).2 = s) :
+    (translateStmt outputParams ⟨.Assign [⟨.Identifier targetId, .empty⟩] value, .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
+      (.Assign [⟨.Identifier targetId, .empty⟩] value)) := by
+  rw [translateStmt_eq_assign_expr targetId .empty value .empty outputParams s s
+    (translateExprModel value.val) hNotSC hNotIC (by rw [Prod.ext_iff]; exact ⟨hExpr, hState⟩)]
+  rw [translateStmtModel_eq_assign_expr _ _ _ _ _ hNotSC hNotIC]
+
+/-- Return with expression: statement translation equivalence. -/
+theorem stmt_equiv_return_expr (outputParams : List Parameter) (s : TranslateState)
+    (value : StmtExprMd) (outParam : Parameter)
+    (hHead : outputParams.head? = some outParam)
+    (hNotSC : ∀ c a, value.val ≠ .StaticCall c a)
+    (hNotIC : ∀ t c a, value.val ≠ .InstanceCall t c a)
+    (hExpr : (translateExpr value [] false s).1 = some (translateExprModel value.val))
+    (hState : (translateExpr value [] false s).2 = s) :
+    (translateStmt outputParams ⟨.Return (some value), .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
+      (.Return (some value))) := by
+  rw [translateStmt_eq_return_expr value .empty outputParams outParam s s
+    (translateExprModel value.val) hHead hNotIC hNotSC (by rw [Prod.ext_iff]; exact ⟨hExpr, hState⟩)]
+  rw [translateStmtModel_eq_return_expr]
+  simp [List.head?_map, hHead]
+
+/-- LocalVariable with expression init (non-call): statement translation equivalence. -/
+theorem stmt_equiv_local_expr_init (outputParams : List Parameter) (s : TranslateState)
+    (name : Identifier) (ty : WithMetadata HighType) (init : StmtExprMd)
+    (hTy : ty.val = .TInt)
+    (hNotSC : ∀ c a, init.val ≠ .StaticCall c a)
+    (hNotIC : ∀ t c a, init.val ≠ .InstanceCall t c a)
+    (hNotHole : ∀ n t, init.val ≠ .Hole n t)
+    (hExpr : (translateExpr init [] false s).1 = some (translateExprModel init.val))
+    (hState : (translateExpr init [] false s).2 = s) :
+    (translateStmt outputParams ⟨.LocalVariable name ty (some init), .empty⟩ s).1 =
+    some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
+      (.LocalVariable name ty (some init))) := by
+  have hty : ty = ⟨HighType.TInt, ty.md⟩ := by cases ty; simp_all
+  cases init with | mk v m =>
+  rw [translateStmt_eq_localVar_exprInit name ty v m .empty outputParams s s
+    (translateExprModel v) hNotSC hNotIC hNotHole (by rw [Prod.ext_iff]; exact ⟨hExpr, hState⟩)]
+  rw [translateStmtModel_eq_local_expr_init _ _ _ _ ⟨v, m⟩ hNotSC hNotIC hNotHole]
+  rw [hty, translateType_int]
+
 /-! ## Step 2: Procedure translation equivalence
 
 The next step toward full `translate = translateProgramModel` equivalence.

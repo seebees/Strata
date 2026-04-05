@@ -29,6 +29,31 @@ def parseLaurelString (name : String) (input : String) : IO Laurel.Program := do
   | .error errs => throw (IO.userError s!"Parse errors: {errs}")
   | .ok program => pure program
 
+-- Structural equality test (eraseTypes + stripMetaData)
+def normalizeDecl (d : Core.Decl) : String :=
+  toString (Std.Format.pretty (Std.ToFormat.format (Core.Decl.stripMetaData (Core.Decl.eraseTypes d))) (width := 200))
+
+def structuralEq (name src : String) : IO Unit := do
+  let program ← parseLaurelString name src
+  let (coreOpt, _) := Laurel.translate {} program
+  let model := Laurel.translateProgramModel program
+  match coreOpt with
+  | none => return
+  | some core =>
+    if core.decls.length != model.decls.length then
+      IO.println s!"{name}: ❌ STRUCT len real={core.decls.length} model={model.decls.length}"
+      return
+    let mut diffCount := 0
+    let mut firstDiff := ""
+    let mut i := 0
+    while i < core.decls.length do
+      if normalizeDecl core.decls[i]! != normalizeDecl model.decls[i]! then
+        if diffCount == 0 then firstDiff := (Core.Decl.name core.decls[i]!).name
+        diffCount := diffCount + 1
+      i := i + 1
+    if diffCount == 0 then IO.println s!"{name}: ✅ STRUCT ({core.decls.length})"
+    else IO.println s!"{name}: ❌ STRUCT {diffCount}/{core.decls.length} first={firstDiff}"
+
 /-- Run real translate and return Core decl names -/
 def translateNames (name : String) (input : String) : IO (List String) := do
   let program ← parseLaurelString name input
@@ -1266,6 +1291,7 @@ procedure negate(b: bool): bool {
         ok := false
       if ok then
         IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+        structuralEq name input
 
   -- Additional differential tests for uncovered patterns
   IO.println ""
@@ -1449,6 +1475,7 @@ composite B {
         ok := false
       if ok then
         IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+        structuralEq name input
 
   -- Stress tests: harder patterns
   IO.println ""
@@ -1468,6 +1495,7 @@ composite B {
       let extra := modelNames.filter (fun n => !realNames.contains n)
       if missing.isEmpty && extra.isEmpty && modelProgram.decls.length == core.decls.length then
         IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+        structuralEq name input
       else
         if !missing.isEmpty then
           IO.println s!"{name}: ❌ real has, model missing: {missing}"
@@ -1739,6 +1767,7 @@ procedure check(x: int): bool {
       let extra := modelNames.filter (fun n => !realNames.contains n)
       if missing.isEmpty && extra.isEmpty && modelProgram.decls.length == core.decls.length then
         IO.println s!"{name}: ✅ all {modelProgram.decls.length} decls match"
+        structuralEq name input
       else
         if !missing.isEmpty then
           IO.println s!"{name}: ❌ real has, model missing: {missing}"
@@ -1974,3 +2003,4 @@ composite C {
   var z: int
 }
 "
+

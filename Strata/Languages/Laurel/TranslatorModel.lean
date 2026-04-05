@@ -1206,7 +1206,7 @@ public def translateStmtModel
         [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some coreExpr) .empty]
       else
         let coreArgs := args.map fun a => translateExprModel a.val
-        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty,
+        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
          Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
          modelExceptionPropagation]
     | _ =>
@@ -1468,6 +1468,10 @@ public def translateProgramModel (program : Program) : Core.Program :=
         | ⟨.LocalVariable id ty (some init), md⟩ =>
           ⟨.LocalVariable id ty (some (qualifyMd init)), md⟩
         | ⟨.Assert c, md⟩ => ⟨.Assert (qualifyMd c), md⟩
+        | ⟨.InstanceCall target callee args, md⟩ =>
+          -- self~>method(args) → StaticCall "Composite..method" [self, args...]
+          let qualName : Identifier := { callee with text := ct.name.text ++ ".." ++ callee.text }
+          ⟨.StaticCall qualName (target :: args.map qualifyMd), md⟩
         | ⟨.Block stmts label, md⟩ => ⟨.Block (stmts.attach.map fun ⟨s, _⟩ => qualifyStmt s) label, md⟩
         | s => s
         termination_by s => sizeOf s

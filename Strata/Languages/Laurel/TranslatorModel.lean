@@ -1179,9 +1179,21 @@ public def translateStmtModel
   | .Return (some v) =>
     match outputParams.head? with
     | some outName =>
-      let coreExpr := translateExprModel v.val
-      [Core.Statement.set ⟨outName, ()⟩ coreExpr .empty,
-       Imperative.Stmt.exit (some "$body") .empty]
+      match v.val with
+      | .StaticCall callee args =>
+        if isFunction callee.text then
+          let coreExpr := translateExprModel v.val
+          [Core.Statement.set ⟨outName, ()⟩ coreExpr .empty,
+           Imperative.Stmt.exit (some "$body") .empty]
+        else
+          let coreArgs := args.map fun a => translateExprModel a.val
+          [Core.Statement.call [⟨outName, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
+           modelExceptionPropagation,
+           Imperative.Stmt.exit (some "$body") .empty]
+      | _ =>
+        let coreExpr := translateExprModel v.val
+        [Core.Statement.set ⟨outName, ()⟩ coreExpr .empty,
+         Imperative.Stmt.exit (some "$body") .empty]
     | none => []
   | .Return none => [Imperative.Stmt.exit (some "$body") .empty]
   | .Block stmts _ =>
@@ -1282,11 +1294,12 @@ end
 @[simp] public theorem translateStmtModel_eq_return_expr
   (isFunction : String → Bool) (outputParams : List String)
   (value : StmtExprMd) (outName : String)
-  (hHead : outputParams.head? = some outName) :
+  (hHead : outputParams.head? = some outName)
+  (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a) :
   translateStmtModel isFunction outputParams (.Return (some value)) =
     [Core.Statement.set ⟨outName, ()⟩ (translateExprModel value.val) .empty,
      Imperative.Stmt.exit (some "$body") .empty] := by
-  rw [translateStmtModel.eq_def]; simp [hHead]
+  rw [translateStmtModel.eq_def]; simp [hHead, hNotStaticCall]
 
 @[simp] public theorem translateStmtModel_eq_ite_noElse
   (isFunction : String → Bool) (outputParams : List String)
@@ -1412,7 +1425,9 @@ end
   let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
   let setResult := Core.Statement.set ⟨"$result", ()⟩ successCtor .empty
   let body := [setResult, Imperative.Stmt.block "$body" bodyStmts .empty]
-  let spec : Core.Procedure.Spec := { modifies := [], preconditions := [], postconditions := [] }
+  let preconditions : ListMap Core.CoreLabel Core.Procedure.Check := proc.preconditions.map fun pre =>
+    ("requires", { expr := translateExprModel pre.val })
+  let spec : Core.Procedure.Spec := { modifies := [], preconditions := preconditions, postconditions := [] }
   .proc { header, spec, body }
 
 /-- Assemble a full Core.Program from a Laurel Program -/

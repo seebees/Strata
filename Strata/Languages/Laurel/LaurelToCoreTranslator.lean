@@ -799,6 +799,110 @@ structure LaurelTranslateOptions where
   emitResolutionErrors : Bool := true
 
 abbrev TranslateResult := (Option Core.Program) × (List DiagnosticModel)
+
+/--
+Translate Laurel datatype definitions to Core declarations.
+Datatypes are grouped by mutual references (SCC) so mutually recursive
+datatypes share a single `.data` declaration.
+-/
+def translateTypes (program : Program) (model : SemanticModel) : TranslateM (List Core.Decl) := do
+  -- Translate datatype definitions to Core declarations.
+  let laurelDatatypes := program.types.filterMap fun td => match td with
+    | .Datatype dt => some dt
+    | _ => none
+  let ldatatypes := laurelDatatypes.map (translateDatatypeDefinition model)
+  let groups := groupDatatypes laurelDatatypes ldatatypes
+  return groups.map fun group => Core.Decl.type (.data group)
+
+def translateLaurelToCore (program : Program): TranslateM Core.Program := do
+  let model := (← get).model
+
+  -- Procedures marked isFunctional are translated to Core functions; all others become Core procedures.
+  -- External procedures are completely ignored (not translated to Core).
+  let nonExternal := program.staticProcedures.filter (fun p => !p.body.isExternal)
+  let (markedPure, procProcs) := nonExternal.partition (·.isFunctional)
+  -- Try to translate each isFunctional procedure to a Core function, collecting errors for failures
+  let pureFuncDecls ← markedPure.mapM translateProcedureToFunction
+  -- Translate procedures using the monad, collecting diagnostics from the final state
+  let procedures ← procProcs.mapM translateProcedure
+
+  -- Translate instance procedures from composite types with qualified names
+  let instanceProcs := program.types.foldl (fun acc td =>
+    match td with
+    | .Composite ct => acc ++ ct.instanceProcedures.map fun proc =>
+        (ct.name.text, proc)
+    | _ => acc) ([] : List (String × Procedure))
+  let nonExternalInstance := instanceProcs.filter (fun (_, p) => !p.body.isExternal)
+  let instanceProcedures ← nonExternalInstance.mapM fun (typeName, proc) => do
+    let qualifiedProc := { proc with
+      name := { proc.name with text := instanceProcCoreName typeName proc.name.text } }
+    translateProcedure qualifiedProc
+
+  -- Translate Laurel constants to Core function declarations (0-ary functions)
+  let constantDecls ← program.constants.mapM fun c => do
+    let coreTy := translateType model c.type
+    let body ← c.initializer.mapM (translateExpr ·)
+    return Core.Decl.func {
+      name := ⟨c.name.text, ()⟩
+      typeArgs := []
+      inputs := []
+      output := coreTy
+      body := body
+    }
+
+  -- Collect ALL errors from both functions, procedures, and resolution before deciding whether to fail
+  -- let allErrors :=pureErrors ++ procDiags ++ constantsState.diagnostics
+  -- if !allErrors.isEmpty then
+  --   .error allErrors.toArray
+  let procDecls := procedures.map (fun p => Core.Decl.proc p .empty)
+  let instanceProcDecls := instanceProcedures.map (fun p => Core.Decl.proc p .empty)
+
+  -- Translate Laurel datatype definitions to Core declarations.
+  let groupedDatatypeDecls ← translateTypes program model
+
+  -- Inject ExceptionResult datatype for exception support
+  let exceptionResultDt : Lambda.LDatatype Unit := {
+    name := "ExceptionResult"
+    typeArgs := []
+    constrs := [
+      { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
+      { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
+    ]
+    constrs_ne := by decide
+  }
+  let exceptionResultDecl := Core.Decl.type (.data [exceptionResultDt]) .empty
+
+  -- Generate equality axioms for Factory read functions.
+  -- Only emit when the specific Box constructor exists.
+  -- emit: ∀ v: int. readIntN(BoxInt(v)) == v
+  -- This connects the opaque Factory function (which carries bound axioms)
+  -- to the Box constructor/destructor (which carries heap faithfulness).
+  let boxConstrs := program.types.foldl (fun acc td => match td with
+    | .Datatype dt => if dt.name.text == "Box" then
+        dt.constructors.map (·.name.text)
+      else acc
+    | _ => acc) ([] : List String)
+  let readFuncAxioms : List Core.Decl :=
+    [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].filterMap
+      fun (readName, constrName) =>
+        if boxConstrs.contains constrName then
+          let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
+          let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
+          let v : Core.Expression.Expr := .bvar () 0
+          let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
+          let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
+          some (Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr })
+        else none
+
+  let program := {
+    decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
+  }
+
+  -- dbg_trace "=== Generated Strata Core Program ==="
+  -- dbg_trace "================================="
+  pure program
+
+
 /--
 Translate Laurel Program to Core Program
 -/
@@ -845,148 +949,42 @@ def translate (options: LaurelTranslateOptions) (program : Program): TranslateRe
   let allDiagnostics := resolutionErrors ++ diamondErrors ++ modifiesDiags ++ constrainedTypeDiags ++ translateState.diagnostics
   let coreProgramOption := if translateState.coreProgramHasSuperfluousErrors then none else coreProgramOption
   (coreProgramOption, allDiagnostics)
-  where
 
-  /--
-  Translate Laurel datatype definitions to Core declarations.
-  Datatypes are grouped by mutual references (SCC) so mutually recursive
-  datatypes share a single `.data` declaration.
-  -/
-  translateTypes (program : Program) (model : SemanticModel) : TranslateM (List Core.Decl) := do
-    -- Translate datatype definitions to Core declarations.
-    let laurelDatatypes := program.types.filterMap fun td => match td with
-      | .Datatype dt => some dt
-      | _ => none
-    let ldatatypes := laurelDatatypes.map (translateDatatypeDefinition model)
-    let groups := groupDatatypes laurelDatatypes ldatatypes
-    return groups.map fun group => Core.Decl.type (.data group)
-
-  translateLaurelToCore (program : Program): TranslateM Core.Program := do
-    let model := (← get).model
-
-    -- Procedures marked isFunctional are translated to Core functions; all others become Core procedures.
-    -- External procedures are completely ignored (not translated to Core).
-    let nonExternal := program.staticProcedures.filter (fun p => !p.body.isExternal)
-    let (markedPure, procProcs) := nonExternal.partition (·.isFunctional)
-    -- Try to translate each isFunctional procedure to a Core function, collecting errors for failures
-    let pureFuncDecls ← markedPure.mapM translateProcedureToFunction
-    -- Translate procedures using the monad, collecting diagnostics from the final state
-    let procedures ← procProcs.mapM translateProcedure
-
-    -- Translate instance procedures from composite types with qualified names
-    let instanceProcs := program.types.foldl (fun acc td =>
-      match td with
-      | .Composite ct => acc ++ ct.instanceProcedures.map fun proc =>
-          (ct.name.text, proc)
-      | _ => acc) ([] : List (String × Procedure))
-    let nonExternalInstance := instanceProcs.filter (fun (_, p) => !p.body.isExternal)
-    let instanceProcedures ← nonExternalInstance.mapM fun (typeName, proc) => do
-      let qualifiedProc := { proc with
-        name := { proc.name with text := instanceProcCoreName typeName proc.name.text } }
-      translateProcedure qualifiedProc
-
-    -- Translate Laurel constants to Core function declarations (0-ary functions)
-    let constantDecls ← program.constants.mapM fun c => do
-      let coreTy := translateType model c.type
-      let body ← c.initializer.mapM (translateExpr ·)
-      return Core.Decl.func {
-        name := ⟨c.name.text, ()⟩
-        typeArgs := []
-        inputs := []
-        output := coreTy
-        body := body
-      }
-
-    -- Collect ALL errors from both functions, procedures, and resolution before deciding whether to fail
-    -- let allErrors :=pureErrors ++ procDiags ++ constantsState.diagnostics
-    -- if !allErrors.isEmpty then
-    --   .error allErrors.toArray
-    let procDecls := procedures.map (fun p => Core.Decl.proc p .empty)
-    let instanceProcDecls := instanceProcedures.map (fun p => Core.Decl.proc p .empty)
-
-    -- Translate Laurel datatype definitions to Core declarations.
-    let groupedDatatypeDecls ← translateTypes program model
-
-    -- Inject ExceptionResult datatype for exception support
-    let exceptionResultDt : Lambda.LDatatype Unit := {
-      name := "ExceptionResult"
-      typeArgs := []
-      constrs := [
-        { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
-        { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
-      ]
-      constrs_ne := by decide
-    }
-    let exceptionResultDecl := Core.Decl.type (.data [exceptionResultDt]) .empty
-
-    -- Generate equality axioms for Factory read functions.
-    -- Only emit when the specific Box constructor exists.
-    -- emit: ∀ v: int. readIntN(BoxInt(v)) == v
-    -- This connects the opaque Factory function (which carries bound axioms)
-    -- to the Box constructor/destructor (which carries heap faithfulness).
-    let boxConstrs := program.types.foldl (fun acc td => match td with
-      | .Datatype dt => if dt.name.text == "Box" then
-          dt.constructors.map (·.name.text)
-        else acc
-      | _ => acc) ([] : List String)
-    let readFuncAxioms : List Core.Decl :=
-      [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].filterMap
-        fun (readName, constrName) =>
-          if boxConstrs.contains constrName then
-            let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
-            let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
-            let v : Core.Expression.Expr := .bvar () 0
-            let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
-            let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
-            some (Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr })
-          else none
-
-    let program := {
-      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
-    }
-
-    -- dbg_trace "=== Generated Strata Core Program ==="
-    -- dbg_trace "================================="
-    pure program
-
-
-/--
-Verify a Laurel program using an SMT solver
--/
 def verifyToVcResults (program : Program)
-    (options : VerifyOptions := .default)
-    : IO (Option VCResults × List DiagnosticModel) := do
-  let (coreProgramOption, translateDiags) := translate { emitResolutionErrors := true } program
+  (options : VerifyOptions := .default)
+  : IO (Option VCResults × List DiagnosticModel) := do
+let (coreProgramOption, translateDiags) := translate { emitResolutionErrors := true } program
 
-  match coreProgramOption with
-  | some coreProgram =>
-    -- Enable removeIrrelevantAxioms to avoid polluting simple assertions with heap axioms
-    let options := { options with removeIrrelevantAxioms := .Precise }
-    let runner tempDir :=
-      EIO.toIO (fun f => IO.Error.userError (toString f))
-          (Core.verify coreProgram tempDir .none options)
-    let ioResult ← match options.vcDirectory with
-      | .none => IO.FS.withTempDir runner
-      | .some p => IO.FS.createDirAll ⟨p.toString⟩; runner ⟨p.toString⟩
-    return (some ioResult, translateDiags)
-  | none => return (none, translateDiags)
+match coreProgramOption with
+| some coreProgram =>
+  -- Enable removeIrrelevantAxioms to avoid polluting simple assertions with heap axioms
+  let options := { options with removeIrrelevantAxioms := .Precise }
+  let runner tempDir :=
+    EIO.toIO (fun f => IO.Error.userError (toString f))
+        (Core.verify coreProgram tempDir .none options)
+  let ioResult ← match options.vcDirectory with
+    | .none => IO.FS.withTempDir runner
+    | .some p => IO.FS.createDirAll ⟨p.toString⟩; runner ⟨p.toString⟩
+  return (some ioResult, translateDiags)
+| none => return (none, translateDiags)
 
 
 def verifyToDiagnostics (files: Map Strata.Uri Lean.FileMap) (program : Program)
-    (options : VerifyOptions := .default): IO (Array Diagnostic) := do
-  let results <- verifyToVcResults program options
-  let translationDiags := results.snd.map (fun dm => dm.toDiagnostic files)
-  let vcDiags := match results.fst with
-  | some vcResults => vcResults.toList.filterMap (fun (vcr: VCResult) => vcr.toDiagnostic files)
-  | none => []
-  return (translationDiags ++ vcDiags).toArray
+  (options : VerifyOptions := .default): IO (Array Diagnostic) := do
+let results <- verifyToVcResults program options
+let translationDiags := results.snd.map (fun dm => dm.toDiagnostic files)
+let vcDiags := match results.fst with
+| some vcResults => vcResults.toList.filterMap (fun (vcr: VCResult) => vcr.toDiagnostic files)
+| none => []
+return (translationDiags ++ vcDiags).toArray
 
 def verifyToDiagnosticModels (program : Program) (options : VerifyOptions := .default) : IO (Array DiagnosticModel) := do
-  let results <- verifyToVcResults program options
-  let vcDiags := match results.fst with
-  | none => []
-  | some vcResults => vcResults.toList.filterMap (fun (vcr: VCResult) => toDiagnosticModel vcr)
-  return (results.snd ++ vcDiags).toArray
+let results <- verifyToVcResults program options
+let vcDiags := match results.fst with
+| none => []
+| some vcResults => vcResults.toList.filterMap (fun (vcr: VCResult) => toDiagnosticModel vcr)
+return (results.snd ++ vcDiags).toArray
+
 
 end -- public section
 

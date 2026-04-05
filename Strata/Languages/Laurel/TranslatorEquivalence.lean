@@ -1150,7 +1150,7 @@ The equivalence holds because:
     at the translateLaurelToCore level. The main theorem
     translate_eq_translateProgramModel captures this. -/
 theorem translate_eq_translateProgramModel (program : Program) :
-    (translate {} program).1.map Core.Program.eraseTypes =
+    (translate {} program).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
     some (translateProgramModel program) :=
   translate_eq_model program
 

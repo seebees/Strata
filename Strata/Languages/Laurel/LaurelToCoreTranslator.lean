@@ -993,7 +993,7 @@ return (results.snd ++ vcDiags).toArray
     This exposes the internal structure for equivalence proofs. -/
 -- The main equivalence theorem, proven where `translate` can be unfolded.
 public theorem translate_eq_model (program : Program) :
-    (translate {} program).1.map Core.Program.eraseTypes =
+    (translate {} program).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
     some (translateProgramModel program) := by
   sorry
 
@@ -1005,7 +1005,7 @@ public theorem translate_eq_model_simple (program : Program)
     (hNoConstants : program.constants = [])
     (hNoFields : program.staticFields = [])
     (hNoProcs : program.staticProcedures = []) :
-    (translate {} program).1.map Core.Program.eraseTypes =
+    (translate {} program).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
     some (translateProgramModel program) := by
   sorry
 

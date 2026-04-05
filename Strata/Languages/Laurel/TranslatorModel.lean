@@ -1206,9 +1206,19 @@ public def translateStmtModel
         [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some coreExpr) .empty]
       else
         let coreArgs := args.map fun a => translateExprModel a.val
+        -- Instance method calls need $heap as first arg
+        let coreArgs := if callee.text.splitOn ".." != [callee.text]
+          then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
         [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
          Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
          modelExceptionPropagation]
+    | .InstanceCall target callee args =>
+      let qualName := callee.text  -- already qualified if from qualifyStmt
+      let coreTarget := translateExprModelMd target
+      let coreArgs := args.map fun a => translateExprModel a.val
+      [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
+       Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] qualName ((.fvar () ⟨"$heap", ()⟩ none) :: coreTarget :: coreArgs) .empty,
+       modelExceptionPropagation]
     | _ =>
       let coreExpr := translateExprModel init.val
       [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some coreExpr) .empty]
@@ -1246,6 +1256,9 @@ public def translateStmtModel
     if isFunction callee.text then []
     else
       let coreArgs := args.map fun a => translateExprModel a.val
+      -- Instance method calls (callee contains "..") need $heap as first arg
+      let coreArgs := if callee.text.splitOn ".." != [callee.text]
+        then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
       [Core.Statement.call [⟨"$heap", ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
        modelExceptionPropagation]
   | .While cond invariants decreasesExpr body =>
@@ -1337,7 +1350,10 @@ end
   (callee : Identifier) (args : List StmtExprMd)
   (hNotFunc : isFunction callee.text = false) :
   translateStmtModel isFunction outputParams (.StaticCall callee args) =
-    [Core.Statement.call [⟨"$heap", ()⟩, ⟨"$result", ()⟩] callee.text (args.map fun a => translateExprModel a.val) .empty,
+    let coreArgs := args.map fun a => translateExprModel a.val
+    let coreArgs := if callee.text.splitOn ".." != [callee.text]
+      then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
+    [Core.Statement.call [⟨"$heap", ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
      modelExceptionPropagation] := by
   rw [translateStmtModel.eq_def]; simp [hNotFunc]
 
@@ -1415,6 +1431,9 @@ public def containsInstanceCallMd : StmtExprMd → Bool
     | .Opaque _ (some impl) _ => containsInstanceCallMd impl
     | _ => false
   let needsHeap := readsHeap || writesHeap || hasInstanceCall
+  -- Instance calls conservatively both read and write heap
+  let readsHeap := readsHeap || hasInstanceCall
+  let writesHeap := writesHeap || hasInstanceCall
   let inputs := proc.inputs.map translateParam
   let heapInput : Lambda.Identifier Unit × Lambda.LMonoTy :=
     (⟨"$heap_in", ()⟩, Lambda.LMonoTy.tcons "Heap" [])
@@ -1738,12 +1757,15 @@ public def translateProgramModel (program : Program) : Core.Program :=
   -- Ancestor functions: one per composite + ancestorsPerType
   let composites := allComposites withDefs
   let ancestorDecls : List Core.Decl := if composites.isEmpty then [] else
-    -- ancestorsForX() = update(const(false), X_TypeTag, true)
+    -- ancestorsForX() = update(...update(const(false), Parent_TypeTag, true)..., X_TypeTag, true)
     let constFalse : Core.Expression.Expr := .app () (.op () ⟨"const", ()⟩ none) (.boolConst () false)
     let perType := composites.map fun ct =>
-      let typeTag : Core.Expression.Expr := .op () ⟨ct.name.text ++ "_TypeTag", ()⟩ none
-      let body : Core.Expression.Expr :=
-        .app () (.app () (.app () (.op () ⟨"update", ()⟩ none) constFalse) typeTag) (.boolConst () true)
+      -- Collect all ancestors: parents + self
+      let allAncestors := ct.extending.map (·.text) ++ [ct.name.text]
+      let body := allAncestors.foldl (fun acc name =>
+        let typeTag : Core.Expression.Expr := .op () ⟨name ++ "_TypeTag", ()⟩ none
+        .app () (.app () (.app () (.op () ⟨"update", ()⟩ none) acc) typeTag) (.boolConst () true))
+        constFalse
       Core.Decl.func {
         name := ⟨"ancestorsFor" ++ ct.name.text, ()⟩, typeArgs := [],
         inputs := [],

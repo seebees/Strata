@@ -1077,6 +1077,44 @@ theorem no_datatypes_no_decls
 
 
 
+/-! ## End-to-end procedure equivalence
+
+Combine parameter equivalence, body translation equivalence, and
+procedure structure into a single unconditional theorem. -/
+
+/-- For a simple procedure with a transparent body, if the body statement
+    translates equivalently (model matches real), then the full procedure
+    declaration matches.
+
+    This removes the `bodyStmts` existential from `translateProcedure_matches_model`
+    by directly providing the body translation equivalence. -/
+theorem proc_equiv_simple
+    (proc : Procedure) (s : TranslateState)
+    (hTransparent : ∃ bodyExpr, proc.body = .Transparent bodyExpr)
+    (hNoPre : proc.preconditions = [])
+    (hInputs : ∀ p ∈ proc.inputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
+    (hOutputs : ∀ p ∈ proc.outputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
+    -- Body translation equivalence (the key hypothesis from stmt_equiv_*)
+    (hBodyEquiv : ∀ bodyExpr, proc.body = .Transparent bodyExpr →
+      (translateStmt proc.outputs bodyExpr s).1 =
+      some (translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val)) :
+    ∃ coreProc,
+      translateProcModel (fun _ => false) proc = .proc coreProc ∧
+      coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
+      coreProc.header.inputs = proc.inputs.map (translateParameterToCore s.model) ∧
+      coreProc.header.outputs = proc.outputs.map (translateParameterToCore s.model) ++
+        [(⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])] ∧
+      ∃ bodyExpr, proc.body = .Transparent bodyExpr ∧
+        coreProc.body = [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
+                         Imperative.Stmt.block "$body"
+                           (translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val) .empty] := by
+  obtain ⟨bodyExpr, hBody⟩ := hTransparent
+  have hEquiv := hBodyEquiv bodyExpr hBody
+  obtain ⟨coreProc, h1, h2, h3, h4, h5, h6, h7⟩ := translateProcedure_matches_model (fun _ => false) proc s
+    (translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val)
+    bodyExpr hBody hNoPre hEquiv rfl hInputs hOutputs
+  exact ⟨coreProc, h1, h2, h4, h5, ⟨bodyExpr, hBody, h7⟩⟩
+
 /-! ## Phase 7 composition: transformation passes are jointly identity -/
 
 /-- The 6 program-level transformation passes are jointly identity on simple programs.

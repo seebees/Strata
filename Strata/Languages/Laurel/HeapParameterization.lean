@@ -627,6 +627,20 @@ theorem heapTransformProcedure_noHeap (model : SemanticModel) (proc : Procedure)
     Functor.map, StateT.map, Id.run]
   rfl
 
+/-- When no procedure reads or writes heap, mapM heapTransformProcedure is identity. -/
+public theorem heapTransformProcs_noHeap (model : SemanticModel) (procs : List Procedure)
+    (s : TransformState)
+    (hNoRead : ∀ p ∈ procs, s.heapReaders.contains p.name = false)
+    (hNoWrite : ∀ p ∈ procs, s.heapWriters.contains p.name = false) :
+    (procs.mapM (heapTransformProcedure model)) s = (procs, s) := by
+  induction procs generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
+      pure, StateT.pure, Functor.map, StateT.map,
+      heapTransformProcedure_noHeap model x s (hNoRead x (.head xs)) (hNoWrite x (.head xs)),
+      ih s (fun p hp => hNoRead p (.tail x hp)) (fun p hp => hNoWrite p (.tail x hp))]
+
 end Strata.Laurel
 
 end -- public section

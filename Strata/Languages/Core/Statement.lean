@@ -128,10 +128,10 @@ def Statement.eraseTypes (s : Statement) : Statement :=
   | .ite cond tss ess md =>
     let thenb' := Statements.eraseTypes tss
     let elseb' := Statements.eraseTypes ess
-    .ite cond thenb' elseb' md
+    .ite cond.eraseTypes thenb' elseb' md
   | .loop guard measure invariant bss md =>
     let body' := Statements.eraseTypes bss
-    .loop guard measure invariant body' md
+    .loop guard.eraseTypes (measure.map (·.eraseTypes)) (invariant.map (·.eraseTypes)) body' md
   | .exit l md => .exit l md
   | .funcDecl decl md =>
     let decl' := { decl with

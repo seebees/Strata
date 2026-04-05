@@ -344,7 +344,7 @@ instance : HasVarsImp Expression Procedure where
   modifiedVars := Procedure.modifiedVars
 
 def Procedure.eraseTypes (p : Procedure) : Procedure :=
-  { p with body := Statements.eraseTypes p.body, spec := p.spec }
+  { p with body := Statements.eraseTypes p.body, spec := p.spec.eraseTypes }
 
 /-- Remove all metadata from procedure. -/
 def Procedure.stripMetaData (p : Procedure) : Procedure :=

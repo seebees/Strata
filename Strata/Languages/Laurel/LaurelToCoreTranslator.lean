@@ -1005,6 +1005,42 @@ public theorem translate_eq_model (program : Program) :
   -- with composites, heap operations, and type hierarchies.
   sorry
 
+-- Restricted equivalence: for programs where all passes are no-ops,
+-- the 6 middle passes don't change the program.
+-- This uses sixPassesNoop to simplify the pipeline.
+public theorem translate_simple_passes_noop (program : Program) (model : SemanticModel)
+    (hNoHolesAll : programNoHolesAll program = true)
+    (hNoHoles : programNoHoles program = true)
+    (hPureShortCircuits : ∀ proc ∈ program.staticProcedures,
+      match proc.body with
+      | .Transparent b => pureShortCircuits model b = true
+      | .Opaque posts impl _ =>
+        posts.all (pureShortCircuits model) = true ∧
+        (match impl with | some i => pureShortCircuits model i = true | none => True)
+      | _ => True)
+    (hNoAssign : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
+      containsAssignmentOrImperativeCall model expr = false)
+    (hNoNondetHole : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
+      containsNondetHole expr = false)
+    (hAllNonFunctional : ∀ proc ∈ program.staticProcedures, proc.isFunctional = false)
+    (hNoConstrained : program.types.all (fun td => match td with | .Constrained _ => false | _ => true) = true) :
+    -- The 6 middle passes are identity
+    let p := inferHoleTypes model program
+    let p := eliminateHoles p
+    let p := desugarShortCircuit model p
+    let p := liftExpressionAssignments model p
+    let p := eliminateReturnsInExpressionTransform p
+    let (p, _) := constrainedTypeElim model p
+    p = program := by
+  simp only []
+  rw [inferHoleTypes_noop model program hNoHolesAll]
+  rw [eliminateHoles_noop program hNoHoles]
+  rw [desugarShortCircuit_noop model program hPureShortCircuits]
+  rw [liftExpressionAssignments_noop model program hNoAssign hNoNondetHole]
+  rw [eliminateReturnsInExpressionTransform_noop program hAllNonFunctional]
+  rw [constrainedTypeElim_noop model program hNoConstrained]
+
+
 public theorem translate_fst (program : Program) :
     (translate {} program).1 =
       let program := { program with

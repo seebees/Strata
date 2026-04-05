@@ -1483,10 +1483,11 @@ public def translateProgramModel (program : Program) : Core.Program :=
   let constrainedTypes := withDefs.types.filterMap fun td => match td with
     | .Constrained ct => some ct | _ => none
   let constraintFuncDecls := constrainedTypes.map fun ct =>
+    let body := translateExprModel ct.constraint.val
     Core.Decl.func {
       name := ⟨ct.name.text ++ "$constraint", ()⟩, typeArgs := [],
       inputs := [(⟨ct.valueName.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName ct.base.val) [])],
-      output := Lambda.LMonoTy.bool, body := none }
+      output := Lambda.LMonoTy.bool, body := some body }
   let witnessProcDecls := constrainedTypes.map fun ct =>
     let witnessProc : Procedure := {
       name := { text := "$witness_" ++ ct.name.text, uniqueId := none }

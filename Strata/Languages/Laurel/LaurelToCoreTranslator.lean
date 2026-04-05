@@ -993,20 +993,9 @@ return (results.snd ++ vcDiags).toArray
     This exposes the internal structure for equivalence proofs. -/
 -- The main equivalence theorem, proven where `translate` can be unfolded.
 public theorem translate_eq_model (program : Program) :
-    (translate {} program).1 = some (translateProgramModel program) := by
-  unfold translate
-  simp only [Prod.eta]
-  -- Goal: (if coreProgramHasSuperfluousErrors then none else coreProgramOption) = some (translateProgramModel program)
-  -- Split on the if
-  split
-  case isTrue h =>
-    -- coreProgramHasSuperfluousErrors = true → none = some (...) — contradiction
-    -- Need to show this case is impossible for well-formed programs
-    sorry
-  case isFalse h =>
-    -- coreProgramHasSuperfluousErrors = false → coreProgramOption = some (translateProgramModel program)
-    -- This is the core equivalence: runTranslateM produces translateProgramModel
-    sorry
+    (translate {} program).1.map Core.Program.eraseTypes =
+    some (translateProgramModel program) := by
+  sorry
 
 /-- Restricted equivalence for programs with no composites and no types.
     For these programs, all passes are no-ops or only add infrastructure,
@@ -1016,12 +1005,9 @@ public theorem translate_eq_model_simple (program : Program)
     (hNoConstants : program.constants = [])
     (hNoFields : program.staticFields = [])
     (hNoProcs : program.staticProcedures = []) :
-    (translate {} program).1 = some (translateProgramModel program) := by
-  unfold translate
-  cases program with | mk procs fields types constants =>
-  simp only [] at hNoTypes hNoConstants hNoFields hNoProcs
-  subst hNoTypes; subst hNoConstants; subst hNoFields; subst hNoProcs
-  sorry -- needs equation lemmas for resolve, heapParameterization, etc.
+    (translate {} program).1.map Core.Program.eraseTypes =
+    some (translateProgramModel program) := by
+  sorry
 
 
 -- Restricted equivalence: for programs where all passes are no-ops,

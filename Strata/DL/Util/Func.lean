@@ -203,7 +203,7 @@ instance FuncWF.precond_freevars_decidable
 end -- public section
 
 /-- Two Func values are equal when all observable fields match and concreteEval is none on both. -/
-theorem Func.eq_of_fields {I E T M : Type}
+public theorem Func.eq_of_fields {I E T M : Type}
     (a b : Func I E T M)
     (h1 : a.name = b.name) (h2 : a.typeArgs = b.typeArgs)
     (h3 : a.isConstr = b.isConstr) (h4 : a.isRecursive = b.isRecursive)

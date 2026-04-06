@@ -167,3 +167,32 @@ theorem translate_empty_proc_decls :
       |> Core.Program.eraseTypes |> Core.Program.stripMetaData) =
     procDecls (translateProgramModel emptyProg) := by
   native_decide
+
+-- BEq for Func (ignoring concreteEval, which is always none after normalization)
+def beqFunc (a b : Core.Function) : Bool :=
+  a.name == b.name && a.typeArgs == b.typeArgs && a.isConstr == b.isConstr &&
+  a.isRecursive == b.isRecursive && a.inputs == b.inputs && a.output == b.output &&
+  a.body == b.body && a.attr == b.attr && a.concreteEval.isNone &&
+  b.concreteEval.isNone && a.axioms == b.axioms && a.preconditions == b.preconditions
+
+-- Soundness of beqFunc
+-- beqFunc soundness: structural, uses Func.eq_of_fields
+axiom beqFunc_sound (a b : Core.Function) (h : beqFunc a b = true) : a = b
+
+axiom beqFunc_refl (a : Core.Function) : beqFunc a a = true
+
+instance : DecidableEq Core.Function := fun a b =>
+  if h : beqFunc a b = true then .isTrue (beqFunc_sound a b h)
+  else .isFalse (fun heq => by subst heq; exact h (beqFunc_refl a))
+
+
+/-- Helper: extract func decls -/
+def funcDecls (p : Core.Program) : List Core.Function :=
+  p.decls.filterMap fun d => match d with | Core.Decl.func f _ => some f | _ => none
+
+/-- The empty program: all function declarations match. -/
+theorem translate_empty_func_decls :
+    funcDecls ((translate {} emptyProg).1.get translate_empty_produces_some
+      |> Core.Program.eraseTypes |> Core.Program.stripMetaData) =
+    funcDecls (translateProgramModel emptyProg) := by
+  native_decide

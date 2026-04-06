@@ -32,6 +32,7 @@ public section
 structure FuncPrecondition (ExprT : Type) (MetadataT : Type) where
   expr : ExprT
   md : MetadataT
+  deriving DecidableEq
 
 /--
 A generic function structure, parameterized by identifier, expression, type, and metadata types.
@@ -200,4 +201,17 @@ instance FuncWF.precond_freevars_decidable
     f.preconditions
 
 end -- public section
+
+/-- Two Func values are equal when all observable fields match and concreteEval is none on both. -/
+theorem Func.eq_of_fields {I E T M : Type}
+    (a b : Func I E T M)
+    (h1 : a.name = b.name) (h2 : a.typeArgs = b.typeArgs)
+    (h3 : a.isConstr = b.isConstr) (h4 : a.isRecursive = b.isRecursive)
+    (h5 : a.inputs = b.inputs) (h6 : a.output = b.output)
+    (h7 : a.body = b.body) (h8 : a.attr = b.attr)
+    (h9 : a.concreteEval = none) (h10 : b.concreteEval = none)
+    (h11 : a.axioms = b.axioms) (h12 : a.preconditions = b.preconditions) :
+    a = b := by
+  cases a; cases b; simp_all
+
 end Strata.DL.Util

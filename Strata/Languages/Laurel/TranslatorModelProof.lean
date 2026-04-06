@@ -196,3 +196,46 @@ theorem translate_empty_func_decls :
       |> Core.Program.eraseTypes |> Core.Program.stripMetaData) =
     funcDecls (translateProgramModel emptyProg) := by
   native_decide
+
+-- DecidableEq for Decl (all component types now have DecidableEq)
+instance : DecidableEq Core.Decl := fun a b =>
+  match a, b with
+  | .var n1 t1 e1 m1, .var n2 t2 e2 m2 =>
+    if h : n1 = n2 ∧ t1 = t2 ∧ e1 = e2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .type t1 m1, .type t2 m2 =>
+    if h : t1 = t2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .ax a1 m1, .ax a2 m2 =>
+    if h : a1 = a2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .distinct n1 e1 m1, .distinct n2 e2 m2 =>
+    if h : n1 = n2 ∧ e1 = e2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .proc p1 m1, .proc p2 m2 =>
+    if h : p1 = p2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .func f1 m1, .func f2 m2 =>
+    if h : f1 = f2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .recFuncBlock fs1 m1, .recFuncBlock fs2 m2 =>
+    if h : fs1 = fs2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .var .., .type .. | .var .., .ax .. | .var .., .distinct .. | .var .., .proc .. | .var .., .func .. | .var .., .recFuncBlock ..
+  | .type .., .var .. | .type .., .ax .. | .type .., .distinct .. | .type .., .proc .. | .type .., .func .. | .type .., .recFuncBlock ..
+  | .ax .., .var .. | .ax .., .type .. | .ax .., .distinct .. | .ax .., .proc .. | .ax .., .func .. | .ax .., .recFuncBlock ..
+  | .distinct .., .var .. | .distinct .., .type .. | .distinct .., .ax .. | .distinct .., .proc .. | .distinct .., .func .. | .distinct .., .recFuncBlock ..
+  | .proc .., .var .. | .proc .., .type .. | .proc .., .ax .. | .proc .., .distinct .. | .proc .., .func .. | .proc .., .recFuncBlock ..
+  | .func .., .var .. | .func .., .type .. | .func .., .ax .. | .func .., .distinct .. | .func .., .proc .. | .func .., .recFuncBlock ..
+  | .recFuncBlock .., .var .. | .recFuncBlock .., .type .. | .recFuncBlock .., .ax .. | .recFuncBlock .., .distinct .. | .recFuncBlock .., .proc .. | .recFuncBlock .., .func .. =>
+    .isFalse (by intro h; cases h)
+
+instance : DecidableEq Core.Program := fun a b =>
+  if h : a.decls = b.decls then .isTrue (by cases a; cases b; simp_all)
+  else .isFalse (by intro heq; cases heq; simp_all)
+
+/-- THE EMPTY PROGRAM: full equivalence between translate and translateProgramModel. -/
+theorem translate_eq_model_empty :
+    (translate {} emptyProg).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel emptyProg) := by
+  native_decide

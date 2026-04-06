@@ -1006,23 +1006,33 @@ public theorem translate_eq_model (program : Program) (coreProgram : Core.Progra
   split at h
   · -- cond = true: none = some coreProgram — contradiction
     exact absurd h (by intro h; cases h)
-  · -- cond = false: opt = some coreProgram
-    -- h tells us the pipeline succeeded and produced coreProgram.
-    -- We need: stripMetaData (eraseTypes coreProgram) = translateProgramModel program
+  · -- cond = false: the pipeline succeeded
+    -- h : (runTranslateM ... (translateLaurelToCore transformedProg)).1 = some coreProgram
+    -- Goal: stripMetaData (eraseTypes coreProgram) = translateProgramModel program
     --
-    -- Both sides produce a Core.Program whose decls list is assembled from
-    -- the same categories of declarations. The real pipeline transforms the
-    -- program through passes then translates; the model translates directly.
+    -- Strategy: unfold both sides to expose the decl lists, then show they match.
+    -- Since we're in the module file, we can unfold translateLaurelToCore.
+    -- The monadic computation assembles decls from mapM calls.
+    -- The model assembles decls from map calls.
+    -- After stripMetaData ∘ eraseTypes, the state-dependent parts vanish.
     --
-    -- The proof requires showing each declaration category matches.
-    -- The per-expression and per-statement equivalence lemmas in
-    -- TranslatorEquivalence.lean provide the building blocks.
-    -- The per-procedure equivalence (translateProcedure_matches_model)
-    -- shows individual procedures match.
+    -- Key sub-goals needed:
+    -- 1. ExceptionResult decl matches (trivial — both hardcoded)
+    -- 2. Datatype decls match (translateTypes vs model's datatype assembly)
+    -- 3. Read axioms match (both conditional on Box constructors)
+    -- 4. Constant decls match
+    -- 5. Pure function decls match (translateProcedureToFunction vs model)
+    -- 6. Procedure decls match (translateProcedure vs translateProcModel)
+    -- 7. Instance procedure decls match
     --
-    -- What remains is lifting these to the program level:
-    -- showing mapM translateProcedure procs (after stripMetaData ∘ eraseTypes)
-    -- equals map translateProcModel procs, and similarly for other categories.
+    -- For (6), we have translateProcedure_matches_model at the individual level.
+    -- We need to lift it to the list level via mapM/map equivalence.
+    --
+    -- The model also produces additional categories (ancestor, constraint, heap
+    -- function decls) that the real pipeline generates through the transformation
+    -- passes. These are added to the program by heapParameterization,
+    -- typeHierarchyTransform, etc., and then translateLaurelToCore translates
+    -- them as regular procedures/functions.
     sorry
 
 -- Corollary: the Option.map form (used in tests and downstream theorems)

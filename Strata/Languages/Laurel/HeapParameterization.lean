@@ -616,6 +616,150 @@ def heapParameterization (model: SemanticModel) (program : Program) : Program :=
     staticProcedures := heapConstants.staticProcedures ++ procs',
     types := fieldDatatype :: heapConstants.types ++ [boxDatatype] ++ types' }
 
+/-- When a procedure writes heap, heapTransformProcedure prepends $heap_in to inputs
+    and $heap to outputs. -/
+theorem heapTransformProcedure_writesHeap_inputs (model : SemanticModel) (proc : Procedure)
+    (s : TransformState)
+    (hWrite : s.heapWriters.contains proc.name = true) :
+    ((heapTransformProcedure model proc) s).1.inputs =
+      { name := "$heap_in", type := ⟨.THeap, #[]⟩ } :: proc.inputs := by
+  unfold heapTransformProcedure
+  simp only [writesHeap, readsHeap, bind, StateT.bind, get, MonadState.get, StateT.get,
+    pure, StateT.pure, getThe, MonadStateOf.get, hWrite, ite_true,
+    Functor.map, StateT.map, Id.run]
+  -- After simp, the goal has nested binds for preconditions and body.
+  -- The .inputs field is set in the final `return { proc with inputs := inputs', ... }`
+  -- which is independent of the body/precondition computation.
+  -- Extract by showing the monadic computation preserves the inputs field.
+  -- The .inputs field is set in the struct literal and doesn't depend on
+  -- the monadic computation results. Extract through the match chains.
+  -- Use generalize to name the intermediate pair results.
+  generalize List.mapM (fun expr => heapTransformExpr ("$heap_in" : Identifier) model expr) proc.preconditions s = precResult
+  match proc.body with
+  | .Transparent bodyExpr =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr (!proc.outputs.isEmpty) s1 = bodyResult
+    obtain ⟨body', s2⟩ := bodyResult
+    rfl
+  | .Opaque postconds impl modif =>
+    obtain ⟨precs, s1⟩ := precResult
+    cases impl with
+    | none =>
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s1 = modifResult
+      obtain ⟨modif', s2⟩ := modifResult; rfl
+    | some implExpr =>
+      generalize heapTransformExpr ("$heap" : Identifier) model implExpr (!proc.outputs.isEmpty) s1 = implResult
+      obtain ⟨impl', s2⟩ := implResult
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s2 = modifResult
+      obtain ⟨modif', s3⟩ := modifResult; rfl
+  | .Abstract postconds =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) postconds s1 = postResult
+    obtain ⟨posts, s2⟩ := postResult; rfl
+  | .External =>
+    obtain ⟨precs, s1⟩ := precResult; rfl
+
+theorem heapTransformProcedure_writesHeap_outputs (model : SemanticModel) (proc : Procedure)
+    (s : TransformState)
+    (hWrite : s.heapWriters.contains proc.name = true) :
+    ((heapTransformProcedure model proc) s).1.outputs =
+      { name := "$heap", type := ⟨.THeap, #[]⟩ } :: proc.outputs := by
+  simp only [heapTransformProcedure, writesHeap, readsHeap,
+    bind, StateT.bind, get, MonadState.get, StateT.get,
+    pure, StateT.pure, getThe, MonadStateOf.get, hWrite, ite_true,
+    Functor.map, StateT.map, Id.run]
+  generalize List.mapM (fun expr => heapTransformExpr ("$heap_in" : Identifier) model expr) proc.preconditions s = precResult
+  match proc.body with
+  | .Transparent bodyExpr =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr (!proc.outputs.isEmpty) s1 = bodyResult
+    obtain ⟨body', s2⟩ := bodyResult; rfl
+  | .Opaque postconds impl modif =>
+    obtain ⟨precs, s1⟩ := precResult
+    cases impl with
+    | none =>
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s1 = r
+      obtain ⟨_, _⟩ := r; rfl
+    | some implExpr =>
+      generalize heapTransformExpr ("$heap" : Identifier) model implExpr (!proc.outputs.isEmpty) s1 = r1
+      obtain ⟨_, s2⟩ := r1
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s2 = r2
+      obtain ⟨_, _⟩ := r2; rfl
+  | .Abstract postconds =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) postconds s1 = r
+    obtain ⟨_, _⟩ := r; rfl
+  | .External =>
+    obtain ⟨precs, s1⟩ := precResult; rfl
+
+/-- When a procedure only reads heap, heapTransformProcedure prepends $heap to inputs. -/
+theorem heapTransformProcedure_readsHeap_inputs (model : SemanticModel) (proc : Procedure)
+    (s : TransformState)
+    (hRead : s.heapReaders.contains proc.name = true)
+    (hNoWrite : s.heapWriters.contains proc.name = false) :
+    ((heapTransformProcedure model proc) s).1.inputs =
+      { name := "$heap", type := ⟨.THeap, #[]⟩ } :: proc.inputs := by
+  simp only [heapTransformProcedure, writesHeap, readsHeap,
+    bind, StateT.bind, get, MonadState.get, StateT.get,
+    pure, StateT.pure, getThe, MonadStateOf.get, hNoWrite, hRead, ite_false, ite_true,
+    Functor.map, StateT.map, Id.run]
+  generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) proc.preconditions s = precResult
+  match proc.body with
+  | .Transparent bodyExpr =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr true s1 = r
+    obtain ⟨_, _⟩ := r; rfl
+  | .Opaque postconds impl modif =>
+    obtain ⟨precs, s1⟩ := precResult
+    cases impl with
+    | none =>
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s1 = r
+      obtain ⟨_, _⟩ := r; rfl
+    | some implExpr =>
+      generalize heapTransformExpr ("$heap" : Identifier) model implExpr true s1 = r1
+      obtain ⟨_, s2⟩ := r1
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s2 = r2
+      obtain ⟨_, _⟩ := r2; rfl
+  | .Abstract postconds =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) postconds s1 = r
+    obtain ⟨_, _⟩ := r; rfl
+  | .External =>
+    obtain ⟨precs, s1⟩ := precResult; rfl
+
+theorem heapTransformProcedure_readsHeap_outputs (model : SemanticModel) (proc : Procedure)
+    (s : TransformState)
+    (hRead : s.heapReaders.contains proc.name = true)
+    (hNoWrite : s.heapWriters.contains proc.name = false) :
+    ((heapTransformProcedure model proc) s).1.outputs = proc.outputs := by
+  simp only [heapTransformProcedure, writesHeap, readsHeap,
+    bind, StateT.bind, get, MonadState.get, StateT.get,
+    pure, StateT.pure, getThe, MonadStateOf.get, hNoWrite, hRead, ite_false, ite_true,
+    Functor.map, StateT.map, Id.run]
+  generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) proc.preconditions s = precResult
+  match proc.body with
+  | .Transparent bodyExpr =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr true s1 = r
+    obtain ⟨_, _⟩ := r; rfl
+  | .Opaque postconds impl modif =>
+    obtain ⟨precs, s1⟩ := precResult
+    cases impl with
+    | none =>
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s1 = r
+      obtain ⟨_, _⟩ := r; rfl
+    | some implExpr =>
+      generalize heapTransformExpr ("$heap" : Identifier) model implExpr true s1 = r1
+      obtain ⟨_, s2⟩ := r1
+      generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) modif s2 = r2
+      obtain ⟨_, _⟩ := r2; rfl
+  | .Abstract postconds =>
+    obtain ⟨precs, s1⟩ := precResult
+    generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) postconds s1 = r
+    obtain ⟨_, _⟩ := r; rfl
+  | .External =>
+    obtain ⟨precs, s1⟩ := precResult; rfl
+
 theorem heapTransformProcedure_noHeap (model : SemanticModel) (proc : Procedure)
     (s : TransformState)
     (hNoRead : s.heapReaders.contains proc.name = false)

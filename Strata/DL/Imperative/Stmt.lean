@@ -164,7 +164,7 @@ Useful for cleaner formatting output in tests.
 
 mutual
 /-- Remove all metadata from a statement. -/
-def Stmt.stripMetaData (s : Stmt P C) : Stmt P C :=
+@[expose] def Stmt.stripMetaData (s : Stmt P C) : Stmt P C :=
   match s with
   | .cmd c => .cmd c
   | .block label bss _ => .block label (Block.stripMetaData bss) .empty
@@ -176,7 +176,7 @@ def Stmt.stripMetaData (s : Stmt P C) : Stmt P C :=
   termination_by (Stmt.sizeOf s)
 
 /-- Remove all metadata from a block. -/
-def Block.stripMetaData (ss : Block P C) : Block P C :=
+@[expose] def Block.stripMetaData (ss : Block P C) : Block P C :=
   match ss with
   | [] => []
   | s :: srest => Stmt.stripMetaData s :: Block.stripMetaData srest

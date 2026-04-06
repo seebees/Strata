@@ -1344,14 +1344,35 @@ theorem proc_decl_strip_erase_eq_model
     congr 1
     simp only [Core.Procedure.eraseTypes, Core.Procedure.stripMetaData,
       Core.Procedure.Spec.eraseTypes, Core.Procedure.Check.eraseTypes]
-    -- After simp, the goal is about concrete struct equality.
-    -- header: preserved by eraseTypes/stripMetaData → matches by construction
-    -- spec: eraseTypes on empty lists → identity → matches
-    -- body: stripMetaData on [cmd setResult, block bodyStmts .empty]
-    --   = [cmd setResult, block (stripMetaData bodyStmts) .empty]
-    -- model body = [setResult .empty, block bodyStmts .empty]
-    -- These match if stripMetaData(bodyStmts) = bodyStmts
-    -- which holds when bodyStmts = translateStmtModel ... (all .empty metadata)
+    -- Try to close directly with simp using all known equalities
+    simp only [hModelBody, hModelSpec, hModelInputs, hModelOutputs, hBM]
+    -- The remaining goal should be about Block.stripMetaData on the body.
+    -- Try congr to split:
+    -- The goal should be: some_procedure = modelProc
+    -- where some_procedure is coreProc after eraseTypes.stripMetaData
+    -- and modelProc is from translateProcedure_matches_model.
+    -- Both should have the same structure.
+    -- Let me try to close with `exact` using the known field equalities:
+    -- modelProc = { header := ..., spec := hModelSpec, body := hModelBody }
+    -- We can reconstruct modelProc from its fields.
+    -- Actually, let me try a different approach: show both sides equal the same thing.
+    -- We know modelProc's fields. We know the real procedure's fields.
+    -- After eraseTypes.stripMetaData, the real procedure should equal modelProc.
+    -- The key issue is that eraseTypes/stripMetaData are module file definitions
+    -- that can't be unfolded cross-module.
+    -- But we added @[expose] to them! So simp should work.
+    -- Let me try a comprehensive simp:
+    simp [Core.Procedure.eraseTypes, Core.Procedure.stripMetaData,
+      Core.Procedure.Spec.eraseTypes, Core.Procedure.Check.eraseTypes,
+      Imperative.Block.stripMetaData, Imperative.Stmt.stripMetaData,
+      Core.Statements.eraseTypes, Core.Statement.eraseTypes,
+      Core.Procedure.Spec.mk.injEq, Core.Procedure.mk.injEq,
+      hModelBody, hModelSpec, hModelInputs, hModelOutputs, hBM,
+      ListMap, List.map]
+    -- Remaining: need to show eraseTypes and stripMetaData are identity on model output.
+    -- Specifically: Statements.eraseTypes (translateStmtModel ...) = translateStmtModel ...
+    -- and Block.stripMetaData (translateStmtModel ...) = translateStmtModel ...
+    -- These require lemmas about translateStmtModel producing type-free, metadata-normalized output.
     sorry
 
 /-! ## The Main Theorem: translate = translateProgramModel

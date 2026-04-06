@@ -119,7 +119,7 @@ def Command.eraseTypes (c : Command) : Command :=
     .call lhs pname (args.map Lambda.LExpr.eraseTypes) md
 
 mutual
-def Statement.eraseTypes (s : Statement) : Statement :=
+@[expose] def Statement.eraseTypes (s : Statement) : Statement :=
   match s with
   | .cmd c => .cmd (Command.eraseTypes c)
   | .block label bss md =>
@@ -141,7 +141,7 @@ def Statement.eraseTypes (s : Statement) : Statement :=
     .funcDecl decl' md
   | .typeDecl tc md => .typeDecl tc md
 
-def Statements.eraseTypes (ss : Statements) : Statements :=
+@[expose] def Statements.eraseTypes (ss : Statements) : Statements :=
   match ss with
   | [] => []
   | s :: srest => Statement.eraseTypes s :: Statements.eraseTypes srest

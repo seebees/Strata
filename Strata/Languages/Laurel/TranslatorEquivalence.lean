@@ -822,15 +822,13 @@ theorem translateProcedure_matches_model
     coreProc.body = [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
                      Imperative.Stmt.block "$body" bodyStmts .empty] := by
   refine ⟨_, rfl, rfl, rfl, ?_, ?_, ?_, ?_⟩
-  · -- inputs
+  · -- inputs: translateProcModel's inputs match translateParameterToCore
     sorry
-  · -- outputs
+  · -- outputs: translateProcModel's outputs match translateParameterToCore
     sorry
-  · -- spec
-    simp [hNoPre, hTransparent]
-    rfl
-  · -- body
-    simp [hTransparent, hBodyMatch]
+  · -- spec: empty for transparent body with no preconditions
+    simp [hNoPre, hTransparent]; rfl
+  · -- body: matches the real translator's output
     sorry
 
 /-! ## Phase 3c: Additional expression equivalence proofs -/

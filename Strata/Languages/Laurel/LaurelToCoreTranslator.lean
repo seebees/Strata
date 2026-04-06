@@ -1007,32 +1007,22 @@ public theorem translate_eq_model (program : Program) (coreProgram : Core.Progra
   · -- cond = true: none = some coreProgram — contradiction
     exact absurd h (by intro h; cases h)
   · -- cond = false: opt = some coreProgram
-    -- Extract coreProgram from h
-    -- h : (runTranslateM initState (translateLaurelToCore transformedProg)).1 = some coreProgram
-    -- runTranslateM s m = m s, so this is (translateLaurelToCore transformedProg initState).1 = some coreProgram
+    -- h tells us the pipeline succeeded and produced coreProgram.
+    -- We need: stripMetaData (eraseTypes coreProgram) = translateProgramModel program
     --
-    -- translateLaurelToCore is a monadic computation that assembles decls.
-    -- translateProgramModel is a pure function that assembles decls.
-    -- Both produce Core.Program with a decls list.
-    -- After stripMetaData ∘ eraseTypes, the metadata and types are removed.
+    -- Both sides produce a Core.Program whose decls list is assembled from
+    -- the same categories of declarations. The real pipeline transforms the
+    -- program through passes then translates; the model translates directly.
     --
-    -- The proof needs to show the decl lists match.
-    -- This requires per-category equivalence lemmas for:
-    -- - ExceptionResult datatype
-    -- - Infrastructure datatypes (TypeTag, Field, Composite, Box, Heap)
-    -- - Read function axioms
-    -- - Ancestor declarations
-    -- - Constraint function declarations
-    -- - Heap function declarations
-    -- - External function declarations
-    -- - Transparent function declarations
-    -- - Procedure declarations
-    -- - Witness procedure declarations
-    -- - Instance procedure declarations
+    -- The proof requires showing each declaration category matches.
+    -- The per-expression and per-statement equivalence lemmas in
+    -- TranslatorEquivalence.lean provide the building blocks.
+    -- The per-procedure equivalence (translateProcedure_matches_model)
+    -- shows individual procedures match.
     --
-    -- Each of these is a substantial lemma showing the real translator
-    -- (operating on the post-pipeline program) produces the same output
-    -- as the model (operating on the original program).
+    -- What remains is lifting these to the program level:
+    -- showing mapM translateProcedure procs (after stripMetaData ∘ eraseTypes)
+    -- equals map translateProcModel procs, and similarly for other categories.
     sorry
 
 -- Corollary: the Option.map form (used in tests and downstream theorems)

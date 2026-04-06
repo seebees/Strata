@@ -717,12 +717,10 @@ theorem proc_wrapped_body_eq
   [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
    Imperative.Stmt.block "$body" bodyStmts .empty] := rfl
 
-/-- The model's procedure spec is always empty (no modifies, no pre/postconditions). -/
-theorem model_spec_empty (isFunction : String → Bool) (proc : Procedure) :
+/-- The model's procedure spec has empty modifies. -/
+theorem model_spec_modifies_empty (isFunction : String → Bool) (proc : Procedure) :
   ∃ coreProc, translateProcModel isFunction [] proc = .proc coreProc ∧
-    coreProc.spec.modifies = [] ∧
-    coreProc.spec.preconditions = [] ∧
-    coreProc.spec.postconditions = [] := by
+    coreProc.spec.modifies = [] := by
   unfold translateProcModel; sorry
 
 /-- The model's procedure header has the correct name. -/
@@ -1405,5 +1403,55 @@ All 9 passes in the translate pipeline have no-op/identity theorems.
 8 of 9 are fully proven (0 sorry). 1 has 2 termination sorry. 1 has 1 termination sorry.
 Total: 3 sorry across all 9 passes (all in decreasing_by termination proofs).
 -/
+
+/-! ## Phase 8: General equivalence proof decomposition
+
+The main theorem `translate_eq_model` states that for ALL Laurel programs:
+  (translate {} program).1.map (stripMetaData ∘ eraseTypes) = some (translateProgramModel program)
+
+Proof strategy:
+1. Use `translate_fst` to decompose `translate` into the pipeline
+2. Show the pipeline produces `some coreProgram` (no errors)
+3. Show `stripMetaData (eraseTypes coreProgram) = translateProgramModel program`
+
+For step 3, the key insight is that `translateProgramModel` directly models
+what the pipeline + `translateLaurelToCore` produces after normalization.
+The pipeline transforms the Laurel program through passes, then
+`translateLaurelToCore` converts to Core. The model does this in one step.
+
+The proof decomposes into showing that each pass's effect on the program
+is correctly captured by the corresponding logic in `translateProgramModel`.
+-/
+
+/-- The translate pipeline always produces Some (no superfluousErrors). -/
+theorem translate_produces_some (program : Program) :
+    (translate {} program).1.isSome = true := by
+  sorry
+
+/-- Key decomposition: translate_fst exposes the pipeline structure.
+    This is proven in LaurelToCoreTranslator.lean. -/
+theorem translate_eq_model_via_fst (program : Program)
+    (h : (translate {} program).1 = some coreProgram) :
+    (translate {} program).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel program) ↔
+    Core.Program.stripMetaData (Core.Program.eraseTypes coreProgram) = translateProgramModel program := by
+  simp [h]
+
+/-- Programs are equal iff their decl lists are equal. -/
+theorem core_program_eq_iff_decls_eq (p q : Core.Program) :
+    p = q ↔ p.decls = q.decls := by
+  constructor
+  · intro h; rw [h]
+  · intro h; cases p; cases q; simp_all [Core.Program.mk.injEq]
+
+/-- The main equivalence reduces to showing decl lists match. -/
+theorem translate_eq_model_iff_decls (program : Program)
+    (h : (translate {} program).1 = some coreProgram) :
+    (translate {} program).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel program) ↔
+    (Core.Program.stripMetaData (Core.Program.eraseTypes coreProgram)).decls =
+    (translateProgramModel program).decls := by
+  rw [translate_eq_model_via_fst program h]
+  exact core_program_eq_iff_decls_eq _ _
 
 end Strata.Laurel

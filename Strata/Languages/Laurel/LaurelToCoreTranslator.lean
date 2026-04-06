@@ -782,11 +782,61 @@ public theorem translateProcedure_eq_transparent (proc : Procedure)
     Option.bind, Option.map, Option.some.injEq,
     Prod.fst, Prod.snd, Prod.mk.injEq,
     hPair, and_self, true_and, and_true,
-    List.map, translateParameterToCore]
-  congr 1
-  · congr 1
-    · simp [Identifier.text, Identifier.mk, translateType, Coe.coe]
-      exact sorry
+    List.map, translateParameterToCore,
+    Identifier.text, Identifier.mk, translateType, Coe.coe,
+    Core.Procedure.Header.mk.injEq, Core.Procedure.mk.injEq,
+    Core.Procedure.Spec.mk.injEq, ListMap]
+  -- Try to see what's left. The simp should have reduced most things.
+  -- The remaining goal might be about `List.map f l = List.map g l` where f ≈ g.
+  -- Or it might be about some default field value.
+  -- Let me try `simp` (non-only) to use all available lemmas:
+  simp [*]
+  -- The remaining goal has `List.mapIdxM.go ... [] #[] s` which needs to reduce.
+  -- This is translateChecks on empty preconditions.
+  -- Let me unfold mapIdxM.go for the nil case:
+  simp only [List.mapIdxM.go, Array.toList, List.nil_append,
+    bind, StateT.bind, pure, StateT.pure, OptionT.mk, OptionT.pure,
+    Option.bind, Prod.fst, Prod.snd, hPair]
+
+/-- When translateStmt fails (returns none) on a transparent procedure with no preconditions,
+    translateProcedure also fails. -/
+public theorem translateProcedure_none_of_translateStmt_none (proc : Procedure)
+    (bodyExpr : StmtExprMd) (s : TranslateState)
+    (hTransparent : proc.body = .Transparent bodyExpr)
+    (hNoPre : proc.preconditions = [])
+    (hBody : (translateStmt proc.outputs bodyExpr s).1 = none) :
+    (translateProcedure proc s).1 = none := by
+  have hPair : translateStmt proc.outputs bodyExpr s = (none, (translateStmt proc.outputs bodyExpr s).2) :=
+    Prod.ext hBody rfl
+  unfold translateProcedure
+  simp only [hTransparent, hNoPre]
+  unfold translateChecks
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get,
+    getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+    OptionT.mk, OptionT.bind, OptionT.lift, OptionT.pure,
+    List.mapIdxM, List.mapIdx.go, List.mapM_nil, Id.run,
+    liftM, monadLift, MonadLift.monadLift,
+    EStateM.get, StateT.lift, StateT.run, OptionT.run,
+    Option.bind, Option.map, Option.some.injEq,
+    Prod.fst, Prod.snd, Prod.mk.injEq,
+    hPair, and_self, true_and, and_true,
+    List.map, translateParameterToCore,
+    Identifier.text, Identifier.mk, translateType, Coe.coe,
+    Core.Procedure.Header.mk.injEq, Core.Procedure.mk.injEq,
+    Core.Procedure.Spec.mk.injEq, ListMap]
+  -- Use the same comprehensive simp as the some case, but with none hPair.
+  -- The key: for empty preconditions, the state doesn't change,
+  -- so translateStmt is called with the original state s.
+  -- When translateStmt returns none, the bind propagates none.
+  simp only [List.mapIdxM.go, Array.toList, List.nil_append,
+    bind, StateT.bind, pure, StateT.pure, OptionT.mk, OptionT.pure,
+    Option.bind, Prod.fst, Prod.snd,
+    liftM, monadLift, MonadLift.monadLift,
+    EStateM.get, StateT.lift, StateT.get, OptionT.lift,
+    get, MonadState.get, getThe, MonadStateOf.get,
+    Functor.map, StateT.map]
+  rw [hPair]
+  rfl
 
 /--
 Translate a Laurel Procedure to a Core Function (when applicable) using `TranslateM`.

@@ -1293,9 +1293,9 @@ theorem proc_decl_strip_erase_eq_model
   | none =>
     -- If translateStmt failed, translateProcedure would fail too
     -- But hSucc says it succeeded — contradiction
-    have := translateProcedure_eq_transparent proc bodyExpr s s1 [] hTransparent hNoPre
-    simp [hBody] at this
-    sorry -- need to show translateProcedure fails when translateStmt fails
+    have hNone := translateProcedure_none_of_translateStmt_none proc bodyExpr s hTransparent hNoPre hBody
+    rw [hNone] at hSucc
+    exact absurd hSucc (by intro h; cases h)
   | some bodyStmts =>
     -- translateStmt succeeded with bodyStmts
     have hState : (translateStmt proc.outputs bodyExpr s).2 = s1 := rfl
@@ -1324,6 +1324,34 @@ theorem proc_decl_strip_erase_eq_model
     -- Now we need to show the model produces the same thing.
     -- Use translateProcedure_matches_model to get the model structure.
     have hBM := hBodyMatch bodyStmts hBody
+    -- hBM : bodyStmts = translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val
+    -- We need to show the stripped/erased real procedure equals translateProcModel.
+    -- translateProcModel returns .proc { header, spec, body } where:
+    -- - header matches (same inputs/outputs after type translation)
+    -- - spec has preconditions from proc.preconditions (empty here)
+    -- - body uses translateStmtModel
+    -- The real procedure (after eraseTypes.stripMetaData) has:
+    -- - same header (eraseTypes/stripMetaData preserve headers)
+    -- - spec with empty preconditions/postconditions (eraseTypes on empty spec)
+    -- - body with bodyStmts (stripMetaData removes .empty metadata)
+    -- Use translateProcedure_matches_model to get the model structure:
+    obtain ⟨modelProc, hModel, _, _, hModelInputs, hModelOutputs, hModelSpec, hModelBody⟩ :=
+      translateProcedure_matches_model (fun _ => false) proc s bodyStmts bodyExpr
+        hTransparent hNoPre hNoHeapRead hNoHeapWrite hNoInstanceCall hNoBareInstanceCall
+        hBody hBM hInputs hOutputs
+    -- hModel : translateProcModel (fun _ => false) [] proc = .proc modelProc
+    rw [hModel]
+    congr 1
+    simp only [Core.Procedure.eraseTypes, Core.Procedure.stripMetaData,
+      Core.Procedure.Spec.eraseTypes, Core.Procedure.Check.eraseTypes]
+    -- After simp, the goal is about concrete struct equality.
+    -- header: preserved by eraseTypes/stripMetaData → matches by construction
+    -- spec: eraseTypes on empty lists → identity → matches
+    -- body: stripMetaData on [cmd setResult, block bodyStmts .empty]
+    --   = [cmd setResult, block (stripMetaData bodyStmts) .empty]
+    -- model body = [setResult .empty, block bodyStmts .empty]
+    -- These match if stripMetaData(bodyStmts) = bodyStmts
+    -- which holds when bodyStmts = translateStmtModel ... (all .empty metadata)
     sorry
 
 /-! ## The Main Theorem: translate = translateProgramModel

@@ -874,8 +874,18 @@ theorem translateProcedure_matches_model
   · -- body
     simp only [hTransparent, hNoHeapRead, hNoHeapWrite, hNoInstanceCall, hNoBareInstanceCall,
       Option.any, Bool.false_or, Bool.or_false, decide_false, Bool.false_eq_true, ↓reduceIte]
-    -- Remaining: resolveBody is identity for procs without InstanceCalls
-    sorry
+    -- resolveBody is identity when no InstanceCalls
+    rw [hBodyMatch]
+    -- Check if resolveInstanceCallsInBody appears in the goal
+    have hResolve := resolveInstanceCallsInBody_id
+      (proc.inputs.filterMap fun p =>
+        match p.type.val with | .UserDefined name => some (p.name.text, name.text) | _ => none)
+      bodyExpr hNoInstanceCall
+    -- Try congr to match the structure
+    exact congrArg (fun body => [Core.Statement.set ⟨"$result", ()⟩
+      (.op () ⟨"Success", ()⟩ none) .empty,
+      Imperative.Stmt.block "$body"
+        (translateStmtModel isFunction (proc.outputs.map (·.name.text)) body) .empty]) hResolve
 
 /-! ## Phase 3c: Additional expression equivalence proofs -/
 

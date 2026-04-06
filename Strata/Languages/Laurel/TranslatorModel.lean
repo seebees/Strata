@@ -1514,6 +1514,56 @@ public theorem resolveBody_id_of_no_instanceCall
     · have := hf s hHead; cases s; simp_all
     · exact ih hRest
 
+/-- Resolve InstanceCall in a single statement by qualifying the callee name. -/
+public def resolveInstanceCallInStmt (paramTypeMap : List (String × String)) (s : StmtExpr) : StmtExpr :=
+  match s with
+  | .LocalVariable id ty (some ⟨.InstanceCall target callee args, imd⟩) =>
+    let qualName := match target.val with
+      | .Identifier name => match paramTypeMap.filter (·.1 == name.text) with
+        | (_, tn) :: _ => tn ++ ".." ++ callee.text
+        | [] => callee.text
+      | _ => callee.text
+    .LocalVariable id ty (some ⟨.InstanceCall target { callee with text := qualName } args, imd⟩)
+  | other => other
+
+/-- Resolve InstanceCalls in a body Block by mapping resolveInstanceCallInStmt. -/
+public def resolveInstanceCallsInBody (paramTypeMap : List (String × String)) (body : StmtExpr) : StmtExpr :=
+  match body with
+  | .Block stmts label => .Block (stmts.map fun s => ⟨resolveInstanceCallInStmt paramTypeMap s.val, s.md⟩) label
+  | other => other
+
+/-- resolveInstanceCallInStmt is identity when the statement has no InstanceCall. -/
+public theorem resolveInstanceCallInStmt_id (paramTypeMap : List (String × String))
+    (s : StmtExprMd) (hNoIC : containsInstanceCallMd s = false) :
+    resolveInstanceCallInStmt paramTypeMap s.val = s.val := by
+  unfold resolveInstanceCallInStmt
+  split
+  · exfalso; exact not_instanceCall_of_no_containsInstanceCallMd s hNoIC _ _ _ _ _ _ ‹_›
+  · rfl
+
+/-- resolveInstanceCallsInBody is identity on a Block when no statement has InstanceCall. -/
+public theorem resolveInstanceCallsInBody_id (paramTypeMap : List (String × String))
+    (bodyExpr : StmtExprMd) (hNoIC : containsInstanceCallMd bodyExpr = false) :
+    resolveInstanceCallsInBody paramTypeMap bodyExpr.val = bodyExpr.val := by
+  unfold resolveInstanceCallsInBody
+  split
+  · rename_i stmts label hv
+    simp only [hv]
+    congr 1
+    have hNoICBlock : containsInstanceCallMd ⟨.Block stmts label, bodyExpr.md⟩ = false := by rwa [← hv]
+    have hMem := fun s hs => no_instanceCall_of_block_mem stmts label hNoICBlock s hs
+    have : ∀ (l : List StmtExprMd), (∀ s ∈ l, containsInstanceCallMd s = false) →
+        l.map (fun s => ⟨resolveInstanceCallInStmt paramTypeMap s.val, s.md⟩) = l := by
+      intro l hl; induction l with
+      | nil => simp
+      | cons s rest ih =>
+        simp only [List.map_cons, List.cons.injEq]
+        exact ⟨by have := resolveInstanceCallInStmt_id paramTypeMap s (hl s (List.mem_cons_self ..))
+                  cases s; simp_all,
+               ih (fun t ht => hl t (List.mem_cons_of_mem _ ht))⟩
+    exact this stmts hMem
+  · rfl
+
 @[expose] public def translateProcModel
   (isFunction : String → Bool)
   (compositeNames : List String)
@@ -1566,18 +1616,7 @@ public theorem resolveBody_id_of_no_instanceCall
   -- Resolve InstanceCalls in LocalVariable inits
   let paramTypeMap := proc.inputs.filterMap fun p =>
     match p.type.val with | .UserDefined name => some (p.name.text, name.text) | _ => none
-  let resolveIC (s : StmtExpr) : StmtExpr := match s with
-    | .LocalVariable id ty (some ⟨.InstanceCall target callee args, imd⟩) =>
-      let qualName := match target.val with
-        | .Identifier name => match paramTypeMap.filter (·.1 == name.text) with
-          | (_, tn) :: _ => tn ++ ".." ++ callee.text
-          | [] => callee.text
-        | _ => callee.text
-      .LocalVariable id ty (some ⟨.InstanceCall target { callee with text := qualName } args, imd⟩)
-    | other => other
-  let resolveBody (body : StmtExpr) : StmtExpr := match body with
-    | .Block stmts label => .Block (stmts.map fun s => ⟨resolveIC s.val, s.md⟩) label
-    | other => other
+  let resolveBody (body : StmtExpr) : StmtExpr := resolveInstanceCallsInBody paramTypeMap body
   let bodyStmts : Core.Statements := match proc.body with
     | .Transparent ⟨bodyExpr, _⟩ => translateStmtModel isFunction outParams (resolveBody bodyExpr)
     | .Opaque _ (some ⟨impl, _⟩) _ => translateStmtModel isFunction outParams (resolveBody impl)

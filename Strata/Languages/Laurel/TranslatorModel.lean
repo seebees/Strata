@@ -1518,7 +1518,43 @@ public def containsBareInstanceCallMd : StmtExprMd → Bool
   let body := [setResult, Imperative.Stmt.block "$body" bodyStmts .empty]
   let preconditions : ListMap Core.CoreLabel Core.Procedure.Check := proc.preconditions.map fun pre =>
     ("requires", { expr := translateExprModel pre.val })
-  let spec : Core.Procedure.Spec := { modifies := [], preconditions := preconditions, postconditions := [] }
+  -- Extract postconditions from Opaque body
+  let userPostconds := match proc.body with
+    | .Opaque postconds _ _ =>
+      let indexed := postconds.zip (List.range postconds.length)
+      indexed.map fun (post, i) =>
+        (s!"postcondition_{i}", ({ expr := translateExprModel post.val } : Core.Procedure.Check))
+    | _ => []
+  -- Frame condition for heap-writing procs with modifies clause
+  let frameCondition : ListMap Core.CoreLabel Core.Procedure.Check :=
+    if !writesHeap then [] else
+    match proc.body with
+    | .Opaque _ _ modif =>
+      if modif.isEmpty then [] else
+      -- ∀ ref. ∀ field. (ref < nextRef ∧ ¬(ref == self)) → readField($heap_in, ref, field) == readField($heap, ref, field)
+      let modifTargets := modif.filterMap fun m => match m.val with
+        | .Identifier name => some name.text | _ => none
+      let refVar : Core.Expression.Expr := .bvar () 1
+      let fieldVar : Core.Expression.Expr := .bvar () 0
+      let heapIn : Core.Expression.Expr := .fvar () ⟨"$heap_in", ()⟩ none
+      let heapOut : Core.Expression.Expr := .fvar () ⟨"$heap", ()⟩ none
+      let refLtNext : Core.Expression.Expr :=
+        .app () (.app () (.op () ⟨"Int.Lt", ()⟩ none)
+          (.app () (.op () ⟨"Composite..ref!", ()⟩ none) refVar))
+          (.app () (.op () ⟨"Heap..nextReference!", ()⟩ none) heapIn)
+      let notModified := modifTargets.foldl (fun acc name =>
+        .app () (.app () (.op () ⟨"Bool.And", ()⟩ none) acc)
+          (.app () (.op () ⟨"Bool.Not", ()⟩ none)
+            (.eq () refVar (.fvar () ⟨name, ()⟩ none)))) refLtNext
+      let readOld := .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) heapIn) refVar) fieldVar
+      let readNew := .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) heapOut) refVar) fieldVar
+      let eq := .eq () readOld readNew
+      let iteExpr := .ite () notModified eq (.const () (.boolConst true))
+      let forallExpr := .all () "" none (.all () "" none iteExpr)
+      [(s!"postcondition_{userPostconds.length}", { expr := forallExpr })]
+    | _ => []
+  let postconditions := userPostconds ++ frameCondition
+  let spec : Core.Procedure.Spec := { modifies := [], preconditions := preconditions, postconditions }
   .proc { header, spec, body }
 
 /-- Assemble a full Core.Program from a Laurel Program -/
@@ -1605,6 +1641,8 @@ public def translateProgramModel (program : Program) : Core.Program :=
               let newStmt : StmtExprMd := ⟨.LocalVariable { text := unusedName } ⟨.TInt, .empty⟩ (some (qualifyMd s)), .empty⟩
               (acc ++ [newStmt], cnt + 1)) ([], counter + 1)
           .Transparent ⟨.Block stmts' label, md⟩
+        | .Opaque postconds (some ⟨.Block stmts label, md⟩) modif =>
+          .Opaque (postconds.map qualifyMd) (some ⟨.Block (stmts.map qualifyStmt) label, md⟩) modif
         | other => other
       let (procs, nextCounter) := (ct.instanceProcedures.filter (!·.body.isExternal)).foldl
         (fun (acc, ctr) proc =>

@@ -998,7 +998,42 @@ return (results.snd ++ vcDiags).toArray
 public theorem translate_eq_model (program : Program) (coreProgram : Core.Program)
     (h : (translate {} program).1 = some coreProgram) :
     Core.Program.stripMetaData (Core.Program.eraseTypes coreProgram) = translateProgramModel program := by
-  sorry
+  -- Decompose translate into the pipeline
+  unfold translate at h
+  simp only [Prod.fst] at h
+  -- h has: (if cond then none else opt) = some coreProgram
+  -- Split on cond to extract opt = some coreProgram
+  split at h
+  · -- cond = true: none = some coreProgram — contradiction
+    exact absurd h (by intro h; cases h)
+  · -- cond = false: opt = some coreProgram
+    -- Extract coreProgram from h
+    -- h : (runTranslateM initState (translateLaurelToCore transformedProg)).1 = some coreProgram
+    -- runTranslateM s m = m s, so this is (translateLaurelToCore transformedProg initState).1 = some coreProgram
+    --
+    -- translateLaurelToCore is a monadic computation that assembles decls.
+    -- translateProgramModel is a pure function that assembles decls.
+    -- Both produce Core.Program with a decls list.
+    -- After stripMetaData ∘ eraseTypes, the metadata and types are removed.
+    --
+    -- The proof needs to show the decl lists match.
+    -- This requires per-category equivalence lemmas for:
+    -- - ExceptionResult datatype
+    -- - Infrastructure datatypes (TypeTag, Field, Composite, Box, Heap)
+    -- - Read function axioms
+    -- - Ancestor declarations
+    -- - Constraint function declarations
+    -- - Heap function declarations
+    -- - External function declarations
+    -- - Transparent function declarations
+    -- - Procedure declarations
+    -- - Witness procedure declarations
+    -- - Instance procedure declarations
+    --
+    -- Each of these is a substantial lemma showing the real translator
+    -- (operating on the post-pipeline program) produces the same output
+    -- as the model (operating on the original program).
+    sorry
 
 -- Corollary: the Option.map form (used in tests and downstream theorems)
 public theorem translate_eq_model' (program : Program)

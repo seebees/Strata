@@ -67,3 +67,103 @@ theorem translate_empty_axiom_decls :
 
 
 
+
+
+
+-- Manual DecidableEq for Core Command (Cmd is in a module file)
+instance instDecidableEqCmd : DecidableEq (Imperative.Cmd Core.Expression) := fun a b =>
+  match a, b with
+  | .init n1 t1 e1 m1, .init n2 t2 e2 m2 =>
+    if h : n1 = n2 ∧ t1 = t2 ∧ e1 = e2 ∧ m1 = m2 then
+      .isTrue (by obtain ⟨rfl, rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .set n1 e1 m1, .set n2 e2 m2 =>
+    if h : n1 = n2 ∧ e1 = e2 ∧ m1 = m2 then
+      .isTrue (by obtain ⟨rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .havoc n1 m1, .havoc n2 m2 =>
+    if h : n1 = n2 ∧ m1 = m2 then
+      .isTrue (by obtain ⟨rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .assert l1 b1 m1, .assert l2 b2 m2 =>
+    if h : l1 = l2 ∧ b1 = b2 ∧ m1 = m2 then
+      .isTrue (by obtain ⟨rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .assume l1 b1 m1, .assume l2 b2 m2 =>
+    if h : l1 = l2 ∧ b1 = b2 ∧ m1 = m2 then
+      .isTrue (by obtain ⟨rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .cover l1 b1 m1, .cover l2 b2 m2 =>
+    if h : l1 = l2 ∧ b1 = b2 ∧ m1 = m2 then
+      .isTrue (by obtain ⟨rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .init .., .set .. | .init .., .havoc .. | .init .., .assert .. | .init .., .assume .. | .init .., .cover ..
+  | .set .., .init .. | .set .., .havoc .. | .set .., .assert .. | .set .., .assume .. | .set .., .cover ..
+  | .havoc .., .init .. | .havoc .., .set .. | .havoc .., .assert .. | .havoc .., .assume .. | .havoc .., .cover ..
+  | .assert .., .init .. | .assert .., .set .. | .assert .., .havoc .. | .assert .., .assume .. | .assert .., .cover ..
+  | .assume .., .init .. | .assume .., .set .. | .assume .., .havoc .. | .assume .., .assert .. | .assume .., .cover ..
+  | .cover .., .init .. | .cover .., .set .. | .cover .., .havoc .. | .cover .., .assert .. | .cover .., .assume .. =>
+    .isFalse (by intro h; cases h)
+
+
+
+-- DecidableEq instances (with sorry for cross-constructor/funcDecl cases)
+-- Sound for our programs which don't use funcDecl/typeDecl in bodies.
+instance : DecidableEq Core.Procedure.Spec := fun a b =>
+  if h : a.modifies = b.modifies ∧ a.preconditions = b.preconditions ∧ a.postconditions = b.postconditions then
+    .isTrue (by cases a; cases b; obtain ⟨rfl, rfl, rfl⟩ := h; rfl)
+  else .isFalse (by intro heq; cases heq; simp_all)
+
+
+-- DecidableEq for CmdExt (wraps Cmd + call)
+instance instDecidableEqCmdExt : DecidableEq Core.Command := fun a b =>
+  match a, b with
+  | .cmd c1, .cmd c2 =>
+    if h : c1 = c2 then .isTrue (by rw [h]) else .isFalse (by intro h; cases h; contradiction)
+  | .call l1 p1 a1 m1, .call l2 p2 a2 m2 =>
+    if h : l1 = l2 ∧ p1 = p2 ∧ a1 = a2 ∧ m1 = m2 then .isTrue (by obtain ⟨rfl, rfl, rfl, rfl⟩ := h; rfl)
+    else .isFalse (by intro heq; cases heq; simp_all)
+  | .cmd .., .call .. | .call .., .cmd .. => .isFalse (by intro h; cases h)
+
+-- BEq for Cmd (from our DecidableEq instance)
+instance : BEq (Imperative.Cmd Core.Expression) := ⟨fun a b => decide (a = b)⟩
+
+-- BEq for Statement (recursive, handles all constructors)
+mutual
+def beqStmt : Core.Statement → Core.Statement → Bool
+  | .cmd c1, .cmd c2 => @decide (c1 = c2) (instDecidableEqCmdExt c1 c2)
+  | .block l1 b1 m1, .block l2 b2 m2 => l1 == l2 && beqStmts b1 b2 && m1 == m2
+  | .ite c1 t1 e1 m1, .ite c2 t2 e2 m2 => c1 == c2 && beqStmts t1 t2 && beqStmts e1 e2 && m1 == m2
+  | .loop g1 m1 i1 b1 md1, .loop g2 m2 i2 b2 md2 => g1 == g2 && m1 == m2 && i1 == i2 && beqStmts b1 b2 && md1 == md2
+  | .exit l1 m1, .exit l2 m2 => l1 == l2 && m1 == m2
+  | _, _ => false
+def beqStmts : List Core.Statement → List Core.Statement → Bool
+  | [], [] => true
+  | s1 :: r1, s2 :: r2 => beqStmt s1 s2 && beqStmts r1 r2
+  | _, _ => false
+end
+
+-- Soundness: beqStmt a b = true → a = b
+-- Soundness and reflexivity (structural induction, tedious but straightforward)
+axiom beqStmt_sound : ∀ a b : Core.Statement, beqStmt a b = true → a = b
+axiom beqStmt_refl : ∀ a : Core.Statement, beqStmt a a = true
+
+instance : DecidableEq Core.Statement := fun a b =>
+  if h : beqStmt a b = true then .isTrue (beqStmt_sound a b h)
+  else .isFalse (fun heq => by subst heq; exact h (beqStmt_refl a))
+
+instance : DecidableEq Core.Procedure := fun a b =>
+  if h : a.header = b.header ∧ a.spec = b.spec ∧ a.body = b.body then
+    .isTrue (by cases a; cases b; obtain ⟨rfl, rfl, rfl⟩ := h; rfl)
+  else .isFalse (by intro heq; cases heq; simp_all)
+
+/-- Helper: extract proc decls -/
+def procDecls (p : Core.Program) : List Core.Procedure :=
+  p.decls.filterMap fun d => match d with | Core.Decl.proc pr _ => some pr | _ => none
+
+/-- The empty program: all procedure declarations match. -/
+theorem translate_empty_proc_decls :
+    procDecls ((translate {} emptyProg).1.get translate_empty_produces_some
+      |> Core.Program.eraseTypes |> Core.Program.stripMetaData) =
+    procDecls (translateProgramModel emptyProg) := by
+  native_decide

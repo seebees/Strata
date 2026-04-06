@@ -1448,6 +1448,72 @@ public def containsBareInstanceCallMd : StmtExprMd → Bool
   termination_by e => sizeOf e
   decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
 
+/-- If a Block has no InstanceCalls, then no individual statement does either. -/
+public theorem no_instanceCall_of_block_mem (stmts : List StmtExprMd) (label : Option String)
+    (hNoIC : containsInstanceCallMd ⟨.Block stmts label, md⟩ = false)
+    (s : StmtExprMd) (hs : s ∈ stmts) : containsInstanceCallMd s = false := by
+  simp only [containsInstanceCallMd] at hNoIC
+  match hc : containsInstanceCallMd s with
+  | false => rfl
+  | true =>
+    exfalso
+    have hAny : stmts.attach.any (fun ⟨s, _⟩ => containsInstanceCallMd s) = true := by
+      apply List.any_eq_true.mpr
+      refine ⟨⟨s, hs⟩, List.mem_attach .., ?_⟩
+      exact hc
+    simp_all
+
+/-- When containsInstanceCallMd is false for a statement, it cannot be
+    a LocalVariable with InstanceCall init. -/
+public theorem not_instanceCall_of_no_containsInstanceCallMd (s : StmtExprMd)
+    (hNoIC : containsInstanceCallMd s = false) :
+    ∀ id ty target callee args imd,
+      s.val ≠ StmtExpr.LocalVariable id ty (some ⟨.InstanceCall target callee args, imd⟩) := by
+  intro id ty target callee args imd heq
+  have : containsInstanceCallMd s = true := by
+    show containsInstanceCallMd ⟨s.val, s.md⟩ = true
+    rw [heq]; simp [containsInstanceCallMd]
+  simp_all
+
+/-- When containsInstanceCallMd is false for a Block, mapping any resolveIC-like
+    function over its statements returns the same Block, provided the function
+    is identity on non-InstanceCall statements. -/
+public theorem resolveBody_id_of_no_instanceCall
+    (stmts : List StmtExprMd) (label : Option String)
+    (f : StmtExpr → StmtExpr)
+    (hf : ∀ (s : StmtExprMd), containsInstanceCallMd s = false → f s.val = s.val)
+    (hNoIC : containsInstanceCallMd ⟨.Block stmts label, md⟩ = false) :
+    StmtExpr.Block (stmts.map fun s => ⟨f s.val, s.md⟩) label =
+    StmtExpr.Block stmts label := by
+  congr 1
+  induction stmts with
+  | nil => rfl
+  | cons s rest ih =>
+    simp only [List.map_cons, List.cons.injEq]
+    have hHead : containsInstanceCallMd s = false := by
+      simp only [containsInstanceCallMd] at hNoIC
+      match hc : containsInstanceCallMd s with
+      | false => rfl
+      | true =>
+        exfalso
+        have : (s :: rest).attach.any (fun ⟨s, _⟩ => containsInstanceCallMd s) = true :=
+          List.any_eq_true.mpr ⟨⟨s, List.mem_cons_self⟩, List.mem_attach ..,
+            show (fun (x : {x // x ∈ s :: rest}) => containsInstanceCallMd x.1) ⟨s, List.mem_cons_self⟩ = true from hc⟩
+        simp_all
+    have hRest : containsInstanceCallMd ⟨.Block rest label, md⟩ = false := by
+      simp only [containsInstanceCallMd] at hNoIC ⊢
+      match hc : rest.attach.any (fun ⟨s, _⟩ => containsInstanceCallMd s) with
+      | false => rfl
+      | true =>
+        exfalso
+        obtain ⟨⟨t, ht⟩, _, htIC⟩ := List.any_eq_true.mp hc
+        have : (s :: rest).attach.any (fun ⟨s, _⟩ => containsInstanceCallMd s) = true :=
+          List.any_eq_true.mpr ⟨⟨t, List.mem_cons_of_mem _ ht⟩, List.mem_attach .., htIC⟩
+        simp_all
+    constructor
+    · have := hf s hHead; cases s; simp_all
+    · exact ih hRest
+
 @[expose] public def translateProcModel
   (isFunction : String → Bool)
   (compositeNames : List String)

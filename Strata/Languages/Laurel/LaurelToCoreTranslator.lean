@@ -783,7 +783,10 @@ public theorem translateProcedure_eq_transparent (proc : Procedure)
     Prod.fst, Prod.snd, Prod.mk.injEq,
     hPair, and_self, true_and, and_true,
     List.map, translateParameterToCore]
-  sorry
+  congr 1
+  · congr 1
+    · simp [Identifier.text, Identifier.mk, translateType, Coe.coe]
+      exact sorry
 
 /--
 Translate a Laurel Procedure to a Core Function (when applicable) using `TranslateM`.

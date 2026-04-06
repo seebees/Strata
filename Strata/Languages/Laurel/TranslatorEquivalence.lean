@@ -1278,11 +1278,53 @@ theorem proc_decl_strip_erase_eq_model
       bodyStmts = translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val) :
     Core.Decl.stripMetaData (Core.Decl.eraseTypes (.proc coreProc .empty)) =
       translateProcModel (fun _ => false) [] proc := by
-  -- The model produces .proc modelProc
-  -- We need: .proc (coreProc.eraseTypes.stripMetaData) = .proc modelProc
-  -- Since eraseTypes/stripMetaData preserve headers, header comparison is direct.
-  -- Body and spec need eraseTypes/stripMetaData applied.
-  sorry
+  -- Extract bodyStmts from the successful translateProcedure
+  -- Since translateProcedure succeeded and the only monadic op is translateStmt,
+  -- translateStmt must have succeeded too.
+  -- We use the equation lemma to extract the structure of coreProc.
+  let s1 := (translateStmt proc.outputs bodyExpr s).2
+  -- From hSucc and the equation lemma, we can determine coreProc's structure.
+  -- First, we need to show translateStmt succeeded.
+  -- The equation lemma says: if translateStmt succeeds with bodyStmts,
+  -- then translateProcedure returns some specific procedure.
+  -- From hSucc, translateProcedure returned some coreProc.
+  -- So translateStmt must have returned some bodyStmts.
+  cases hBody : (translateStmt proc.outputs bodyExpr s).1 with
+  | none =>
+    -- If translateStmt failed, translateProcedure would fail too
+    -- But hSucc says it succeeded — contradiction
+    have := translateProcedure_eq_transparent proc bodyExpr s s1 [] hTransparent hNoPre
+    simp [hBody] at this
+    sorry -- need to show translateProcedure fails when translateStmt fails
+  | some bodyStmts =>
+    -- translateStmt succeeded with bodyStmts
+    have hState : (translateStmt proc.outputs bodyExpr s).2 = s1 := rfl
+    have hEq := translateProcedure_eq_transparent proc bodyExpr s s1 bodyStmts
+      hTransparent hNoPre hBody hState
+    -- hEq : (translateProcedure proc s).1 = some { header := ..., spec := ..., body := ... }
+    -- hSucc : (translateProcedure proc s).1 = some coreProc
+    -- So coreProc = { header := ..., spec := ..., body := ... }
+    have hCoreProc : coreProc = {
+      header := {
+        name := proc.name.text
+        typeArgs := []
+        inputs := proc.inputs.map (translateParameterToCore s.model)
+        outputs := proc.outputs.map (translateParameterToCore s.model) ++
+          [(⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])]
+      }
+      spec := { modifies := [], preconditions := [], postconditions := [] }
+      body := [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
+               .block "$body" bodyStmts .empty]
+    } := Option.some.inj (hSucc.symm.trans hEq)
+    -- Now substitute coreProc and compare with translateProcModel
+    rw [hCoreProc]
+    -- Goal: stripMetaData(eraseTypes(.proc {...} .empty)) = translateProcModel ...
+    simp only [Decl_strip_erase_proc]
+    -- Goal: .proc (eraseTypes.stripMetaData {...}) = translateProcModel ...
+    -- Now we need to show the model produces the same thing.
+    -- Use translateProcedure_matches_model to get the model structure.
+    have hBM := hBodyMatch bodyStmts hBody
+    sorry
 
 /-! ## The Main Theorem: translate = translateProgramModel
 

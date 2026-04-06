@@ -525,11 +525,12 @@ theorem stmt_real_block_unlabeled_succeeds
 theorem stmt_model_return_expr
   (isFunction : String → Bool) (outputParams : List String)
   (value : StmtExprMd) (outName : String)
-  (hHead : outputParams.head? = some outName) :
+  (hHead : outputParams.head? = some outName)
+  (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a) :
   translateStmtModel isFunction outputParams (.Return (some value)) =
     [Core.Statement.set ⟨outName, ()⟩ (translateExprModel value.val) .empty,
-     Imperative.Stmt.exit (some "$body") .empty] := by
-  sorry -- needs hNotStaticCall hypothesis after Return refactor
+     Imperative.Stmt.exit (some "$body") .empty] :=
+  translateStmtModel_eq_return_expr isFunction outputParams value outName hHead hNotStaticCall
 
 /-- Statement LocalVariable with expression init: model produces init. -/
 theorem stmt_model_local_expr_init
@@ -537,20 +538,22 @@ theorem stmt_model_local_expr_init
   (id : Identifier) (ty : WithMetadata HighType) (init : StmtExprMd)
   (hNotStaticCall : ∀ c a, init.val ≠ .StaticCall c a)
   (hNotInstanceCall : ∀ t c a, init.val ≠ .InstanceCall t c a)
-  (hNotHole : ∀ n t, init.val ≠ .Hole n t) :
+  (hNotHole : ∀ n t, init.val ≠ .Hole n t)
+  (hNotUnused : id.text.startsWith "$unused_" = false) :
   translateStmtModel isFunction outputParams (.LocalVariable id ty (some init)) =
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (translateExprModel init.val)) .empty] :=
-  sorry -- needs hNotUnused hypothesis
+  translateStmtModel_eq_local_expr_init isFunction outputParams id ty init hNotStaticCall hNotInstanceCall hNotHole hNotUnused
 
 /-- Statement StaticCall procedure: model produces call + exception propagation. -/
 theorem stmt_model_staticCall_proc
   (isFunction : String → Bool) (outputParams : List String)
   (callee : Identifier) (args : List StmtExprMd)
-  (hNotFunc : isFunction callee.text = false) :
+  (hNotFunc : isFunction callee.text = false)
+  (hNotInstanceCall : callee.text.splitOn ".." = [callee.text]) :
   translateStmtModel isFunction outputParams (.StaticCall callee args) =
     [Core.Statement.call [⟨"$result", ()⟩] callee.text (args.map fun a => translateExprModel a.val) .empty,
-     modelExceptionPropagation] :=
-  sorry -- translateStmtModel_eq_staticCall_proc changed outputs
+     modelExceptionPropagation] := by
+  simp [translateStmtModel_eq_staticCall_proc, hNotFunc, hNotInstanceCall]
 
 /-- Statement While loop: model produces loop statement. -/
 theorem stmt_model_while

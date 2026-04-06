@@ -105,7 +105,7 @@ abbrev Block := Imperative.Block Core.Expression Core.Command
 
 ---------------------------------------------------------------------
 
-def Command.eraseTypes (c : Command) : Command :=
+@[expose] def Command.eraseTypes (c : Command) : Command :=
   match c with
   | .cmd c =>
     match c with

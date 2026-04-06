@@ -505,7 +505,7 @@ def size (T : LExprParamsT) (e : LExpr T) : Nat :=
 Erase all type annotations from `e` except the bound variables of abstractions
 and quantified expressions.
 -/
-def eraseTypes {T : LExprParamsT} (e : LExpr T) : LExpr T :=
+@[expose] def eraseTypes {T : LExprParamsT} (e : LExpr T) : LExpr T :=
   match e with
   | .const m c => .const m c
   | .op m o _ => .op m o none

@@ -263,19 +263,57 @@ exhaustive pattern matching forces the model to be updated.
 ## D6: Equivalence Proof Plan (Phase 2)
 
 **Date:** 2026-04-06
+**Updated:** 2026-04-06
 **Status:** In Progress
 
-### Current State
+### Main Theorem
 
-The main theorem is:
 ```lean
 theorem translate_eq_model (program : Program) (coreProgram : Core.Program)
     (h : (translate {} program).1 = some coreProgram) :
     stripMetaData (eraseTypes coreProgram) = translateProgramModel program
 ```
 
-The proof is structured: unfold `translate`, split on error flag, dismiss contradiction.
-The remaining goal: show the Core decl lists match.
+**Status: 1 sorry** (the theorem itself). Proof structured: unfold translate, split on
+error flag, dismiss contradiction. Remaining: show the Core decl lists match.
+
+### Sorry Inventory (4 total)
+
+| # | Location | What | Status |
+|---|----------|------|--------|
+| 1 | `LaurelToCoreTranslator:1127` | `translate_eq_model` — the main goal | Needs 7 category sub-proofs |
+| 2 | `LaurelToCoreTranslator:1157` | `translate_eq_model_simple` | Already proven in TranslatorModelProof.lean (cross-module access issue) |
+| 3 | `LaurelToCoreTranslator:1236` | `translate_empty_isSome` | Already proven via native_decide in tests (cross-module access issue) |
+| 4 | `TranslatorEquivalence:1387` | `proc_decl_strip_erase_eq_model` | Mathematically complete; blocked by mutual recursion reduction cross-module |
+
+### Proven Infrastructure
+
+**Expression level (19 theorems, 0 sorry):**
+All expression equivalences proven in TranslatorEquivalence.lean.
+
+**Statement level (10 theorems, 0 sorry):**
+All statement equivalences proven in TranslatorEquivalence.lean.
+
+**Procedure level:**
+- `translateProcedure_matches_model` — model structure for simple procedures (0 sorry)
+- `translateProcedure_eq_transparent` — equation lemma extracting real translator output (0 sorry)
+- `translateProcedure_none_of_translateStmt_none` — contrapositive (0 sorry)
+- `proc_decl_strip_erase_eq_model` — connects real output to model after strip/erase (1 sorry, technical)
+- Heap transform lemmas: 6 lemmas for inputs/outputs in all 3 cases (0 sorry)
+
+**Structural:**
+- `@[expose]` on Decl/Procedure/Program eraseTypes/stripMetaData, Stmt/Block.stripMetaData,
+  Statement/Statements.eraseTypes, Command.eraseTypes, LExpr.eraseTypes
+- `Program_strip_erase_eq_decls`, `Decl_strip_erase_proc/type/ax`
+- `Procedure_eraseTypes_header`, `Procedure_stripMetaData_header`
+- `translateType_heap`, `translateParameterToCore_heap/heap_in`
+
+**Pass no-ops (6 of 9 passes, 0 sorry):**
+inferHoleTypes, eliminateHoles, desugarShortCircuit, liftExpressionAssignments,
+eliminateReturnsInExpressionTransform, constrainedTypeElim — all proven identity
+under appropriate conditions.
+
+**Computational (45/45 tests passing).**
 
 ### Decl List Alignment
 
@@ -293,66 +331,34 @@ externalFuncDecls ++ transparentFuncDecls ++
 procDecls ++ witnessProcDecls ++ instanceProcDecls
 ```
 
-### Key Insight
+### Sub-lemmas Needed (7 categories)
 
-The pipeline passes ADD procedures/types to the program before `translateLaurelToCore` runs:
-- `heapParameterization` adds heap read/write functions → model's `heapFuncDecls`
-- `typeHierarchyTransform` adds ancestor functions → model's `ancestorDecls`
-- `constrainedTypeElim` adds constraint functions + witness procs → model's `constraintFuncDecls` + `witnessProcDecls`
-- `coreDefinitionsForLaurel` adds external function stubs → model's `externalFuncDecls`
+#### Category 1: ExceptionResult — trivial, not started
+Both hardcode the same datatype. Should be `rfl` after normalization.
 
-So the real translator's `pureFuncDecls` (all isFunctional procs) includes the pass-added
-functions. The model generates them directly.
-
-### Sub-lemmas Needed (ordered by dependency)
-
-#### Category 1: ExceptionResult (trivial)
-Both hardcode the same ExceptionResult datatype. Should be `rfl` after normalization.
-
-#### Category 2: Datatypes (medium)
+#### Category 2: Datatypes — medium, not started
 Real: `translateTypes program model` produces grouped datatype decls.
 Model: `infraDatatypes ++ datatypeDecls` computed directly from program types.
-Need: `translateTypes` equivalence lemma.
 
-#### Category 3: Read Function Axioms (easy)
+#### Category 3: Read Function Axioms — easy, not started
 Both conditional on Box constructors existing. Same logic, different code paths.
-Need: show both produce the same axiom list.
 
-#### Category 4: Functions — ancestor, constraint, heap, external, transparent (hard)
-Real: pipeline passes add these as `isFunctional` procedures, then `translateProcedureToFunction`
-translates them to Core functions.
-Model: generates Core function decls directly.
-Need: for each category, show the pass-added procedure, when translated by
-`translateProcedureToFunction`, produces the same Core function as the model.
+#### Category 4: Functions (ancestor, constraint, heap, external, transparent) — hard, not started
+Pipeline passes add these as `isFunctional` procedures, then `translateProcedureToFunction`
+translates them. Model generates Core function decls directly. Hardest category.
 
-This is the hardest part. Each pass (heapParameterization, typeHierarchyTransform,
-constrainedTypeElim) adds specific procedures with specific bodies. The model
-generates the equivalent Core directly. The proof must show these match.
+#### Category 5: Procedures — medium, partially done
+`proc_decl_strip_erase_eq_model` covers simple procedures (1 technical sorry).
+Still needs: heap access, instance calls, preconditions, opaque bodies, non-basic types.
 
-#### Category 5: Procedures (medium, partially done)
-Real: `procProcs.mapM translateProcedure` wrapped in `Core.Decl.proc`.
-Model: `procProcs.map (translateProcModel isFunc compositeNames)`.
-Need: generalize `translateProcedure_matches_model` to handle all procedure types
-(heap access, instance calls, preconditions, opaque bodies, non-basic types).
-Then lift to list level.
-
-#### Category 6: Instance Procedures (medium)
+#### Category 6: Instance Procedures — medium, not started
 Same as Category 5 but with qualified names from composite types.
-Need: show instance procedure name qualification matches between real and model.
 
-#### Category 7: Constants (easy)
-Real: `program.constants.mapM` translates constants to 0-ary functions.
-Model: should have equivalent logic (or constants are empty in test programs).
+#### Category 7: Constants — easy, not started
+Real: `program.constants.mapM` translates to 0-ary functions.
 
-### Proof Strategy
+### Next Step
 
-1. Prove Categories 1, 3, 7 first (easy wins)
-2. Prove Category 5 by generalizing `translateProcedure_matches_model`
-   - Add heap parameter support
-   - Add precondition/postcondition support
-   - Add non-basic type support
-   - Lift to list level
-3. Prove Category 6 (extends Category 5 with name qualification)
-4. Prove Category 2 (datatype equivalence)
-5. Prove Category 4 (function equivalence — hardest, depends on pass analysis)
-6. Assemble all categories into the main theorem
+Close the technical sorry in `proc_decl_strip_erase_eq_model` (sorry #4), then
+start on Categories 1, 3, 7 (easy wins) to build momentum toward assembling
+the main theorem.

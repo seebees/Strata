@@ -177,9 +177,26 @@ def beqFunc (a b : Core.Function) : Bool :=
 
 -- Soundness of beqFunc
 -- beqFunc soundness: structural, uses Func.eq_of_fields
-axiom beqFunc_sound (a b : Core.Function) (h : beqFunc a b = true) : a = b
+theorem beqFunc_sound (a b : Core.Function) (h : beqFunc a b = true) : a = b := by
+  unfold beqFunc at h
+  repeat rw [Bool.and_eq_true] at h
+  have h12 := beq_iff_eq.mp h.2
+  rw [Bool.and_eq_true] at h; have h11 := beq_iff_eq.mp h.1.2
+  rw [Bool.and_eq_true] at h; have h10 := Option.eq_none_of_isNone h.1.1.2
+  rw [Bool.and_eq_true] at h; have h9 := Option.eq_none_of_isNone h.1.1.1.2
+  rw [Bool.and_eq_true] at h; have h8 := beq_iff_eq.mp h.1.1.1.1.2
+  rw [Bool.and_eq_true] at h; have h7 := beq_iff_eq.mp h.1.1.1.1.1.2
+  rw [Bool.and_eq_true] at h; have h6 := beq_iff_eq.mp h.1.1.1.1.1.1.2
+  rw [Bool.and_eq_true] at h; have h5 := beq_iff_eq.mp h.1.1.1.1.1.1.1.2
+  rw [Bool.and_eq_true] at h; have h4 := beq_iff_eq.mp h.1.1.1.1.1.1.1.1.2
+  rw [Bool.and_eq_true] at h; have h3 := beq_iff_eq.mp h.1.1.1.1.1.1.1.1.1.2
+  rw [Bool.and_eq_true] at h; have h2 := beq_iff_eq.mp h.1.1.1.1.1.1.1.1.1.1.2
+  have h1 := beq_iff_eq.mp h.1.1.1.1.1.1.1.1.1.1.1
+  exact Strata.DL.Util.Func.eq_of_fields a b h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12
 
-axiom beqFunc_refl (a : Core.Function) : beqFunc a a = true
+theorem beqFunc_refl (a : Core.Function) : beqFunc a a = true := by
+  unfold beqFunc; simp only [beq_self_eq_true, Bool.and_self, Bool.true_and]
+  cases a.concreteEval <;> simp [Option.isNone]
 
 instance : DecidableEq Core.Function := fun a b =>
   if h : beqFunc a b = true then .isTrue (beqFunc_sound a b h)

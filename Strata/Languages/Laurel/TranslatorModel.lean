@@ -1044,12 +1044,19 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
   | .FieldSelect target fieldName =>
     let cleanFieldName := if fieldName.text.endsWith ":bool" then fieldName.text.dropRight 5
       else if fieldName.text.endsWith ":string" then fieldName.text.dropRight 7
-      else fieldName.text
+      else
+        -- Check for constrained type suffix like :int32, :int16, etc.
+        match fieldName.text.splitOn ":" with
+        | [name, _] => name
+        | _ => fieldName.text
     let readExpr : Core.Expression.Expr :=
       .app () (.app () (.app () (.op () ⟨"readField", ()⟩ none) (.fvar () ⟨"$heap", ()⟩ none)) (translateExprModelMd target)) (.op () ⟨cleanFieldName, ()⟩ none)
     let boxFn := if fieldName.text.endsWith ":bool" then "Box..boolVal!"
       else if fieldName.text.endsWith ":string" then "Box..stringVal!"
-      else "Box..intVal!"
+      else
+        match fieldName.text.splitOn ":" with
+        | [_, constrainedName] => "read" ++ constrainedName.capitalize
+        | _ => "Box..intVal!"
     .app () (.op () ⟨boxFn, ()⟩ none) readExpr
   | .Forall ⟨name, _⟩ _ body =>
     .all () name.text none (translateExprModelMd body)
@@ -1529,6 +1536,10 @@ public def translateProgramModel (program : Program) : Core.Program :=
   -- Procedure declarations (non-functional, non-external)
   let procDecls := procProcs.map (fun p => translateProcModel isFunc compositeNames p)
   -- Instance procedure declarations
+  -- Map constrained type names to their base types
+  let constrainedBaseTypes : List (String × HighType) := withDefs.types.filterMap fun td => match td with
+    | .Constrained ct => some (ct.name.text, ct.base.val)
+    | _ => none
   let instanceProcs := withDefs.types.foldl (fun (acc, outerCtr) td =>
     match td with
     | .Composite ct =>
@@ -1539,6 +1550,10 @@ public def translateProgramModel (program : Program) : Core.Program :=
         | some f => match f.type.val with
           | .TBool => ":bool"
           | .TString => ":string"
+          | .UserDefined uname =>
+            match (constrainedBaseTypes.find? fun x => x.1 == uname.text) with
+            | some (_, .TInt) => ":" ++ uname.text
+            | _ => ""
           | _ => ""
         | none => ""
       let rec qualifyMd : StmtExprMd → StmtExprMd
@@ -1665,12 +1680,19 @@ public def translateProgramModel (program : Program) : Core.Program :=
     constrs_ne := by simp [fieldConstrs]; split <;> simp_all [List.isEmpty_iff] }])
 
   -- Box: generate constructors based on field types when procedures access fields.
+  let resolveFieldType (ty : HighType) : HighType := match ty with
+    | .UserDefined name =>
+      match (constrainedBaseTypes.find? fun x => x.1 == name.text) with
+      | some (_, base) => base
+      | none => ty
+    | other => other
   let hasFieldAccess := composites.any fun ct =>
     ct.instanceProcedures.any fun p => !p.body.isExternal
   let boxConstrNames : List String := if !hasFieldAccess then [] else
     composites.foldl (fun acc ct =>
       ct.fields.foldl (fun acc f =>
-        let name := match f.type.val with
+        let resolvedTy : HighType := resolveFieldType f.type.val
+        let name := match resolvedTy with
           | .TInt => "BoxInt"
           | .TBool => "BoxBool"
           | .TString => "BoxString"

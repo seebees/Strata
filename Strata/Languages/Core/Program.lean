@@ -142,7 +142,7 @@ def Decl.getRecFuncBlock? (d : Decl) : Option (List Function) :=
   | .recFuncBlock fs _ => some fs
   | _ => none
 
-def Decl.eraseTypes (d : Decl) : Decl :=
+@[expose] def Decl.eraseTypes (d : Decl) : Decl :=
   match d with
   | .ax a md     => .ax a.eraseTypes md
   | .proc p md   => .proc p.eraseTypes md
@@ -151,7 +151,7 @@ def Decl.eraseTypes (d : Decl) : Decl :=
   | .var _ _ _ _ | .type _ _ | .distinct _ _ _ => d
 
 /-- Remove all metadata from a declaration. -/
-def Decl.stripMetaData (d : Decl) : Decl :=
+@[expose] def Decl.stripMetaData (d : Decl) : Decl :=
   match d with
   | .var name ty e _ => .var name ty e
   | .type t _ => .type t
@@ -191,11 +191,11 @@ def Program.init : Program :=
 instance : Inhabited Program where
   default := .init
 
-def Program.eraseTypes (p : Program) : Program :=
+@[expose] def Program.eraseTypes (p : Program) : Program :=
   { p with decls := p.decls.map Decl.eraseTypes }
 
 /-- Remove all metadata from a program. -/
-def Program.stripMetaData (p : Program) : Program :=
+@[expose] def Program.stripMetaData (p : Program) : Program :=
   { p with decls := p.decls.map Decl.stripMetaData }
 
 def Program.formatWithMetaData  (p : Program) : Format :=

@@ -1193,6 +1193,19 @@ end -- public section
 @[simp] public theorem translateType_string (model : SemanticModel) (md : MetaData) :
   translateType model ⟨.TString, md⟩ = LMonoTy.tcons "string" [] := by unfold translateType; rfl
 
+@[simp] public theorem translateType_heap (model : SemanticModel) (md : MetaData) :
+  translateType model ⟨.THeap, md⟩ = LMonoTy.tcons "Heap" [] := by unfold translateType; rfl
+
+public theorem translateParameterToCore_heap_in (model : SemanticModel) :
+  translateParameterToCore model { name := "$heap_in", type := ⟨.THeap, #[]⟩ } =
+    (⟨"$heap_in", ()⟩, LMonoTy.tcons "Heap" []) := by
+  simp [translateParameterToCore, translateType_heap]
+
+public theorem translateParameterToCore_heap (model : SemanticModel) :
+  translateParameterToCore model { name := "$heap", type := ⟨.THeap, #[]⟩ } =
+    (⟨"$heap", ()⟩, LMonoTy.tcons "Heap" []) := by
+  simp [translateParameterToCore, translateType_heap]
+
 /-! ### translateExpr equation lemmas -/
 
 @[simp] public theorem translateExpr_eq_identifier_succeeds

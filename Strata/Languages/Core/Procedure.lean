@@ -242,7 +242,7 @@ instance : Inhabited Procedure.Check where
 instance : ToFormat Procedure.Check where
   format c := f!"{c.expr}{c.attr}"
 
-def Procedure.Check.eraseTypes (c : Procedure.Check) : Procedure.Check :=
+@[expose] def Procedure.Check.eraseTypes (c : Procedure.Check) : Procedure.Check :=
   { c with expr := c.expr.eraseTypes }
 
 /--
@@ -277,7 +277,7 @@ def Procedure.Spec.preconditionNames (s : Procedure.Spec) : List CoreLabel :=
 def Procedure.Spec.postconditionNames (s : Procedure.Spec) : List CoreLabel :=
   s.postconditions.keys
 
-def Procedure.Spec.eraseTypes (s : Procedure.Spec) : Procedure.Spec :=
+@[expose] def Procedure.Spec.eraseTypes (s : Procedure.Spec) : Procedure.Spec :=
   { s with
     preconditions := s.preconditions.map (fun (l, c) => (l, c.eraseTypes)),
     postconditions := s.postconditions.map (fun (l, c) => (l, c.eraseTypes))
@@ -343,11 +343,11 @@ instance : HasVarsImp Expression Procedure where
   definedVars := Procedure.definedVars
   modifiedVars := Procedure.modifiedVars
 
-def Procedure.eraseTypes (p : Procedure) : Procedure :=
+@[expose] def Procedure.eraseTypes (p : Procedure) : Procedure :=
   { p with body := Statements.eraseTypes p.body, spec := p.spec.eraseTypes }
 
 /-- Remove all metadata from procedure. -/
-def Procedure.stripMetaData (p : Procedure) : Procedure :=
+@[expose] def Procedure.stripMetaData (p : Procedure) : Procedure :=
   { p with body := Imperative.Block.stripMetaData p.body }
 
 /-- Transitive variable lookup for procedures.

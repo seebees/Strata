@@ -890,6 +890,73 @@ theorem translateProcedure_matches_model
       Imperative.Stmt.block "$body"
         (translateStmtModel isFunction (proc.outputs.map (·.name.text)) body) .empty]) hResolve
 
+/-- When heapTransformProcedure adds $heap_in to inputs, translateParameterToCore maps it correctly. -/
+theorem translateProcedure_inputs_writesHeap
+  (proc : Procedure) (model : SemanticModel)
+  (hInputs : ∀ p ∈ proc.inputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
+  ({ name := "$heap_in", type := ⟨.THeap, #[]⟩ } :: proc.inputs).map (translateParameterToCore model) =
+    (⟨"$heap_in", ()⟩, Lambda.LMonoTy.tcons "Heap" []) :: proc.inputs.map (translateParameterToCore model) := by
+  simp [List.map, translateParameterToCore_heap_in]
+
+/-- When heapTransformProcedure adds $heap to outputs, translateParameterToCore maps it correctly. -/
+theorem translateProcedure_outputs_writesHeap
+  (proc : Procedure) (model : SemanticModel)
+  (hOutputs : ∀ p ∈ proc.outputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
+  ({ name := "$heap", type := ⟨.THeap, #[]⟩ } :: proc.outputs).map (translateParameterToCore model) ++
+    [(⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])] =
+    (⟨"$heap", ()⟩, Lambda.LMonoTy.tcons "Heap" []) :: proc.outputs.map (translateParameterToCore model) ++
+      [(⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])] := by
+  simp [List.map, translateParameterToCore_heap]
+
+/-- When heapTransformProcedure adds $heap to inputs (read-only), translateParameterToCore maps it correctly. -/
+theorem translateProcedure_inputs_readsHeap
+  (proc : Procedure) (model : SemanticModel)
+  (hInputs : ∀ p ∈ proc.inputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
+  ({ name := "$heap", type := ⟨.THeap, #[]⟩ } :: proc.inputs).map (translateParameterToCore model) =
+    (⟨"$heap", ()⟩, Lambda.LMonoTy.tcons "Heap" []) :: proc.inputs.map (translateParameterToCore model) := by
+  simp [List.map, translateParameterToCore_heap]
+
+/-- stripMetaData ∘ eraseTypes on a Program maps over decls. -/
+theorem Program_strip_erase_eq_decls (p : Core.Program) :
+    (Core.Program.stripMetaData (Core.Program.eraseTypes p)).decls =
+      p.decls.map (Core.Decl.stripMetaData ∘ Core.Decl.eraseTypes) := by
+  simp [Core.Program.stripMetaData, Core.Program.eraseTypes, List.map_map]
+
+/-- Two Core.Programs are equal iff their decl lists are equal. -/
+theorem Core_Program_eq_iff_decls_eq (p q : Core.Program) :
+    p = q ↔ p.decls = q.decls := by
+  constructor
+  · intro h; rw [h]
+  · intro h; cases p; cases q; simp_all
+
+/-- stripMetaData ∘ eraseTypes on Decl.proc drops metadata and erases types. -/
+@[simp] theorem Decl_strip_erase_proc (p : Core.Procedure) :
+    Core.Decl.stripMetaData (Core.Decl.eraseTypes (.proc p .empty)) =
+      .proc (p.eraseTypes.stripMetaData) := by rfl
+
+/-- stripMetaData ∘ eraseTypes on Decl.type is identity on the type data. -/
+@[simp] theorem Decl_strip_erase_type (t : Core.TypeDecl) :
+    Core.Decl.stripMetaData (Core.Decl.eraseTypes (.type t .empty)) = .type t := by rfl
+
+/-- stripMetaData ∘ eraseTypes on Decl.ax drops metadata and erases types. -/
+@[simp] theorem Decl_strip_erase_ax (a : Core.Axiom) :
+    Core.Decl.stripMetaData (Core.Decl.eraseTypes (.ax a .empty)) = .ax a.eraseTypes := by rfl
+
+/-- eraseTypes preserves the procedure header. -/
+theorem Procedure_eraseTypes_header (p : Core.Procedure) :
+    p.eraseTypes.header = p.header := by
+  simp [Core.Procedure.eraseTypes]
+
+/-- stripMetaData preserves the procedure header. -/
+theorem Procedure_stripMetaData_header (p : Core.Procedure) :
+    p.stripMetaData.header = p.header := by
+  simp [Core.Procedure.stripMetaData]
+
+/-- eraseTypes then stripMetaData preserves the procedure header. -/
+theorem Procedure_strip_erase_header (p : Core.Procedure) :
+    (p.eraseTypes.stripMetaData).header = p.header := by
+  simp [Core.Procedure.eraseTypes, Core.Procedure.stripMetaData]
+
 /-! ## Phase 3c: Additional expression equivalence proofs -/
 
 /-- Neq: type-erased equivalence. -/

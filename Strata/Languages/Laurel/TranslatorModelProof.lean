@@ -143,13 +143,109 @@ def beqStmts : List Core.Statement → List Core.Statement → Bool
   | _, _ => false
 end
 
--- Soundness: beqStmt a b = true → a = b
--- Reflexivity: beqStmt a a = true
--- Both are axioms because mutual recursion blocks standard unfold tactics,
--- and funcDecl/typeDecl constructors contain function types preventing full DecidableEq.
-axiom beqStmt_sound : ∀ a b : Core.Statement, beqStmt a b = true → a = b
-axiom beqStmt_refl : ∀ a : Core.Statement, beqStmt a a = true
+-- Size function for well-founded recursion on statements
+mutual
+def stmtSz : Core.Statement → Nat
+  | .cmd _ => 1
+  | .block _ b _ => 1 + stmtsSz b
+  | .ite _ t e _ => 1 + stmtsSz t + stmtsSz e
+  | .loop _ _ _ b _ => 1 + stmtsSz b
+  | .exit _ _ => 1
+  | .funcDecl _ _ => 1
+  | .typeDecl _ _ => 1
+def stmtsSz : List Core.Statement → Nat
+  | [] => 0
+  | s :: rest => stmtSz s + stmtsSz rest
+end
+-- Helper: LExpr BEq soundness for Core types (used in beqStmt and beqFunc proofs)
+private theorem lexpr_beq_sound (a b : Lambda.LExpr Core.CoreLParams.mono)
+    (h : (a == b) = true) : a = b :=
+  (Lambda.LExpr.beq_eq a b).mp h
 
+
+-- Simultaneous soundness proof via Nat well-founded induction (strict <)
+private theorem beqStmt_sound_aux :
+    ∀ n, (∀ a b : Core.Statement, stmtSz a < n → beqStmt a b = true → a = b) ∧
+         (∀ a b : List Core.Statement, stmtsSz a < n → beqStmts a b = true → a = b) := by
+  intro n; induction n with
+  | zero => exact ⟨fun _ _ h => by omega, fun _ _ h => by omega⟩
+  | succ n ih =>
+    obtain ⟨ihS, ihL⟩ := ih
+    have stmtPart : ∀ a b : Core.Statement, stmtSz a < n + 1 → beqStmt a b = true → a = b := by
+      intro a b hlt h
+      match a, b, h with
+      | .cmd c1, .cmd c2, h =>
+        simp only [beqStmt.eq_1] at h; exact congrArg _ (decide_eq_true_eq.mp h)
+      | .block l1 b1 m1, .block l2 b2 m2, h =>
+        simp only [beqStmt.eq_2, Bool.and_eq_true, beq_iff_eq] at h
+        obtain ⟨⟨rfl, hb⟩, rfl⟩ := h; congr 1
+        exact ihL _ _ (by unfold stmtSz at hlt; omega) hb
+      | .ite c1 t1 e1 m1, .ite c2 t2 e2 m2, h =>
+        simp only [beqStmt.eq_3, Bool.and_eq_true] at h
+        obtain ⟨⟨⟨hc, ht⟩, he⟩, hm⟩ := h
+        have := lexpr_beq_sound _ _ hc; have := beq_iff_eq.mp hm; subst_vars; congr 1
+        · exact ihL _ _ (by unfold stmtSz at hlt; omega) ht
+        · exact ihL _ _ (by unfold stmtSz at hlt; omega) he
+      | .loop g1 m1 i1 b1 md1, .loop g2 m2 i2 b2 md2, h =>
+        simp only [beqStmt.eq_4, Bool.and_eq_true] at h
+        obtain ⟨⟨⟨⟨hg, hm⟩, hi⟩, hb⟩, hmd⟩ := h
+        have := lexpr_beq_sound _ _ hg
+        have : m1 = m2 := by
+          match m1, m2 with
+          | none, none => rfl
+          | some x, some y => exact congrArg _ (lexpr_beq_sound x y hm)
+          | none, some _ | some _, none => exact absurd hm (by dsimp [BEq.beq]; decide)
+        have : i1 = i2 := by
+          clear hlt hb hmd hg hm
+          induction i1 generalizing i2 with
+          | nil => cases i2 <;> simp_all [BEq.beq]
+          | cons x xs ihx =>
+            cases i2 with
+            | nil => simp_all [BEq.beq]
+            | cons y ys =>
+              simp only [BEq.beq, List.beq, Bool.and_eq_true] at hi
+              have := lexpr_beq_sound _ _ hi.1; have := ihx _ hi.2; subst_vars; rfl
+        have := beq_iff_eq.mp hmd; subst_vars; congr 1
+        exact ihL _ _ (by unfold stmtSz at hlt; omega) hb
+      | .exit l1 m1, .exit l2 m2, h =>
+        simp only [beqStmt.eq_5, Bool.and_eq_true, beq_iff_eq] at h
+        obtain ⟨rfl, rfl⟩ := h; rfl
+      | .cmd _, .block .., h | .cmd _, .ite .., h | .cmd _, .loop .., h
+      | .cmd _, .exit .., h | .cmd _, .funcDecl .., h | .cmd _, .typeDecl .., h
+      | .block .., .cmd _, h | .block .., .ite .., h | .block .., .loop .., h
+      | .block .., .exit .., h | .block .., .funcDecl .., h | .block .., .typeDecl .., h
+      | .ite .., .cmd _, h | .ite .., .block .., h | .ite .., .loop .., h
+      | .ite .., .exit .., h | .ite .., .funcDecl .., h | .ite .., .typeDecl .., h
+      | .loop .., .cmd _, h | .loop .., .block .., h | .loop .., .ite .., h
+      | .loop .., .exit .., h | .loop .., .funcDecl .., h | .loop .., .typeDecl .., h
+      | .exit .., .cmd _, h | .exit .., .block .., h | .exit .., .ite .., h
+      | .exit .., .loop .., h | .exit .., .funcDecl .., h | .exit .., .typeDecl .., h
+      | .funcDecl .., _, h | .typeDecl .., _, h =>
+        simp only [beqStmt.eq_6] at h <;> (intros; contradiction)
+    exact ⟨stmtPart, fun a b hlt h => by
+      cases a with
+      | nil => cases b with
+        | nil => rfl
+        | cons => simp only [beqStmts.eq_3] at h <;> (intros; contradiction)
+      | cons s rest =>
+        cases b with
+        | nil => simp only [beqStmts.eq_3] at h <;> (intros; contradiction)
+        | cons t rest' =>
+          simp only [beqStmts.eq_2, Bool.and_eq_true] at h
+          obtain ⟨hs, hr⟩ := h
+          have hsz : stmtSz s ≥ 1 := by cases s <;> (unfold stmtSz; omega)
+          have hlt' : stmtSz s + stmtsSz rest < n + 1 := by unfold stmtsSz at hlt; exact hlt
+          have := stmtPart s t (by omega) hs
+          have := ihL rest rest' (by omega) hr
+          subst_vars; rfl⟩
+
+-- Soundness: beqStmt a b = true → a = b (0 sorry, 0 axioms)
+theorem beqStmt_sound : ∀ a b : Core.Statement, beqStmt a b = true → a = b :=
+  fun a b h => (beqStmt_sound_aux (stmtSz a + 1)).1 a b (by omega) h
+
+-- Reflexivity: can't be proven for funcDecl/typeDecl (function types in PureFunc).
+-- Only used in DecidableEq, which is only evaluated on programs without these constructors.
+axiom beqStmt_refl : ∀ a : Core.Statement, beqStmt a a = true
 instance : DecidableEq Core.Statement := fun a b =>
   if h : beqStmt a b = true then .isTrue (beqStmt_sound a b h)
   else .isFalse (fun heq => by subst heq; exact h (beqStmt_refl a))
@@ -176,11 +272,6 @@ def beqFunc (a b : Core.Function) : Bool :=
   a.isRecursive == b.isRecursive && a.inputs == b.inputs && a.output == b.output &&
   a.body == b.body && a.attr == b.attr && a.concreteEval.isNone &&
   b.concreteEval.isNone && a.axioms == b.axioms && a.preconditions == b.preconditions
-
--- Helper: LExpr BEq soundness for Core types
-private theorem lexpr_beq_sound (a b : Lambda.LExpr Core.CoreLParams.mono)
-    (h : (a == b) = true) : a = b :=
-  (Lambda.LExpr.beq_eq a b).mp h
 
 -- Helper: FuncAttr equation lemmas enable LawfulBEq
 private theorem funcAttr_beq_sound (a b : Strata.DL.Util.FuncAttr) (h : (a == b) = true) : a = b := by

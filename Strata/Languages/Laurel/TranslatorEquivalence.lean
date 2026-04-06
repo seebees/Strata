@@ -721,13 +721,13 @@ theorem proc_wrapped_body_eq
 theorem model_spec_modifies_empty (isFunction : String → Bool) (proc : Procedure) :
   ∃ coreProc, translateProcModel isFunction [] proc = .proc coreProc ∧
     coreProc.spec.modifies = [] := by
-  unfold translateProcModel; sorry
+  exact ⟨_, rfl, rfl⟩
 
 /-- The model's procedure header has the correct name. -/
 theorem model_header_name (isFunction : String → Bool) (proc : Procedure) :
   ∃ coreProc, translateProcModel isFunction [] proc = .proc coreProc ∧
     coreProc.header.name = ⟨proc.name.text, ()⟩ := by
-  unfold translateProcModel; sorry
+  exact ⟨_, rfl, rfl⟩
 
 /-- The model's procedure header has no type arguments. -/
 theorem model_header_typeArgs (isFunction : String → Bool) (proc : Procedure) :
@@ -821,8 +821,17 @@ theorem translateProcedure_matches_model
     -- Body matches the real translator's output
     coreProc.body = [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
                      Imperative.Stmt.block "$body" bodyStmts .empty] := by
-  unfold translateProcModel
-  sorry
+  refine ⟨_, rfl, rfl, rfl, ?_, ?_, ?_, ?_⟩
+  · -- inputs
+    sorry
+  · -- outputs
+    sorry
+  · -- spec
+    simp [hNoPre, hTransparent]
+    rfl
+  · -- body
+    simp [hTransparent, hBodyMatch]
+    sorry
 
 /-! ## Phase 3c: Additional expression equivalence proofs -/
 

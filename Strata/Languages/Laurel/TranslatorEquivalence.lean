@@ -790,6 +790,23 @@ theorem params_equiv_basic (model : SemanticModel) (params : List Parameter)
 
 Combine parameter, spec, and body equivalence into a single theorem. -/
 
+/-- For basic types, translateParamModel matches translateParameterToCore. -/
+theorem param_model_eq_real (model : SemanticModel) (p : Parameter)
+    (hType : p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
+    translateParamModel p = translateParameterToCore model p := by
+  simp only [translateParamModel, translateParameterToCore]
+  ext1
+  · rfl
+  · cases hp : p.type with | mk v m =>
+    rcases hType with h | h | h <;> simp_all <;>
+      first | exact coreTypeName_int | exact coreTypeName_bool | exact coreTypeName_string
+
+/-- For basic types, parameter lists match between model and real translator. -/
+theorem params_model_eq_real (model : SemanticModel) (params : List Parameter)
+    (hTypes : ∀ p ∈ params, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
+    params.map translateParamModel = params.map (translateParameterToCore model) :=
+  List.map_eq_map_iff.mpr fun p hp => param_model_eq_real model p (hTypes p hp)
+
 /-- For a simple procedure (basic-typed params, transparent body, no contracts),
     if the body translates equivalently, the full procedure declaration matches.
 

@@ -1255,6 +1255,35 @@ theorem proc_equiv_simple
     bodyExpr hBody hNoPre hr hw hic hbic hEquiv rfl hInputs hOutputs
   exact ⟨coreProc, h1, h2, h4, h5, ⟨bodyExpr, hBody, h7⟩⟩
 
+/-- For a simple procedure, the real translator output after stripMetaData ∘ eraseTypes
+    equals the model output. This is the per-procedure building block for translate_eq_model.
+
+    Conditions: transparent body, no preconditions, no heap access, no instance calls,
+    basic-typed parameters, body translates equivalently. -/
+theorem proc_decl_strip_erase_eq_model
+    (proc : Procedure) (s : TranslateState) (coreProc : Core.Procedure)
+    (bodyExpr : StmtExprMd)
+    (hTransparent : proc.body = .Transparent bodyExpr)
+    (hNoPre : proc.preconditions = [])
+    (hNoHeapRead : directlyReadsHeapMd bodyExpr = false)
+    (hNoHeapWrite : directlyWritesHeapMd bodyExpr = false)
+    (hNoInstanceCall : containsInstanceCallMd bodyExpr = false)
+    (hNoBareInstanceCall : containsBareInstanceCallMd bodyExpr = false)
+    (hInputs : ∀ p ∈ proc.inputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
+    (hOutputs : ∀ p ∈ proc.outputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
+    -- The real translator succeeds and produces coreProc
+    (hSucc : (translateProcedure proc s).1 = some coreProc)
+    -- Body translation matches model
+    (hBodyMatch : ∀ bodyStmts, (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts →
+      bodyStmts = translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val) :
+    Core.Decl.stripMetaData (Core.Decl.eraseTypes (.proc coreProc .empty)) =
+      translateProcModel (fun _ => false) [] proc := by
+  -- The model produces .proc modelProc
+  -- We need: .proc (coreProc.eraseTypes.stripMetaData) = .proc modelProc
+  -- Since eraseTypes/stripMetaData preserve headers, header comparison is direct.
+  -- Body and spec need eraseTypes/stripMetaData applied.
+  sorry
+
 /-! ## The Main Theorem: translate = translateProgramModel
 
 This is the ultimate goal: for any Laurel program, the real translator

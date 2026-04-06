@@ -747,6 +747,50 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions }
   return { header, spec, body }
 
+/-- Equation lemma: translateProcedure on a transparent procedure with no preconditions. -/
+public theorem translateProcedure_eq_transparent (proc : Procedure)
+    (bodyExpr : StmtExprMd) (s s1 : TranslateState)
+    (bodyStmts : List Core.Statement)
+    (hTransparent : proc.body = .Transparent bodyExpr)
+    (hNoPre : proc.preconditions = [])
+    (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr s).2 = s1) :
+    (translateProcedure proc s).1 = some {
+      header := {
+        name := proc.name.text
+        typeArgs := []
+        inputs := proc.inputs.map (translateParameterToCore s.model)
+        outputs := proc.outputs.map (translateParameterToCore s.model) ++
+          [(⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" [])]
+      }
+      spec := { modifies := [], preconditions := [], postconditions := [] }
+      body := [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
+               .block "$body" bodyStmts .empty]
+    } := by
+  -- Prove by direct computation within the same module file.
+  -- translateProcedure is a do block; we unfold and reduce step by step.
+  have hPair : translateStmt proc.outputs bodyExpr s = (some bodyStmts, s1) :=
+    Prod.ext hBody hState
+  unfold translateProcedure
+  simp only [hTransparent, hNoPre]
+  unfold translateChecks
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get,
+    getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+    OptionT.mk, OptionT.bind, List.mapIdxM, List.mapIdx.go, List.mapM_nil, Id.run,
+    liftM, monadLift, MonadLift.monadLift,
+    OptionT.lift, StateT.lift,
+    Option.bind, Prod.fst, Prod.snd, hPair]
+  -- The remaining difference is likely in how `← get` is expanded.
+  -- TranslateM is OptionT (StateT TranslateState Id).
+  -- `← get` becomes `liftM (m := StateT ...) StateT.get` which is
+  -- `fun s => (some s, s)` after full reduction.
+  -- Let me try `simp` with all monad lemmas:
+  simp only [OptionT.run, OptionT.mk, OptionT.pure, OptionT.bind, OptionT.lift,
+    StateT.run, StateT.bind, StateT.pure, StateT.get, StateT.lift, StateT.map,
+    MonadState.get, MonadStateOf.get, getThe,
+    liftM, monadLift, MonadLift.monadLift]
+  sorry
+
 /--
 Translate a Laurel Procedure to a Core Function (when applicable) using `TranslateM`.
 Diagnostics for disallowed constructs in the function body are emitted into the monad state.

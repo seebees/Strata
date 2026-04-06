@@ -1232,7 +1232,12 @@ theorem stmt_equiv_return_expr (outputParams : List Parameter) (s : TranslateSta
     (translateStmt outputParams ⟨.Return (some value), .empty⟩ s).1 =
     some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
       (.Return (some value))) := by
-  sorry -- needs hNotStaticCall after Return refactor
+  have hPair : translateExpr value [] false s = (some (translateExprModel value.val), s) := by
+    rw [Prod.ext_iff]; exact ⟨hExpr, hState⟩
+  rw [translateStmt_eq_return_expr value .empty outputParams outParam s s _ hHead hNotIC hNotSC hPair]
+  have hHeadMap : (outputParams.map (·.name.text)).head? = some outParam.name.text := by
+    cases outputParams <;> simp_all
+  rw [translateStmtModel_eq_return_expr _ _ _ _ hHeadMap hNotSC]
 
 /-- LocalVariable with expression init (non-call): statement translation equivalence. -/
 theorem stmt_equiv_local_expr_init (outputParams : List Parameter) (s : TranslateState)
@@ -1241,6 +1246,7 @@ theorem stmt_equiv_local_expr_init (outputParams : List Parameter) (s : Translat
     (hNotSC : ∀ c a, init.val ≠ .StaticCall c a)
     (hNotIC : ∀ t c a, init.val ≠ .InstanceCall t c a)
     (hNotHole : ∀ n t, init.val ≠ .Hole n t)
+    (hNotUnused : name.text.startsWith "$unused_" = false)
     (hExpr : (translateExpr init [] false s).1 = some (translateExprModel init.val))
     (hState : (translateExpr init [] false s).2 = s) :
     (translateStmt outputParams ⟨.LocalVariable name ty (some init), .empty⟩ s).1 =
@@ -1250,7 +1256,8 @@ theorem stmt_equiv_local_expr_init (outputParams : List Parameter) (s : Translat
   cases init with | mk v m =>
   rw [translateStmt_eq_localVar_exprInit name ty v m .empty outputParams s s
     (translateExprModel v) hNotSC hNotIC hNotHole (by rw [Prod.ext_iff]; exact ⟨hExpr, hState⟩)]
-  sorry -- needs hNotUnused
+  rw [translateStmtModel_eq_local_expr_init _ _ _ _ ⟨v, m⟩ hNotSC hNotIC hNotHole hNotUnused]
+  rw [hty, translateType_int]
 
 
 /-- IfThenElse (no else): statement translation equivalence. -/
@@ -1340,13 +1347,19 @@ theorem stmt_equiv_while (outputParams : List Parameter) (s : TranslateState)
 theorem stmt_equiv_staticCall_proc (outputParams : List Parameter) (s : TranslateState)
     (callee : Identifier) (args : List StmtExprMd)
     (hNotFunc : s.model.isFunction callee = false)
+    (hNotInstance : callee.text.splitOn ".." = [callee.text])
     (hTarget : s.exceptionTarget = "$body")
     (hArgs : (args.mapM (fun a => translateExpr a) s).1 = some (args.map fun a => translateExprModel a.val))
     (hArgsS : (args.mapM (fun a => translateExpr a) s).2 = s) :
     (translateStmt outputParams ⟨.StaticCall callee args, .empty⟩ s).1 =
     some (translateStmtModel (fun _ => false) (outputParams.map (·.name.text))
       (.StaticCall callee args)) := by
-  sorry -- translateStmtModel_eq_staticCall_proc changed outputs
+  have hPair : (args.mapM (fun a => translateExpr a)) s = (some (args.map fun a => translateExprModel a.val), s) := by
+    rw [Prod.ext_iff]; exact ⟨hArgs, hArgsS⟩
+  rw [translateStmt_eq_staticCall_proc callee args .empty outputParams s s _ hNotFunc hPair]
+  rw [translateStmtModel_eq_staticCall_proc (fun _ => false) _ callee args rfl]
+  simp only [hNotInstance, hTarget, modelExceptionPropagation_eq, bne_self_eq_false, decide_false,
+    Bool.false_eq_true, ↓reduceIte]
 
 /-! ## Step 2: Procedure translation equivalence
 

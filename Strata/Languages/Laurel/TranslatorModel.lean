@@ -1274,10 +1274,12 @@ public def translateStmtModel
     if isFunction callee.text then []
     else
       let coreArgs := args.map fun a => translateExprModel a.val
-      -- Instance method calls (callee contains "..") need $heap as first arg
-      let coreArgs := if callee.text.splitOn ".." != [callee.text]
+      let isInstanceCall := callee.text.splitOn ".." != [callee.text]
+      let coreArgs := if isInstanceCall
         then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
-      [Core.Statement.call [⟨"$heap", ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
+      let outputs := if isInstanceCall
+        then [⟨"$heap", ()⟩, ⟨"$result", ()⟩] else [⟨"$result", ()⟩]
+      [Core.Statement.call outputs callee.text coreArgs .empty,
        modelExceptionPropagation]
   | .While cond invariants decreasesExpr body =>
     let condExpr := translateExprModel cond.val
@@ -1372,9 +1374,12 @@ end
   (hNotFunc : isFunction callee.text = false) :
   translateStmtModel isFunction outputParams (.StaticCall callee args) =
     let coreArgs := args.map fun a => translateExprModel a.val
-    let coreArgs := if callee.text.splitOn ".." != [callee.text]
+    let isInstanceCall := callee.text.splitOn ".." != [callee.text]
+    let coreArgs := if isInstanceCall
       then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
-    [Core.Statement.call [⟨"$heap", ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
+    let outputs := if isInstanceCall
+      then [⟨"$heap", ()⟩, ⟨"$result", ()⟩] else [⟨"$result", ()⟩]
+    [Core.Statement.call outputs callee.text coreArgs .empty,
      modelExceptionPropagation] := by
   rw [translateStmtModel.eq_def]; simp [hNotFunc]
 

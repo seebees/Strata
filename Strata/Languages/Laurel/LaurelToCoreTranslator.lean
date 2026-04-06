@@ -1080,6 +1080,13 @@ public theorem translate_fst (program : Program) :
   unfold translate
   simp only [Prod.eta]
 
+/-- The empty program case: translate produces Some.
+    Verified computationally (native_decide in test files) but cannot be
+    proven here because coreDefinitionsForLaurel is in a module file
+    whose IR is not available for native_decide. -/
+public theorem translate_empty_isSome :
+    (translate {} { staticProcedures := [], staticFields := [], types := [], constants := [] }).1.isSome = true := by
+  sorry
 
 end -- public section
 

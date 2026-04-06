@@ -258,3 +258,101 @@ by JVerify into existing Laurel constructs (exit + labeled
 blocks, if/else chains). The Laurel AST is relatively stable.
 New Laurel AST nodes are rare. When they do occur, Lean's
 exhaustive pattern matching forces the model to be updated.
+
+
+## D6: Equivalence Proof Plan (Phase 2)
+
+**Date:** 2026-04-06
+**Status:** In Progress
+
+### Current State
+
+The main theorem is:
+```lean
+theorem translate_eq_model (program : Program) (coreProgram : Core.Program)
+    (h : (translate {} program).1 = some coreProgram) :
+    stripMetaData (eraseTypes coreProgram) = translateProgramModel program
+```
+
+The proof is structured: unfold `translate`, split on error flag, dismiss contradiction.
+The remaining goal: show the Core decl lists match.
+
+### Decl List Alignment
+
+Real translator (`translateLaurelToCore` on post-pipeline program):
+```
+[exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++
+constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
+```
+
+Model (`translateProgramModel` on original program):
+```
+[exceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ readFuncAxioms ++
+ancestorDecls ++ constraintFuncDecls ++ heapFuncDecls ++
+externalFuncDecls ++ transparentFuncDecls ++
+procDecls ++ witnessProcDecls ++ instanceProcDecls
+```
+
+### Key Insight
+
+The pipeline passes ADD procedures/types to the program before `translateLaurelToCore` runs:
+- `heapParameterization` adds heap read/write functions → model's `heapFuncDecls`
+- `typeHierarchyTransform` adds ancestor functions → model's `ancestorDecls`
+- `constrainedTypeElim` adds constraint functions + witness procs → model's `constraintFuncDecls` + `witnessProcDecls`
+- `coreDefinitionsForLaurel` adds external function stubs → model's `externalFuncDecls`
+
+So the real translator's `pureFuncDecls` (all isFunctional procs) includes the pass-added
+functions. The model generates them directly.
+
+### Sub-lemmas Needed (ordered by dependency)
+
+#### Category 1: ExceptionResult (trivial)
+Both hardcode the same ExceptionResult datatype. Should be `rfl` after normalization.
+
+#### Category 2: Datatypes (medium)
+Real: `translateTypes program model` produces grouped datatype decls.
+Model: `infraDatatypes ++ datatypeDecls` computed directly from program types.
+Need: `translateTypes` equivalence lemma.
+
+#### Category 3: Read Function Axioms (easy)
+Both conditional on Box constructors existing. Same logic, different code paths.
+Need: show both produce the same axiom list.
+
+#### Category 4: Functions — ancestor, constraint, heap, external, transparent (hard)
+Real: pipeline passes add these as `isFunctional` procedures, then `translateProcedureToFunction`
+translates them to Core functions.
+Model: generates Core function decls directly.
+Need: for each category, show the pass-added procedure, when translated by
+`translateProcedureToFunction`, produces the same Core function as the model.
+
+This is the hardest part. Each pass (heapParameterization, typeHierarchyTransform,
+constrainedTypeElim) adds specific procedures with specific bodies. The model
+generates the equivalent Core directly. The proof must show these match.
+
+#### Category 5: Procedures (medium, partially done)
+Real: `procProcs.mapM translateProcedure` wrapped in `Core.Decl.proc`.
+Model: `procProcs.map (translateProcModel isFunc compositeNames)`.
+Need: generalize `translateProcedure_matches_model` to handle all procedure types
+(heap access, instance calls, preconditions, opaque bodies, non-basic types).
+Then lift to list level.
+
+#### Category 6: Instance Procedures (medium)
+Same as Category 5 but with qualified names from composite types.
+Need: show instance procedure name qualification matches between real and model.
+
+#### Category 7: Constants (easy)
+Real: `program.constants.mapM` translates constants to 0-ary functions.
+Model: should have equivalent logic (or constants are empty in test programs).
+
+### Proof Strategy
+
+1. Prove Categories 1, 3, 7 first (easy wins)
+2. Prove Category 5 by generalizing `translateProcedure_matches_model`
+   - Add heap parameter support
+   - Add precondition/postcondition support
+   - Add non-basic type support
+   - Lift to list level
+3. Prove Category 6 (extends Category 5 with name qualification)
+4. Prove Category 2 (datatype equivalence)
+5. Prove Category 4 (function equivalence — hardest, depends on pass analysis)
+6. Assemble all categories into the main theorem

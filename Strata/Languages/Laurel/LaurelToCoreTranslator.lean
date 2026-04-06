@@ -768,7 +768,6 @@ public theorem translateProcedure_eq_transparent (proc : Procedure)
                .block "$body" bodyStmts .empty]
     } := by
   -- Prove by direct computation within the same module file.
-  -- translateProcedure is a do block; we unfold and reduce step by step.
   have hPair : translateStmt proc.outputs bodyExpr s = (some bodyStmts, s1) :=
     Prod.ext hBody hState
   unfold translateProcedure
@@ -776,19 +775,14 @@ public theorem translateProcedure_eq_transparent (proc : Procedure)
   unfold translateChecks
   simp only [bind, StateT.bind, get, MonadState.get, StateT.get,
     getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
-    OptionT.mk, OptionT.bind, List.mapIdxM, List.mapIdx.go, List.mapM_nil, Id.run,
+    OptionT.mk, OptionT.bind, OptionT.lift, OptionT.pure,
+    List.mapIdxM, List.mapIdx.go, List.mapM_nil, Id.run,
     liftM, monadLift, MonadLift.monadLift,
-    OptionT.lift, StateT.lift,
-    Option.bind, Prod.fst, Prod.snd, hPair]
-  -- The remaining difference is likely in how `← get` is expanded.
-  -- TranslateM is OptionT (StateT TranslateState Id).
-  -- `← get` becomes `liftM (m := StateT ...) StateT.get` which is
-  -- `fun s => (some s, s)` after full reduction.
-  -- Let me try `simp` with all monad lemmas:
-  simp only [OptionT.run, OptionT.mk, OptionT.pure, OptionT.bind, OptionT.lift,
-    StateT.run, StateT.bind, StateT.pure, StateT.get, StateT.lift, StateT.map,
-    MonadState.get, MonadStateOf.get, getThe,
-    liftM, monadLift, MonadLift.monadLift]
+    EStateM.get, StateT.lift, StateT.run, OptionT.run,
+    Option.bind, Option.map, Option.some.injEq,
+    Prod.fst, Prod.snd, Prod.mk.injEq,
+    hPair, and_self, true_and, and_true,
+    List.map, translateParameterToCore]
   sorry
 
 /--

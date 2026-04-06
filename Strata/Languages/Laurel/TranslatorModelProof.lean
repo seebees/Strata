@@ -239,3 +239,31 @@ theorem translate_eq_model_empty :
     (translate {} emptyProg).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
     some (translateProgramModel emptyProg) := by
   native_decide
+
+/-- The simple program case: programs with no types/procs/constants/fields
+    are equivalent to the empty program, which we've proven matches the model. -/
+theorem translate_eq_model_simple (program : Program)
+    (hNoTypes : program.types = [])
+    (hNoConstants : program.constants = [])
+    (hNoFields : program.staticFields = [])
+    (hNoProcs : program.staticProcedures = []) :
+    (translate {} program).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel program) := by
+  have hProg : program = emptyProg := by
+    cases program; simp_all [emptyProg]
+  rw [hProg]
+  exact translate_eq_model_empty
+
+/-- translate_produces_some for the empty program. -/
+theorem translate_produces_some_empty :
+    (translate {} emptyProg).1.isSome = true := translate_empty_produces_some
+
+/-- translate_produces_some for simple programs (no types/procs/constants/fields). -/
+theorem translate_produces_some_simple (program : Program)
+    (hNoTypes : program.types = [])
+    (hNoConstants : program.constants = [])
+    (hNoFields : program.staticFields = [])
+    (hNoProcs : program.staticProcedures = []) :
+    (translate {} program).1.isSome = true := by
+  have hProg : program = emptyProg := by cases program; simp_all [emptyProg]
+  rw [hProg]; exact translate_empty_produces_some

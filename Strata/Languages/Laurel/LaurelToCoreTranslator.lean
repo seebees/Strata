@@ -1007,6 +1007,13 @@ public theorem translate_eq_model_simple (program : Program)
     (hNoProcs : program.staticProcedures = []) :
     (translate {} program).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
     some (translateProgramModel program) := by
+  -- The program with these hypotheses is structurally the empty program
+  have hProg : program = { staticProcedures := [], staticFields := [], types := [], constants := [] } := by
+    cases program; simp_all
+  rw [hProg]
+  -- Now need: translate {} emptyProg matches model
+  -- This is translate_eq_model_empty, proven in TranslatorModelProof.lean
+  -- but not accessible here (module file). Use sorry.
   sorry
 
 

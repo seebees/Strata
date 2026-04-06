@@ -819,6 +819,11 @@ theorem translateProcedure_matches_model
   (hTransparent : proc.body = .Transparent bodyExpr)
   -- No preconditions
   (hNoPre : proc.preconditions = [])
+  -- No heap access
+  (hNoHeapRead : directlyReadsHeapMd bodyExpr = false)
+  (hNoHeapWrite : directlyWritesHeapMd bodyExpr = false)
+  (hNoInstanceCall : containsInstanceCallMd bodyExpr = false)
+  (hNoBareInstanceCall : containsBareInstanceCallMd bodyExpr = false)
   -- Body translates equivalently
   (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
   (hBodyMatch : bodyStmts = translateStmtModel isFunction (proc.outputs.map (·.name.text)) bodyExpr.val)
@@ -827,25 +832,49 @@ theorem translateProcedure_matches_model
   (hOutputs : ∀ p ∈ proc.outputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString) :
   ∃ coreProc,
     translateProcModel isFunction [] proc = .proc coreProc ∧
-    -- Header matches
     coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
     coreProc.header.typeArgs = [] ∧
     coreProc.header.inputs = proc.inputs.map (translateParameterToCore s.model) ∧
     coreProc.header.outputs = proc.outputs.map (translateParameterToCore s.model) ++
       [(⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])] ∧
-    -- Spec is empty
     coreProc.spec = { modifies := [], preconditions := [], postconditions := [] } ∧
-    -- Body matches the real translator's output
     coreProc.body = [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
                      Imperative.Stmt.block "$body" bodyStmts .empty] := by
+  -- translateProcModel with needsHeap = false simplifies to no heap params
+  have hNeedsHeap : (Option.any directlyReadsHeapMd (some bodyExpr) ||
+    Option.any directlyWritesHeapMd (some bodyExpr) ||
+    containsInstanceCallMd bodyExpr) = false := by
+    simp [hNoHeapRead, hNoHeapWrite, hNoInstanceCall]
   refine ⟨_, rfl, rfl, rfl, ?_, ?_, ?_, ?_⟩
-  · -- inputs: translateProcModel's inputs match translateParameterToCore
-    sorry
-  · -- outputs: translateProcModel's outputs match translateParameterToCore
-    sorry
-  · -- spec: empty for transparent body with no preconditions
+  · -- inputs
+    simp only [hTransparent, hNoHeapRead, hNoHeapWrite, hNoInstanceCall,
+      Option.any, Bool.false_or, Bool.or_false, decide_false, Bool.false_eq_true, ↓reduceIte]
+    apply List.map_eq_map_iff.mpr
+    intro p hp
+    simp only [translateParameterToCore]
+    rcases hInputs p hp with h | h | h <;> {
+      cases hpt : p.type with | mk v m =>
+      simp_all [coreTypeName_int, coreTypeName_bool, coreTypeName_string,
+        translateType_int, translateType_bool, translateType_string]
+    }
+  · -- outputs
+    simp only [hTransparent, hNoHeapRead, hNoHeapWrite, hNoInstanceCall, hNoBareInstanceCall,
+      Option.any, Bool.false_or, Bool.or_false, decide_false, Bool.false_eq_true, ↓reduceIte]
+    congr 1
+    apply List.map_eq_map_iff.mpr
+    intro p hp
+    simp only [translateParameterToCore]
+    rcases hOutputs p hp with h | h | h <;> {
+      cases hpt : p.type with | mk v m =>
+      simp_all [coreTypeName_int, coreTypeName_bool, coreTypeName_string,
+        translateType_int, translateType_bool, translateType_string]
+    }
+  · -- spec
     simp [hNoPre, hTransparent]; rfl
-  · -- body: matches the real translator's output
+  · -- body
+    simp only [hTransparent, hNoHeapRead, hNoHeapWrite, hNoInstanceCall, hNoBareInstanceCall,
+      Option.any, Bool.false_or, Bool.or_false, decide_false, Bool.false_eq_true, ↓reduceIte]
+    -- Remaining: resolveBody is identity for procs without InstanceCalls
     sorry
 
 /-! ## Phase 3c: Additional expression equivalence proofs -/
@@ -1120,6 +1149,10 @@ theorem proc_equiv_simple
     (hNoPre : proc.preconditions = [])
     (hInputs : ∀ p ∈ proc.inputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
     (hOutputs : ∀ p ∈ proc.outputs, p.type.val = .TInt ∨ p.type.val = .TBool ∨ p.type.val = .TString)
+    -- No heap access
+    (hNoHeap : ∀ bodyExpr, proc.body = .Transparent bodyExpr →
+      directlyReadsHeapMd bodyExpr = false ∧ directlyWritesHeapMd bodyExpr = false ∧
+      containsInstanceCallMd bodyExpr = false ∧ containsBareInstanceCallMd bodyExpr = false)
     -- Body translation equivalence (the key hypothesis from stmt_equiv_*)
     (hBodyEquiv : ∀ bodyExpr, proc.body = .Transparent bodyExpr →
       (translateStmt proc.outputs bodyExpr s).1 =
@@ -1135,10 +1168,11 @@ theorem proc_equiv_simple
                          Imperative.Stmt.block "$body"
                            (translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val) .empty] := by
   obtain ⟨bodyExpr, hBody⟩ := hTransparent
+  have ⟨hr, hw, hic, hbic⟩ := hNoHeap bodyExpr hBody
   have hEquiv := hBodyEquiv bodyExpr hBody
   obtain ⟨coreProc, h1, h2, h3, h4, h5, h6, h7⟩ := translateProcedure_matches_model (fun _ => false) proc s
     (translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val)
-    bodyExpr hBody hNoPre hEquiv rfl hInputs hOutputs
+    bodyExpr hBody hNoPre hr hw hic hbic hEquiv rfl hInputs hOutputs
   exact ⟨coreProc, h1, h2, h4, h5, ⟨bodyExpr, hBody, h7⟩⟩
 
 /-! ## The Main Theorem: translate = translateProgramModel

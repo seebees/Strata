@@ -144,7 +144,9 @@ def beqStmts : List Core.Statement → List Core.Statement → Bool
 end
 
 -- Soundness: beqStmt a b = true → a = b
--- Soundness and reflexivity (structural induction, tedious but straightforward)
+-- Reflexivity: beqStmt a a = true
+-- Both are axioms because mutual recursion blocks standard unfold tactics,
+-- and funcDecl/typeDecl constructors contain function types preventing full DecidableEq.
 axiom beqStmt_sound : ∀ a b : Core.Statement, beqStmt a b = true → a = b
 axiom beqStmt_refl : ∀ a : Core.Statement, beqStmt a a = true
 
@@ -175,13 +177,73 @@ def beqFunc (a b : Core.Function) : Bool :=
   a.body == b.body && a.attr == b.attr && a.concreteEval.isNone &&
   b.concreteEval.isNone && a.axioms == b.axioms && a.preconditions == b.preconditions
 
--- Soundness of beqFunc
--- beqFunc soundness: structural, uses Func.eq_of_fields
+-- Helper: LExpr BEq soundness for Core types
+private theorem lexpr_beq_sound (a b : Lambda.LExpr Core.CoreLParams.mono)
+    (h : (a == b) = true) : a = b :=
+  (Lambda.LExpr.beq_eq a b).mp h
+
+-- Helper: FuncAttr equation lemmas enable LawfulBEq
+private theorem funcAttr_beq_sound (a b : Strata.DL.Util.FuncAttr) (h : (a == b) = true) : a = b := by
+  simp only [BEq.beq] at h
+  cases a <;> cases b
+  · rfl
+  all_goals first
+    | (rw [Strata.DL.Util.instBEqFuncAttr.beq.eq_2] at h; exact congrArg _ (beq_iff_eq.mp h))
+    | (rw [Strata.DL.Util.instBEqFuncAttr.beq.eq_3] at h; exact congrArg _ (beq_iff_eq.mp h))
+    | (rw [Strata.DL.Util.instBEqFuncAttr.beq.eq_4] at h <;> simp_all)
+
+instance : LawfulBEq Strata.DL.Util.FuncAttr where
+  eq_of_beq := fun h => funcAttr_beq_sound _ _ h
+  rfl := by
+    intro a; simp only [BEq.beq]
+    cases a
+    · exact Strata.DL.Util.instBEqFuncAttr.beq.eq_1
+    · rw [Strata.DL.Util.instBEqFuncAttr.beq.eq_2]; exact beq_self_eq_true _
+    · rw [Strata.DL.Util.instBEqFuncAttr.beq.eq_3]; exact beq_self_eq_true _
+
+-- Helper: ListMap BEq soundness (custom BEq, not from List)
+private theorem listmap_beq_sound
+    {α β : Type} [BEq α] [BEq β] [LawfulBEq α] [LawfulBEq β]
+    (a b : ListMap α β) (h : (a == b) = true) : a = b := by
+  change instBEqListMap.beq a b = true at h
+  simp only [BEq.beq, instBEqListMap] at h
+  induction a generalizing b with
+  | nil => cases b <;> simp_all [instBEqListMap.go]
+  | cons x xs ih =>
+    cases b with
+    | nil => simp [instBEqListMap.go] at h
+    | cons y ys =>
+      simp only [instBEqListMap.go, Bool.and_eq_true] at h
+      have h1 := beq_iff_eq.mp h.1; have h2 := ih ys h.2
+      subst h1; subst h2; rfl
+
+-- Helper: Option LExpr BEq soundness
+private theorem option_lexpr_beq_sound (a b : Option (Lambda.LExpr Core.CoreLParams.mono))
+    (h : (a == b) = true) : a = b := by
+  match a, b with
+  | none, none => rfl
+  | some x, some y =>
+    simp only [BEq.beq] at h
+    exact congrArg _ (lexpr_beq_sound x y h)
+  | none, some _ => exact absurd h (by dsimp [BEq.beq]; decide)
+  | some _, none => exact absurd h (by dsimp [BEq.beq]; decide)
+
+-- Helper: List LExpr BEq soundness
+private theorem list_lexpr_beq_sound (a b : List (Lambda.LExpr Core.CoreLParams.mono))
+    (h : (a == b) = true) : a = b := by
+  induction a generalizing b with
+  | nil => cases b <;> simp_all [BEq.beq]
+  | cons x xs ih =>
+    cases b with
+    | nil => simp_all [BEq.beq]
+    | cons y ys =>
+      simp only [BEq.beq, List.beq, Bool.and_eq_true] at h
+      have h1 := lexpr_beq_sound _ _ h.1; have h2 := ih _ h.2
+      subst h1; subst h2; rfl
+
+-- Soundness of beqFunc (0 sorry, 0 axioms)
 private theorem beq_to_eq {α : Type} [BEq α] [DecidableEq α] [LawfulBEq α]
     (a b : α) (h : (a == b) = true) : a = b := beq_iff_eq.mp h
-private theorem beq_to_eq' {α : Type} [DecidableEq α]
-    (a b : α) (h : (a == b) = true) : a = b := by
-  have : BEq α := instBEqOfDecidableEq; exact decide_eq_true_eq.mp h
 
 theorem beqFunc_sound (a b : Core.Function) (h : beqFunc a b = true) : a = b := by
   unfold beqFunc at h
@@ -191,17 +253,17 @@ theorem beqFunc_sound (a b : Core.Function) (h : beqFunc a b = true) : a = b := 
     (beq_to_eq _ _ h.1.1.1.1.1.1.1.1.1.1.2)
     (beq_to_eq _ _ h.1.1.1.1.1.1.1.1.1.2)
     (beq_to_eq _ _ h.1.1.1.1.1.1.1.1.2)
-    (sorry)
+    (listmap_beq_sound _ _ h.1.1.1.1.1.1.1.2)
     (beq_to_eq _ _ h.1.1.1.1.1.1.2)
-    (sorry)
-    (sorry)
+    (option_lexpr_beq_sound _ _ h.1.1.1.1.1.2)
+    (beq_to_eq _ _ h.1.1.1.1.2)
     (Option.eq_none_of_isNone h.1.1.1.2)
     (Option.eq_none_of_isNone h.1.1.2)
-    (sorry)
-    (sorry)
+    (list_lexpr_beq_sound _ _ h.1.2)
+    (beq_to_eq _ _ h.2)
 
--- beqFunc_refl: straightforward but needs LawfulBEq for all fields
--- Some fields (inputs, body, attr, axioms, preconditions) don't have LawfulBEq
+-- Reflexivity: can't be proven unconditionally (concreteEval is a function type).
+-- Only used in DecidableEq, which is only evaluated on functions with concreteEval = none.
 axiom beqFunc_refl (a : Core.Function) : beqFunc a a = true
 
 instance : DecidableEq Core.Function := fun a b =>

@@ -1016,15 +1016,6 @@ public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
     liftM, monadLift, MonadLift.monadLift,
     StateT.lift, StateT.run, OptionT.run,
     Option.bind, Prod.fst, Prod.snd, Id.run, List.map] at h
-  -- h has nested match expressions. Revert coreProg so split can substitute it.
-  -- The approach: don't try to extract the decl structure from h.
-  -- Instead, use the fact that translateLaurelToCore always produces
-  -- a program with the specific decl structure (by construction).
-  -- The final line is `pure { decls := [exceptionResultDecl] ++ ... }`.
-  -- So ANY successful result has this structure.
-  -- Prove by showing the monadic computation, when it returns some,
-  -- returns a program with the specific decl list.
-  -- Use `have` to establish the structure, then close the existential.
   sorry
 
 /--

@@ -1101,29 +1101,11 @@ public theorem translate_eq_model (program : Program) (coreProgram : Core.Progra
     -- h : (runTranslateM ... (translateLaurelToCore transformedProg)).1 = some coreProgram
     -- Goal: stripMetaData (eraseTypes coreProgram) = translateProgramModel program
     --
-    -- Strategy: unfold both sides to expose the decl lists, then show they match.
-    -- Since we're in the module file, we can unfold translateLaurelToCore.
-    -- The monadic computation assembles decls from mapM calls.
-    -- The model assembles decls from map calls.
-    -- After stripMetaData ∘ eraseTypes, the state-dependent parts vanish.
-    --
-    -- Key sub-goals needed:
-    -- 1. ExceptionResult decl matches (trivial — both hardcoded)
-    -- 2. Datatype decls match (translateTypes vs model's datatype assembly)
-    -- 3. Read axioms match (both conditional on Box constructors)
-    -- 4. Constant decls match
-    -- 5. Pure function decls match (translateProcedureToFunction vs model)
-    -- 6. Procedure decls match (translateProcedure vs translateProcModel)
-    -- 7. Instance procedure decls match
-    --
-    -- For (6), we have translateProcedure_matches_model at the individual level.
-    -- We need to lift it to the list level via mapM/map equivalence.
-    --
-    -- The model also produces additional categories (ancestor, constraint, heap
-    -- function decls) that the real pipeline generates through the transformation
-    -- passes. These are added to the program by heapParameterization,
-    -- typeHierarchyTransform, etc., and then translateLaurelToCore translates
-    -- them as regular procedures/functions.
+    -- Step 1: The goal is stripMetaData(eraseTypes(coreProgram)) = translateProgramModel(program)
+    -- Both sides are Core.Program with only a `decls` field.
+    -- We need to show their decl lists are equal.
+    -- Since we're in the module file, we can unfold stripMetaData/eraseTypes.
+    -- Let's work directly with the decl lists.
     sorry
 
 -- Corollary: the Option.map form (used in tests and downstream theorems)

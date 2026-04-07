@@ -1010,33 +1010,22 @@ public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
       procedures.map (fun p => Core.Decl.proc p .empty) ++
       instanceProcedures.map (fun p => Core.Decl.proc p .empty) := by
   unfold translateLaurelToCore at h
-  -- Don't simp — work with the raw do-block expansion.
-  -- The do-block expands to nested binds. Each bind is:
-  -- (f >>= g) s = match (f s).1 with | some a => g a (f s).2 | none => (none, (f s).2)
-  -- We need to peel off each layer.
-  -- Actually, let's try a different approach: use `show` to restate h
-  -- in terms of the final program structure, then extract witnesses.
-  -- The key: translateLaurelToCore always returns `pure { decls := ... }`
-  -- at the end, so if it succeeds, the decls have the specific structure.
-  -- Let me try the comprehensive simp that worked for translateProcedure_eq_transparent,
-  -- but applied to h:
   simp only [bind, StateT.bind, get, MonadState.get, StateT.get,
-    getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+    getThe, MonadStateOf.get, pure, StateT.pure,
     OptionT.mk, OptionT.bind, OptionT.lift, OptionT.pure,
     liftM, monadLift, MonadLift.monadLift,
-    EStateM.get, StateT.lift, StateT.run, OptionT.run,
-    Option.bind, Option.map,
-    Prod.fst, Prod.snd,
-    Id.run] at h
-  -- After simp, h has nested match expressions.
-  -- Use split to case-split. The some cases give us the witnesses.
-  split at h
-  · -- After split, coreProg is the concrete program from translateLaurelToCore.
-    -- Use omega or native_decide to close — actually, just use sorry for now.
-    -- The split consumed h and set coreProg to the concrete program.
-    -- The existential witnesses need to be the intermediate monadic results.
-    -- These are anonymous after split. Use sorry.
-    sorry
+    StateT.lift, StateT.run, OptionT.run,
+    Option.bind, Prod.fst, Prod.snd, Id.run, List.map] at h
+  -- h has nested match expressions. Revert coreProg so split can substitute it.
+  -- The approach: don't try to extract the decl structure from h.
+  -- Instead, use the fact that translateLaurelToCore always produces
+  -- a program with the specific decl structure (by construction).
+  -- The final line is `pure { decls := [exceptionResultDecl] ++ ... }`.
+  -- So ANY successful result has this structure.
+  -- Prove by showing the monadic computation, when it returns some,
+  -- returns a program with the specific decl list.
+  -- Use `have` to establish the structure, then close the existential.
+  sorry
 
 /--
 Translate Laurel Program to Core Program

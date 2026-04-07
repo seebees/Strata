@@ -907,31 +907,57 @@ def translateTypes (program : Program) (model : SemanticModel) : TranslateM (Lis
   let groups := groupDatatypes laurelDatatypes ldatatypes
   return groups.map fun group => Core.Decl.type (.data group)
 
-def translateLaurelToCore (program : Program): TranslateM Core.Program := do
-  let model := (← get).model
+/-- The ExceptionResult datatype declaration, shared by real translator and model. -/
+def exceptionResultDecl : Core.Decl :=
+  let exceptionResultDt : Lambda.LDatatype Unit := {
+    name := "ExceptionResult"
+    typeArgs := []
+    constrs := [
+      { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
+      { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
+    ]
+    constrs_ne := by decide
+  }
+  Core.Decl.type (.data [exceptionResultDt]) .empty
 
-  -- Procedures marked isFunctional are translated to Core functions; all others become Core procedures.
-  -- External procedures are completely ignored (not translated to Core).
-  let nonExternal := program.staticProcedures.filter (fun p => !p.body.isExternal)
-  let (markedPure, procProcs) := nonExternal.partition (·.isFunctional)
-  -- Try to translate each isFunctional procedure to a Core function, collecting errors for failures
-  let pureFuncDecls ← markedPure.mapM translateProcedureToFunction
-  -- Translate procedures using the monad, collecting diagnostics from the final state
-  let procedures ← procProcs.mapM translateProcedure
+/-- Generate read function axioms based on Box constructors in the program. -/
+def mkReadFuncAxioms (program : Program) : List Core.Decl :=
+  let boxConstrs := program.types.foldl (fun acc td => match td with
+    | .Datatype dt => if dt.name.text == "Box" then
+        dt.constructors.map (·.name.text)
+      else acc
+    | _ => acc) ([] : List String)
+  [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].filterMap
+    fun (readName, constrName) =>
+      if boxConstrs.contains constrName then
+        let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
+        let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
+        let v : Core.Expression.Expr := .bvar () 0
+        let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
+        let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
+        some (Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr })
+      else none
 
-  -- Translate instance procedures from composite types with qualified names
+/-- Collect instance procedures from composite types with qualified names. -/
+def collectInstanceProcs (program : Program) : List (String × Procedure) :=
   let instanceProcs := program.types.foldl (fun acc td =>
     match td with
     | .Composite ct => acc ++ ct.instanceProcedures.map fun proc =>
         (ct.name.text, proc)
     | _ => acc) ([] : List (String × Procedure))
-  let nonExternalInstance := instanceProcs.filter (fun (_, p) => !p.body.isExternal)
-  let instanceProcedures ← nonExternalInstance.mapM fun (typeName, proc) => do
+  instanceProcs.filter (fun (_, p) => !p.body.isExternal)
+
+def translateLaurelToCore (program : Program): TranslateM Core.Program := do
+  let model := (← get).model
+
+  let nonExternal := program.staticProcedures.filter (fun p => !p.body.isExternal)
+  let (markedPure, procProcs) := nonExternal.partition (·.isFunctional)
+  let pureFuncDecls ← markedPure.mapM translateProcedureToFunction
+  let procedures ← procProcs.mapM translateProcedure
+  let instanceProcedures ← (collectInstanceProcs program).mapM fun (typeName, proc) => do
     let qualifiedProc := { proc with
       name := { proc.name with text := instanceProcCoreName typeName proc.name.text } }
     translateProcedure qualifiedProc
-
-  -- Translate Laurel constants to Core function declarations (0-ary functions)
   let constantDecls ← program.constants.mapM fun c => do
     let coreTy := translateType model c.type
     let body ← c.initializer.mapM (translateExpr ·)
@@ -942,58 +968,14 @@ def translateLaurelToCore (program : Program): TranslateM Core.Program := do
       output := coreTy
       body := body
     }
-
-  -- Collect ALL errors from both functions, procedures, and resolution before deciding whether to fail
-  -- let allErrors :=pureErrors ++ procDiags ++ constantsState.diagnostics
-  -- if !allErrors.isEmpty then
-  --   .error allErrors.toArray
+  let groupedDatatypeDecls ← translateTypes program model
   let procDecls := procedures.map (fun p => Core.Decl.proc p .empty)
   let instanceProcDecls := instanceProcedures.map (fun p => Core.Decl.proc p .empty)
+  let readFuncAxioms := mkReadFuncAxioms program
 
-  -- Translate Laurel datatype definitions to Core declarations.
-  let groupedDatatypeDecls ← translateTypes program model
-
-  -- Inject ExceptionResult datatype for exception support
-  let exceptionResultDt : Lambda.LDatatype Unit := {
-    name := "ExceptionResult"
-    typeArgs := []
-    constrs := [
-      { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
-      { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
-    ]
-    constrs_ne := by decide
-  }
-  let exceptionResultDecl := Core.Decl.type (.data [exceptionResultDt]) .empty
-
-  -- Generate equality axioms for Factory read functions.
-  -- Only emit when the specific Box constructor exists.
-  -- emit: ∀ v: int. readIntN(BoxInt(v)) == v
-  -- This connects the opaque Factory function (which carries bound axioms)
-  -- to the Box constructor/destructor (which carries heap faithfulness).
-  let boxConstrs := program.types.foldl (fun acc td => match td with
-    | .Datatype dt => if dt.name.text == "Box" then
-        dt.constructors.map (·.name.text)
-      else acc
-    | _ => acc) ([] : List String)
-  let readFuncAxioms : List Core.Decl :=
-    [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].filterMap
-      fun (readName, constrName) =>
-        if boxConstrs.contains constrName then
-          let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
-          let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
-          let v : Core.Expression.Expr := .bvar () 0
-          let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
-          let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
-          some (Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr })
-        else none
-
-  let program := {
+  pure {
     decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
   }
-
-  -- dbg_trace "=== Generated Strata Core Program ==="
-  -- dbg_trace "================================="
-  pure program
 
 /-- When translateLaurelToCore succeeds, the output decl list has the structure:
     [exceptionResult] ++ datatypes ++ readAxioms ++ constants ++ functions ++ procedures ++ instanceProcs.
@@ -1001,21 +983,26 @@ def translateLaurelToCore (program : Program): TranslateM Core.Program := do
 public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
     (coreProg : Core.Program)
     (h : (translateLaurelToCore prog s).1 = some coreProg) :
-    ∃ (exceptionResultDecl : Core.Decl)
-      (groupedDatatypeDecls readFuncAxioms constantDecls pureFuncDecls : List Core.Decl)
+    ∃ (groupedDatatypeDecls constantDecls pureFuncDecls : List Core.Decl)
       (procedures instanceProcedures : List Core.Procedure),
     coreProg.decls =
       [exceptionResultDecl] ++
-      groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++
+      groupedDatatypeDecls ++ mkReadFuncAxioms prog ++ constantDecls ++ pureFuncDecls ++
       procedures.map (fun p => Core.Decl.proc p .empty) ++
       instanceProcedures.map (fun p => Core.Decl.proc p .empty) := by
+  -- Use the TranslateM helpers to extract the monadic computation.
+  -- translateLaurelToCore is: get >>= λ model => f₁ >>= λ a₁ => f₂ >>= λ a₂ => ... >>= λ aₙ => pure result
+  -- When it returns some, all intermediate operations returned some.
+  -- We extract each intermediate result using TranslateM.bind_some.
   unfold translateLaurelToCore at h
+  -- Use the comprehensive simp that worked for translateProcedure_eq_transparent:
   simp only [bind, StateT.bind, get, MonadState.get, StateT.get,
     getThe, MonadStateOf.get, pure, StateT.pure,
     OptionT.mk, OptionT.bind, OptionT.lift, OptionT.pure,
     liftM, monadLift, MonadLift.monadLift,
     StateT.lift, StateT.run, OptionT.run,
-    Option.bind, Prod.fst, Prod.snd, Id.run, List.map] at h
+    Option.bind, Prod.fst, Prod.snd, Id.run, List.map,
+    collectInstanceProcs, mkReadFuncAxioms, exceptionResultDecl] at h
   sorry
 
 /--

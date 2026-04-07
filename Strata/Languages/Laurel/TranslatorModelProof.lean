@@ -443,3 +443,24 @@ theorem translate_produces_some_simple (program : Program)
     (translate {} program).1.isSome = true := by
   have hProg : program = emptyProg := by cases program; simp_all [emptyProg]
   rw [hProg]; exact translate_empty_produces_some
+
+/-- Block.stripMetaData on [cmd c, block label stmts .empty] reduces to
+    [cmd c, block label (Block.stripMetaData stmts) .empty].
+    Proven in non-module file because mutual recursion wrapper doesn't reduce cross-module. -/
+theorem block_stripMetaData_cmd_block (c : Core.Command)
+    (label : String) (stmts : Core.Statements) :
+    Imperative.Block.stripMetaData
+      [Imperative.Stmt.cmd c, Imperative.Stmt.block label stmts .empty] =
+    [Imperative.Stmt.cmd c, Imperative.Stmt.block label (Imperative.Block.stripMetaData stmts) .empty] := by
+  simp [Imperative.Block.stripMetaData, Imperative.Stmt.stripMetaData]
+
+/-- Combined: stripMetaData ∘ eraseTypes on the procedure body wrapper
+    [cmd setResult, block "$body" bodyStmts .empty]. -/
+theorem block_strip_erase_cmd_block (c : Core.Command)
+    (label : String) (stmts : Core.Statements) :
+    Imperative.Block.stripMetaData (Core.Statements.eraseTypes
+      [Imperative.Stmt.cmd c, Imperative.Stmt.block label stmts .empty]) =
+    [Imperative.Stmt.cmd (Core.Command.eraseTypes c),
+     Imperative.Stmt.block label (Imperative.Block.stripMetaData (Core.Statements.eraseTypes stmts)) .empty] := by
+  simp [Core.Statements.eraseTypes, Core.Statement.eraseTypes,
+    Imperative.Block.stripMetaData, Imperative.Stmt.stripMetaData]

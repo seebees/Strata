@@ -185,6 +185,16 @@ end
 
 ---------------------------------------------------------------------
 
+/-- Block.stripMetaData on a 2-element list [cmd c, block label stmts md]. -/
+@[simp] theorem Block.stripMetaData_cmd_block
+    (c : C) (label : String) (stmts : Block P C) (md : MetaData P) :
+    Block.stripMetaData (P := P) (C := C) [Stmt.cmd c, Stmt.block label stmts md] =
+    [Stmt.cmd c, Stmt.block label (Block.stripMetaData stmts) MetaData.empty] := by
+  simp [Block.stripMetaData.eq_1, Block.stripMetaData.eq_2,
+    Stmt.stripMetaData.eq_1, Stmt.stripMetaData.eq_2]
+
+---------------------------------------------------------------------
+
 /-! ### HasVars -/
 
 mutual

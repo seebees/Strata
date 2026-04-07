@@ -840,6 +840,7 @@ theorem translateProcedure_matches_model
     coreProc.header.inputs = proc.inputs.map (translateParameterToCore s.model) ∧
     coreProc.header.outputs = proc.outputs.map (translateParameterToCore s.model) ++
       [(⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" [])] ∧
+    coreProc.header.noFilter = false ∧
     coreProc.spec = { modifies := [], preconditions := [], postconditions := [] } ∧
     coreProc.body = [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
                      Imperative.Stmt.block "$body" bodyStmts .empty] := by
@@ -848,7 +849,7 @@ theorem translateProcedure_matches_model
     Option.any directlyWritesHeapMd (some bodyExpr) ||
     containsInstanceCallMd bodyExpr) = false := by
     simp [hNoHeapRead, hNoHeapWrite, hNoInstanceCall]
-  refine ⟨_, rfl, rfl, rfl, ?_, ?_, ?_, ?_⟩
+  refine ⟨_, rfl, rfl, rfl, ?_, ?_, rfl, ?_, ?_⟩
   · -- inputs
     simp only [hTransparent, hNoHeapRead, hNoHeapWrite, hNoInstanceCall,
       Option.any, Bool.false_or, Bool.or_false, decide_false, Bool.false_eq_true, ↓reduceIte]
@@ -1250,7 +1251,7 @@ theorem proc_equiv_simple
   obtain ⟨bodyExpr, hBody⟩ := hTransparent
   have ⟨hr, hw, hic, hbic⟩ := hNoHeap bodyExpr hBody
   have hEquiv := hBodyEquiv bodyExpr hBody
-  obtain ⟨coreProc, h1, h2, h3, h4, h5, h6, h7⟩ := translateProcedure_matches_model (fun _ => false) proc s
+  obtain ⟨coreProc, h1, h2, h3, h4, h5, _, h6, h7⟩ := translateProcedure_matches_model (fun _ => false) proc s
     (translateStmtModel (fun _ => false) (proc.outputs.map (·.name.text)) bodyExpr.val)
     bodyExpr hBody hNoPre hr hw hic hbic hEquiv rfl hInputs hOutputs
   exact ⟨coreProc, h1, h2, h4, h5, ⟨bodyExpr, hBody, h7⟩⟩
@@ -1339,7 +1340,7 @@ theorem proc_decl_strip_erase_eq_model
     -- - spec with empty preconditions/postconditions (eraseTypes on empty spec)
     -- - body with bodyStmts (stripMetaData removes .empty metadata)
     -- Use translateProcedure_matches_model to get the model structure:
-    obtain ⟨modelProc, hModel, _, _, hModelInputs, hModelOutputs, hModelSpec, hModelBody⟩ :=
+    obtain ⟨modelProc, hModel, hModelName, hModelTypeArgs, hModelInputs, hModelOutputs, hModelNoFilter, hModelSpec, hModelBody⟩ :=
       translateProcedure_matches_model (fun _ => false) proc s bodyStmts bodyExpr
         hTransparent hNoPre hNoHeapRead hNoHeapWrite hNoInstanceCall hNoBareInstanceCall
         hBody hBM hInputs hOutputs
@@ -1365,26 +1366,27 @@ theorem proc_decl_strip_erase_eq_model
     -- Use hModelInvariant to close the body equality.
     rw [← hBM] at hModelInvariant
     -- hModelInvariant : Block.stripMetaData (Statements.eraseTypes bodyStmts) = bodyStmts
-    -- Now simp with all the structural lemmas + hModelInvariant:
     simp only [Core.Procedure.eraseTypes, Core.Procedure.stripMetaData,
       Core.Procedure.Spec.eraseTypes, Core.Procedure.Check.eraseTypes,
-      Core.Statements.eraseTypes, Core.Statement.eraseTypes,
-      Imperative.Block.stripMetaData, Imperative.Stmt.stripMetaData,
-      Core.Command.eraseTypes,
+      Core.Statements.eraseTypes.eq_1, Core.Statements.eraseTypes.eq_2,
+      Core.Statement.eraseTypes.eq_1, Core.Statement.eraseTypes.eq_2,
+      Imperative.Block.stripMetaData.eq_1, Imperative.Block.stripMetaData.eq_2,
+      Imperative.Stmt.stripMetaData.eq_1, Imperative.Stmt.stripMetaData.eq_2,
+      Core.Command.eraseTypes, Lambda.LExpr.eraseTypes,
       hModelBody, hModelSpec, hModelInputs, hModelOutputs,
-      hModelInvariant, ListMap, List.map,
-      Lambda.LExpr.eraseTypes]
-    -- Technical blocker: Stmt.stripMetaData._mutual (from mutual recursion in module file)
-    -- doesn't reduce via simp/unfold cross-module. The proof is correct:
-    -- 1. Header: preserved by eraseTypes/stripMetaData, matches by construction
-    -- 2. Spec: empty spec is invariant under eraseTypes
-    -- 3. Body: stripMetaData(eraseTypes([cmd setResult, block bodyStmts .empty]))
-    --    = [cmd setResult, block (stripMetaData(eraseTypes bodyStmts)) .empty]
-    --    = [cmd setResult, block bodyStmts .empty]  (by hModelInvariant)
-    --    = modelProc.body (by hModelBody)
-    -- Needs: equation lemmas for mutual Stmt.stripMetaData/Block.stripMetaData,
-    -- or moving this proof to a non-module file.
-    sorry
+      hBM, hModelInvariant, ListMap, List.map]
+    -- hBM rewrites bodyStmts → translateStmtModel, but we need the reverse.
+    -- Use ← hBM to rewrite translateStmtModel → bodyStmts in the goal:
+    simp only [← hBM, hModelInvariant]
+    -- Goal: { header := H, spec := S, body := B } = modelProc
+    -- Destructure modelProc into its fields:
+    cases modelProc with | mk header spec body =>
+    simp only [Core.Procedure.mk.injEq] at hModelBody hModelSpec hModelInputs hModelOutputs ⊢
+    refine ⟨?_, hModelSpec.symm, hModelBody.symm⟩
+    -- header equality: need to handle the noFilter field (defaults to false).
+    cases header with | mk name typeArgs inputs outputs noFilter =>
+    simp only [Core.Procedure.Header.mk.injEq] at hModelName hModelTypeArgs hModelInputs hModelOutputs hModelNoFilter ⊢
+    exact ⟨hModelName.symm, hModelTypeArgs.symm, hModelInputs.symm, hModelOutputs.symm, hModelNoFilter.symm⟩
 
 /-! ## The Main Theorem: translate = translateProgramModel
 

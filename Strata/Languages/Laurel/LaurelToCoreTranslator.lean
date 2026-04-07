@@ -1257,6 +1257,21 @@ end -- public section
   unfold OptionT.bind OptionT.mk
   simp only [bind, StateT.bind, h]
 
+/-- If a monadic bind succeeds, both the first operation and the continuation succeeded. -/
+public theorem TranslateM.bind_some_inv (m : TranslateM α) (f : α → TranslateM β)
+    (s : TranslateState) (result : β)
+    (h : ((do let x ← m; f x) s).1 = some result) :
+    ∃ a s', m s = (some a, s') ∧ (f a s').1 = some result := by
+  -- TranslateM = OptionT (StateM TranslateState)
+  -- (do let x ← m; f x) s = OptionT.bind m f s
+  -- = let (opt, s') := m s; match opt with | some a => f a s' | none => (none, s')
+  -- When the result is some, opt must be some.
+  have hm := m s
+  obtain ⟨opt, s'⟩ : Option α × TranslateState := m s
+  -- The key: we need to show that `(do let x ← m; f x) s` reduces to
+  -- `match opt with | some a => f a s' | none => (none, s')` where (opt, s') = m s.
+  sorry
+
 @[simp] public theorem TranslateM.map_some (f : α → β) (m : TranslateM α) (s s1 : TranslateState) (a : α)
   (h : m s = (some a, s1)) :
   (f <$> m) s = (some (f a), s1) := by

@@ -1262,15 +1262,21 @@ public theorem TranslateM.bind_some_inv (m : TranslateM α) (f : α → Translat
     (s : TranslateState) (result : β)
     (h : ((do let x ← m; f x) s).1 = some result) :
     ∃ a s', m s = (some a, s') ∧ (f a s').1 = some result := by
-  -- TranslateM = OptionT (StateM TranslateState)
-  -- (do let x ← m; f x) s = OptionT.bind m f s
-  -- = let (opt, s') := m s; match opt with | some a => f a s' | none => (none, s')
-  -- When the result is some, opt must be some.
-  have hm := m s
-  obtain ⟨opt, s'⟩ : Option α × TranslateState := m s
-  -- The key: we need to show that `(do let x ← m; f x) s` reduces to
-  -- `match opt with | some a => f a s' | none => (none, s')` where (opt, s') = m s.
-  sorry
+  -- Generalize m s to a variable, then case-split.
+  generalize hms : m s = p at h
+  -- h : ((do let x ← m; f x) s).1 = some result
+  -- But h still references `m s` through the bind. We need to rewrite h using hms.
+  -- The bind: (do let x ← m; f x) s = match p.1 with | some a => f a p.2 | none => (none, p.2)
+  have hbind : ((do let x ← m; f x) s) =
+    match p.1 with | some a => f a p.2 | none => (none, p.2) := by
+    show OptionT.bind m f s = _
+    unfold OptionT.bind OptionT.mk
+    simp [bind, StateT.bind, hms, pure, StateT.pure]
+    cases p; simp [pure, StateT.pure]; split <;> rfl
+  rw [hbind] at h
+  cases hp : p.1 with
+  | none => simp [hp] at h
+  | some a => simp [hp] at h; exact ⟨a, p.2, by rw [← hms]; exact Prod.ext (by rw [hms]; exact hp) rfl, h⟩
 
 @[simp] public theorem TranslateM.map_some (f : α → β) (m : TranslateM α) (s s1 : TranslateState) (a : α)
   (h : m s = (some a, s1)) :

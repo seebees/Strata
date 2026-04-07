@@ -977,33 +977,22 @@ def translateLaurelToCore (program : Program): TranslateM Core.Program := do
     decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
   }
 
-/-- When translateLaurelToCore succeeds, the output decl list has the structure:
-    [exceptionResult] ++ datatypes ++ readAxioms ++ constants ++ functions ++ procedures ++ instanceProcs.
-    This exposes the internal structure for the equivalence proof. -/
-public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
-    (coreProg : Core.Program)
-    (h : (translateLaurelToCore prog s).1 = some coreProg) :
-    ∃ (groupedDatatypeDecls constantDecls pureFuncDecls : List Core.Decl)
-      (procedures instanceProcedures : List Core.Procedure),
-    coreProg.decls =
-      [exceptionResultDecl] ++
-      groupedDatatypeDecls ++ mkReadFuncAxioms prog ++ constantDecls ++ pureFuncDecls ++
-      procedures.map (fun p => Core.Decl.proc p .empty) ++
-      instanceProcedures.map (fun p => Core.Decl.proc p .empty) := by
-  -- Use the TranslateM helpers to extract the monadic computation.
-  -- translateLaurelToCore is: get >>= λ model => f₁ >>= λ a₁ => f₂ >>= λ a₂ => ... >>= λ aₙ => pure result
-  -- When it returns some, all intermediate operations returned some.
-  -- We extract each intermediate result using TranslateM.bind_some.
-  unfold translateLaurelToCore at h
-  -- Use the comprehensive simp that worked for translateProcedure_eq_transparent:
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get,
-    getThe, MonadStateOf.get, pure, StateT.pure,
-    OptionT.mk, OptionT.bind, OptionT.lift, OptionT.pure,
-    liftM, monadLift, MonadLift.monadLift,
-    StateT.lift, StateT.run, OptionT.run,
-    Option.bind, Prod.fst, Prod.snd, Id.run, List.map,
-    collectInstanceProcs, mkReadFuncAxioms, exceptionResultDecl] at h
-  sorry
+/-- If a monadic bind succeeds, both the first operation and the continuation succeeded. -/
+public theorem TranslateM.bind_some_inv (m : TranslateM α) (f : α → TranslateM β)
+    (s : TranslateState) (result : β)
+    (h : ((do let x ← m; f x) s).1 = some result) :
+    ∃ a s', m s = (some a, s') ∧ (f a s').1 = some result := by
+  generalize hms : m s = p at h
+  have hbind : ((do let x ← m; f x) s) =
+    match p.1 with | some a => f a p.2 | none => (none, p.2) := by
+    show OptionT.bind m f s = _
+    unfold OptionT.bind OptionT.mk
+    simp [bind, StateT.bind, hms, pure, StateT.pure]
+    cases p; simp [pure, StateT.pure]; split <;> rfl
+  rw [hbind] at h
+  cases hp : p.1 with
+  | none => simp [hp] at h
+  | some a => simp [hp] at h; exact ⟨a, p.2, by rw [← hms]; exact Prod.ext (by rw [hms]; exact hp) rfl, h⟩
 
 /--
 Translate Laurel Program to Core Program
@@ -1257,33 +1246,34 @@ end -- public section
   unfold OptionT.bind OptionT.mk
   simp only [bind, StateT.bind, h]
 
-/-- If a monadic bind succeeds, both the first operation and the continuation succeeded. -/
-public theorem TranslateM.bind_some_inv (m : TranslateM α) (f : α → TranslateM β)
-    (s : TranslateState) (result : β)
-    (h : ((do let x ← m; f x) s).1 = some result) :
-    ∃ a s', m s = (some a, s') ∧ (f a s').1 = some result := by
-  -- Generalize m s to a variable, then case-split.
-  generalize hms : m s = p at h
-  -- h : ((do let x ← m; f x) s).1 = some result
-  -- But h still references `m s` through the bind. We need to rewrite h using hms.
-  -- The bind: (do let x ← m; f x) s = match p.1 with | some a => f a p.2 | none => (none, p.2)
-  have hbind : ((do let x ← m; f x) s) =
-    match p.1 with | some a => f a p.2 | none => (none, p.2) := by
-    show OptionT.bind m f s = _
-    unfold OptionT.bind OptionT.mk
-    simp [bind, StateT.bind, hms, pure, StateT.pure]
-    cases p; simp [pure, StateT.pure]; split <;> rfl
-  rw [hbind] at h
-  cases hp : p.1 with
-  | none => simp [hp] at h
-  | some a => simp [hp] at h; exact ⟨a, p.2, by rw [← hms]; exact Prod.ext (by rw [hms]; exact hp) rfl, h⟩
-
 @[simp] public theorem TranslateM.map_some (f : α → β) (m : TranslateM α) (s s1 : TranslateState) (a : α)
   (h : m s = (some a, s1)) :
   (f <$> m) s = (some (f a), s1) := by
   show OptionT.bind m (OptionT.pure ∘ f) s = _
   unfold OptionT.bind OptionT.mk OptionT.pure
   simp [bind, StateT.bind, h]; rfl
+
+/-- When translateLaurelToCore succeeds, the output decl list has the known structure. -/
+public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
+    (coreProg : Core.Program)
+    (h : (translateLaurelToCore prog s).1 = some coreProg) :
+    ∃ (groupedDatatypeDecls constantDecls pureFuncDecls : List Core.Decl)
+      (procedures instanceProcedures : List Core.Procedure),
+    coreProg.decls =
+      [exceptionResultDecl] ++
+      groupedDatatypeDecls ++ mkReadFuncAxioms prog ++ constantDecls ++ pureFuncDecls ++
+      procedures.map (fun p => Core.Decl.proc p .empty) ++
+      instanceProcedures.map (fun p => Core.Decl.proc p .empty) := by
+  unfold translateLaurelToCore at h
+  simp only [TranslateM.get_bind] at h
+  obtain ⟨pureFuncDecls, s1, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨procedures, s2, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨instanceProcedures, s3, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨constantDecls, s4, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨groupedDatatypeDecls, s5, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  simp only [TranslateM.pure_eq] at h
+  have := Option.some.inj h; subst this
+  exact ⟨groupedDatatypeDecls, constantDecls, pureFuncDecls, procedures, instanceProcedures, rfl⟩
 
 /-! ### translateType equation lemmas -/
 

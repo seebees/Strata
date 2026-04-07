@@ -263,7 +263,7 @@ exhaustive pattern matching forces the model to be updated.
 ## D6: Equivalence Proof Plan (Phase 2)
 
 **Date:** 2026-04-06
-**Updated:** 2026-04-06
+**Updated:** 2026-04-07
 **Status:** In Progress
 
 ### Main Theorem
@@ -277,16 +277,29 @@ theorem translate_eq_model (program : Program) (coreProgram : Core.Program)
 **Status: 1 sorry** (the theorem itself). Proof structured: unfold translate, split on
 error flag, dismiss contradiction. Remaining: show the Core decl lists match.
 
-### Sorry Inventory (4 total)
+### Sorry Inventory (3 total, down from 4)
 
 | # | Location | What | Status |
 |---|----------|------|--------|
-| 1 | `LaurelToCoreTranslator:1127` | `translate_eq_model` — the main goal | Needs 7 category sub-proofs |
-| 2 | `LaurelToCoreTranslator:1157` | `translate_eq_model_simple` | Already proven in TranslatorModelProof.lean (cross-module access issue) |
-| 3 | `LaurelToCoreTranslator:1236` | `translate_empty_isSome` | Already proven via native_decide in tests (cross-module access issue) |
-| 4 | `TranslatorEquivalence:1387` | `proc_decl_strip_erase_eq_model` | Mathematically complete; blocked by mutual recursion reduction cross-module |
+| 1 | `LaurelToCoreTranslator:1107` | `translate_eq_model` — the main goal | Needs 7 category sub-proofs |
+| 2 | `LaurelToCoreTranslator:1137` | `translate_eq_model_simple` | Already proven in TranslatorModelProof.lean (cross-module access issue) |
+| 3 | `LaurelToCoreTranslator:1216` | `translate_empty_isSome` | Already proven via native_decide in tests (cross-module access issue) |
 
 ### Proven Infrastructure
+
+**Monadic infrastructure (all 0 sorry):**
+- `TranslateM.bind_some_inv` — if monadic bind succeeds, both parts succeeded
+- `TranslateM.bind_some` — forward: if m succeeds, bind reduces to continuation
+- `TranslateM.get_bind` — get followed by bind simplifies
+- `TranslateM.pure_eq` — pure returns (some a, s)
+
+**Program-level (0 sorry):**
+- `translateLaurelToCore_decls` — when translateLaurelToCore succeeds, the output
+  decl list has the 7-segment structure: [exceptionResultDecl] ++ datatypes ++
+  readAxioms ++ constants ++ functions ++ procedures ++ instanceProcs.
+  Proven by applying `bind_some_inv` 5 times to peel each monadic layer.
+- `exceptionResultDecl`, `mkReadFuncAxioms`, `collectInstanceProcs` — extracted
+  as standalone pure definitions from translateLaurelToCore for proof accessibility.
 
 **Expression level (19 theorems, 0 sorry):**
 All expression equivalences proven in TranslatorEquivalence.lean.
@@ -294,16 +307,18 @@ All expression equivalences proven in TranslatorEquivalence.lean.
 **Statement level (10 theorems, 0 sorry):**
 All statement equivalences proven in TranslatorEquivalence.lean.
 
-**Procedure level:**
-- `translateProcedure_matches_model` — model structure for simple procedures (0 sorry)
-- `translateProcedure_eq_transparent` — equation lemma extracting real translator output (0 sorry)
-- `translateProcedure_none_of_translateStmt_none` — contrapositive (0 sorry)
-- `proc_decl_strip_erase_eq_model` — connects real output to model after strip/erase (1 sorry, technical)
-- Heap transform lemmas: 6 lemmas for inputs/outputs in all 3 cases (0 sorry)
+**Procedure level (all 0 sorry):**
+- `translateProcedure_matches_model` — model structure for simple procedures
+- `translateProcedure_eq_transparent` — equation lemma extracting real translator output
+- `translateProcedure_none_of_translateStmt_none` — contrapositive
+- `proc_decl_strip_erase_eq_model` — connects real output to model after strip/erase
+- Heap transform lemmas: 6 lemmas for inputs/outputs in all 3 cases
 
-**Structural:**
+**Structural (all 0 sorry):**
 - `@[expose]` on Decl/Procedure/Program eraseTypes/stripMetaData, Stmt/Block.stripMetaData,
   Statement/Statements.eraseTypes, Command.eraseTypes, LExpr.eraseTypes
+- Equation lemmas for mutual Stmt.stripMetaData/Block.stripMetaData (.eq_1, .eq_2)
+- `Block.stripMetaData_cmd_block` — reduces stripMetaData on 2-element body list
 - `Program_strip_erase_eq_decls`, `Decl_strip_erase_proc/type/ax`
 - `Procedure_eraseTypes_header`, `Procedure_stripMetaData_header`
 - `translateType_heap`, `translateParameterToCore_heap/heap_in`
@@ -319,13 +334,14 @@ under appropriate conditions.
 
 Real translator (`translateLaurelToCore` on post-pipeline program):
 ```
-[exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++
-constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
+[exceptionResultDecl] ++ groupedDatatypeDecls ++ mkReadFuncAxioms prog ++
+constantDecls ++ pureFuncDecls ++
+procedures.map (Decl.proc · .empty) ++ instanceProcedures.map (Decl.proc · .empty)
 ```
 
 Model (`translateProgramModel` on original program):
 ```
-[exceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ readFuncAxioms ++
+[modelExceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ modelReadFuncAxioms ++
 ancestorDecls ++ constraintFuncDecls ++ heapFuncDecls ++
 externalFuncDecls ++ transparentFuncDecls ++
 procDecls ++ witnessProcDecls ++ instanceProcDecls
@@ -342,13 +358,14 @@ Model: `infraDatatypes ++ datatypeDecls` computed directly from program types.
 
 #### Category 3: Read Function Axioms — easy, not started
 Both conditional on Box constructors existing. Same logic, different code paths.
+`mkReadFuncAxioms` is now a standalone definition.
 
 #### Category 4: Functions (ancestor, constraint, heap, external, transparent) — hard, not started
 Pipeline passes add these as `isFunctional` procedures, then `translateProcedureToFunction`
 translates them. Model generates Core function decls directly. Hardest category.
 
 #### Category 5: Procedures — medium, partially done
-`proc_decl_strip_erase_eq_model` covers simple procedures (1 technical sorry).
+`proc_decl_strip_erase_eq_model` covers simple procedures (0 sorry).
 Still needs: heap access, instance calls, preconditions, opaque bodies, non-basic types.
 
 #### Category 6: Instance Procedures — medium, not started
@@ -359,6 +376,6 @@ Real: `program.constants.mapM` translates to 0-ary functions.
 
 ### Next Step
 
-Close the technical sorry in `proc_decl_strip_erase_eq_model` (sorry #4), then
-start on Categories 1, 3, 7 (easy wins) to build momentum toward assembling
-the main theorem.
+Use `translateLaurelToCore_decls` in `translate_decls_match` (TranslatorEquivalence.lean)
+to decompose the main theorem into per-category sub-goals. Then prove Categories 1, 3, 7
+(easy wins) to make concrete progress on the assembly.

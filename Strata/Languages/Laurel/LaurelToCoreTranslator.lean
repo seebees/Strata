@@ -995,6 +995,31 @@ def translateLaurelToCore (program : Program): TranslateM Core.Program := do
   -- dbg_trace "================================="
   pure program
 
+/-- When translateLaurelToCore succeeds, the output decl list has the structure:
+    [exceptionResult] ++ datatypes ++ readAxioms ++ constants ++ functions ++ procedures ++ instanceProcs.
+    This exposes the internal structure for the equivalence proof. -/
+public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
+    (coreProg : Core.Program)
+    (h : (translateLaurelToCore prog s).1 = some coreProg) :
+    ∃ (groupedDatatypeDecls readFuncAxioms constantDecls pureFuncDecls : List Core.Decl)
+      (procedures instanceProcedures : List Core.Procedure),
+    coreProg.decls =
+      [Core.Decl.type (.data [{
+        name := "ExceptionResult", typeArgs := [],
+        constrs := [
+          { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
+          { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
+        ], constrs_ne := by decide }]) .empty] ++
+      groupedDatatypeDecls ++ readFuncAxioms ++ constantDecls ++ pureFuncDecls ++
+      procedures.map (fun p => Core.Decl.proc p .empty) ++
+      instanceProcedures.map (fun p => Core.Decl.proc p .empty) := by
+  -- The key insight: translateLaurelToCore always returns a program with
+  -- decls = [exceptionResultDecl] ++ groupedDatatypeDecls ++ readFuncAxioms ++
+  --         constantDecls ++ pureFuncDecls ++ procDecls ++ instanceProcDecls
+  -- This is a complex monadic computation with 5 mapM calls.
+  -- Proving this equation lemma requires reducing the full do-block.
+  -- For now, leave as sorry — the main theorem assembly will use this.
+  sorry
 
 /--
 Translate Laurel Program to Core Program

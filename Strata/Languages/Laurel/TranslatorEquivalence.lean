@@ -1733,4 +1733,42 @@ theorem translate_eq_model_iff_decls (program : Program)
   rw [translate_eq_model_via_fst program h]
   exact core_program_eq_iff_decls_eq _ _
 
+/-! ## Phase 9: Assembly — proving the decl lists match
+
+The goal: show that `translateLaurelToCore` on the post-pipeline program,
+after `stripMetaData ∘ eraseTypes`, produces the same decl list as
+`translateProgramModel` on the original program.
+
+We work with the `translate_fst` decomposition which exposes the full pipeline.
+The proof proceeds by showing each category of declarations matches.
+-/
+
+/-- The main assembly theorem: when translate succeeds, the decl lists match.
+    This is equivalent to translate_eq_model but proven here where all
+    building blocks are accessible. -/
+theorem translate_decls_match (program : Program) (coreProgram : Core.Program)
+    (h : (translate {} program).1 = some coreProgram) :
+    Core.Program.stripMetaData (Core.Program.eraseTypes coreProgram) = translateProgramModel program := by
+  -- Use translate_fst to decompose translate into the pipeline
+  rw [translate_fst] at h
+  simp only [Prod.fst] at h
+  -- h now has the full pipeline computation
+  -- Split on coreProgramHasSuperfluousErrors
+  split at h
+  · -- errors = true → none = some coreProgram — contradiction
+    exact absurd h (by intro h; cases h)
+  · -- errors = false → pipeline succeeded
+    -- Extract the pipeline result
+    -- h : (runTranslateM ... (translateLaurelToCore transformedProg)).1 = some coreProgram
+    -- where transformedProg is the program after all passes.
+    -- We need: stripMetaData(eraseTypes(coreProgram)) = translateProgramModel(program)
+    --
+    -- The approach: show that translateLaurelToCore on the transformed program
+    -- produces the same decls as translateProgramModel on the original program,
+    -- after stripMetaData ∘ eraseTypes.
+    --
+    -- This is the core of the equivalence proof. Each declaration category
+    -- needs its own sub-proof. For now, we establish the framework.
+    sorry
+
 end Strata.Laurel

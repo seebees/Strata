@@ -37,7 +37,7 @@ instance : ToFormat (CoreLParams.mono : LExprParamsT).base.Identifier :=
 instance : ToFormat Axiom where
   format a := f!"axiom {a.name}: {a.e};"
 
-def Axiom.eraseTypes (a : Axiom) : Axiom :=
+@[expose] def Axiom.eraseTypes (a : Axiom) : Axiom :=
   { a with e := a.e.eraseTypes }
 
 instance : ToFormat Axiom where

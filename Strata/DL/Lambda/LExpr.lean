@@ -517,6 +517,30 @@ and quantified expressions.
   | .ite m c t f => .ite m (eraseTypes c) (eraseTypes t) (eraseTypes f)
   | .eq m e1 e2 => .eq m (eraseTypes e1) (eraseTypes e2)
 
+/-! ### eraseTypes equation lemmas (for cross-module simp) -/
+
+@[simp] public theorem eraseTypes_const {T : LExprParamsT} (m : T.base.Metadata) (c : LConst) :
+    eraseTypes (.const m c : LExpr T) = .const m c := by rfl
+@[simp] public theorem eraseTypes_op {T : LExprParamsT} (m : T.base.Metadata) (o : Identifier T.base.IDMeta) (ty : Option T.TypeType) :
+    eraseTypes (.op m o ty : LExpr T) = .op m o none := by rfl
+@[simp] public theorem eraseTypes_fvar {T : LExprParamsT} (m : T.base.Metadata) (name : Identifier T.base.IDMeta) (ty : Option T.TypeType) :
+    eraseTypes (.fvar m name ty : LExpr T) = .fvar m name none := by rfl
+@[simp] public theorem eraseTypes_bvar {T : LExprParamsT} (m : T.base.Metadata) (i : Nat) :
+    eraseTypes (.bvar m i : LExpr T) = .bvar m i := by rfl
+@[simp] public theorem eraseTypes_abs {T : LExprParamsT} (m : T.base.Metadata) (name : String) (ty : Option T.TypeType) (e : LExpr T) :
+    eraseTypes (.abs m name ty e) = .abs m name ty (eraseTypes e) := by rfl
+@[simp] public theorem eraseTypes_quant {T : LExprParamsT} (m : T.base.Metadata) (k : QuantifierKind) (name : String) (ty : Option T.TypeType) (trigger body : LExpr T) :
+    eraseTypes (.quant m k name ty trigger body) = .quant m k name none (eraseTypes trigger) (eraseTypes body) := by rfl
+
+@[simp] public theorem eraseTypes_all {T : LExprParamsT} (m : T.base.Metadata) (name : String) (ty : Option T.TypeType) (body : LExpr T) :
+    eraseTypes (LExpr.all m name ty body) = .quant m .all name none (.bvar m 0) (eraseTypes body) := by rfl
+@[simp] public theorem eraseTypes_app {T : LExprParamsT} (m : T.base.Metadata) (fn e : LExpr T) :
+    eraseTypes (.app m fn e) = .app m (eraseTypes fn) (eraseTypes e) := by rfl
+@[simp] public theorem eraseTypes_ite {T : LExprParamsT} (m : T.base.Metadata) (c t e : LExpr T) :
+    eraseTypes (.ite m c t e) = .ite m (eraseTypes c) (eraseTypes t) (eraseTypes e) := by rfl
+@[simp] public theorem eraseTypes_eq {T : LExprParamsT} (m : T.base.Metadata) (e1 e2 : LExpr T) :
+    eraseTypes (.eq m e1 e2) = .eq m (eraseTypes e1) (eraseTypes e2) := by rfl
+
 ---------------------------------------------------------------------
 
 /- Formatting and Parsing of Lambda Expressions -/
@@ -1169,31 +1193,6 @@ elab "es[" e:lexpr "]" : term => elabLExpr (T:=⟨Unit, Unit⟩) e
 end Syntax
 
 ---------------------------------------------------------------------
-
-@[simp] public theorem eraseTypes_const {T : LExprParamsT} (m : T.base.Metadata) (c : LConst) :
-  (LExpr.const m c : LExpr T).eraseTypes = .const m c := by unfold eraseTypes; rfl
-
-@[simp] public theorem eraseTypes_fvar {T : LExprParamsT} (m : T.base.Metadata)
-  (name : Identifier T.base.IDMeta) (ty : Option T.TypeType) :
-  (LExpr.fvar m name ty : LExpr T).eraseTypes = .fvar m name none := by
-  simp only [eraseTypes]
-
-@[simp] public theorem eraseTypes_op {T : LExprParamsT} (m : T.base.Metadata)
-  (o : Identifier T.base.IDMeta) (ty : Option T.TypeType) :
-  (LExpr.op m o ty : LExpr T).eraseTypes = .op m o none := by
-  simp only [eraseTypes]
-
-@[simp] public theorem eraseTypes_app {T : LExprParamsT} (m : T.base.Metadata) (e1 e2 : LExpr T) :
-  (LExpr.app m e1 e2).eraseTypes = .app m e1.eraseTypes e2.eraseTypes := by
-  simp only [eraseTypes]
-
-@[simp] public theorem eraseTypes_eq' {T : LExprParamsT} (m : T.base.Metadata) (e1 e2 : LExpr T) :
-  (LExpr.eq m e1 e2).eraseTypes = .eq m e1.eraseTypes e2.eraseTypes := by
-  simp only [eraseTypes]
-
-@[simp] public theorem eraseTypes_ite' {T : LExprParamsT} (m : T.base.Metadata) (c t f : LExpr T) :
-  (LExpr.ite m c t f).eraseTypes = .ite m c.eraseTypes t.eraseTypes f.eraseTypes := by
-  simp only [eraseTypes]
 
 end LExpr
 end -- public section

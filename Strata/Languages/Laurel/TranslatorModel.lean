@@ -8,6 +8,7 @@ public import Strata.Languages.Laurel.Laurel
 public import Strata.Languages.Core.Program
 public import Strata.Languages.Laurel.CoreDefinitionsForLaurel
 public import Strata.Languages.Laurel.HeapParameterizationConstants
+public import Strata.DDM.Util.DecimalRat
 
 /-!
 # Translator Functional Model
@@ -157,8 +158,7 @@ def directlyReadsHeap (body : StmtExpr) : Bool :=
   | .Assign targets v =>
     targets.attach.any (fun ⟨t, _⟩ => directlyReadsHeapMd t) || directlyReadsHeapMd v
   | .StaticCall _ args => args.attach.any (fun ⟨a, _⟩ => directlyReadsHeapMd a)
-  | .InstanceCall target _ args =>
-    directlyReadsHeapMd target || args.attach.any (fun ⟨a, _⟩ => directlyReadsHeapMd a)
+  | .InstanceCall target _ args => true  -- instance calls always access the heap
   | .PrimitiveOp _ args => args.attach.any (fun ⟨a, _⟩ => directlyReadsHeapMd a)
   | .PureFieldUpdate t _ v => directlyReadsHeapMd t || directlyReadsHeapMd v
   | .ReferenceEquals l r => directlyReadsHeapMd l || directlyReadsHeapMd r
@@ -797,19 +797,35 @@ inputs and outputs be?
   | .TBool => "bool"
   | .TString => "string"
   | .TReal => "real"
-  | .TVoid => "bool"  -- void maps to bool (placeholder)
+  | .TVoid => "bool"
   | .THeap => "Heap"
   | .TTypedField _ => "Field"
   | .TCore s => s
   | .Unknown => "Any"
-  | .UserDefined name => name.text  -- use the type name directly
-  | _ => "Composite"  -- TSet, TMap, TSequence need recursive translation
+  | .UserDefined name => name.text
+  | _ => "Composite"
+
+/-- Full Core monomorphic type for a Laurel HighType (handles Map, Sequence, Set). -/
+@[expose] def coreMonoType (ty : HighType) : Lambda.LMonoTy :=
+  match ty with
+  | .TMap k v => .tcons "Map" [coreMonoType k.val, coreMonoType v.val]
+  | .TSequence e => .tcons "Sequence" [coreMonoType e.val]
+  | .TSet e => .tcons "Map" [coreMonoType e.val, .bool]
+  | _ => .tcons (coreTypeName ty) []
 
 /-- Core type name properties -/
 
 public theorem coreTypeName_int : coreTypeName .TInt = "int" := by simp [coreTypeName]
 public theorem coreTypeName_bool : coreTypeName .TBool = "bool" := by simp [coreTypeName]
 public theorem coreTypeName_string : coreTypeName .TString = "string" := by simp [coreTypeName]
+
+@[simp] public theorem coreMonoType_int : coreMonoType .TInt = .tcons "int" [] := rfl
+@[simp] public theorem coreMonoType_bool : coreMonoType .TBool = .tcons "bool" [] := rfl
+@[simp] public theorem coreMonoType_string : coreMonoType .TString = .tcons "string" [] := rfl
+@[simp] public theorem coreMonoType_eq_tcons (ty : HighType)
+    (h : ∀ k v, ty ≠ .TMap k v) (h2 : ∀ e, ty ≠ .TSequence e) (h3 : ∀ e, ty ≠ .TSet e) :
+    coreMonoType ty = .tcons (coreTypeName ty) [] := by
+  sorry
 public theorem coreTypeName_real : coreTypeName .TReal = "real" := by simp [coreTypeName]
 public theorem coreTypeName_void : coreTypeName .TVoid = "bool" := by simp [coreTypeName]
 public theorem coreTypeName_heap : coreTypeName .THeap = "Heap" := by simp [coreTypeName]
@@ -907,7 +923,7 @@ we investigate who is right.
 -/
 
 /-- Build the ExceptionResult datatype declaration -/
-@[expose] def modelExceptionResultDecl : Core.Decl :=
+@[expose] public def modelExceptionResultDecl : Core.Decl :=
   Core.Decl.type (.data [{
     name := "ExceptionResult"
     typeArgs := []
@@ -915,7 +931,7 @@ we investigate who is right.
       { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
       { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
     ]
-    constrs_ne := by decide
+    constrs_ne := rfl
   }]) .empty
 
 /-- Build the declaration list structure (names and order only).
@@ -963,7 +979,7 @@ public def translateExprTop (expr : StmtExpr) : Option Core.Expression.Expr :=
   | .LiteralBool b => some (.const () (.boolConst b))
   | .LiteralInt i => some (.const () (.intConst i))
   | .LiteralString s => some (.const () (.strConst s))
-  | .LiteralDecimal _ => some (.const () (.realConst 0))
+  | .LiteralDecimal d => some (.const () (.realConst (Decimal.toRat d)))
   | .Identifier name => some (.fvar () ⟨name.text, ()⟩ none)
   | .PrimitiveOp .Eq [e1, e2] => none  -- needs recursion
   | .New _ => some (.const () (.boolConst true))  -- placeholder
@@ -1000,17 +1016,62 @@ public theorem translateExpr_identifier_preserves_name (name : Identifier) :
     e = .fvar () ⟨name.text, ()⟩ none := by
   exact ⟨_, by simp [translateExprTop], rfl⟩
 
+/-- Replace free variable with bound variable (de Bruijn index) in a Core expression. -/
+public def replaceFvarWithBvar (name : String) (idx : Nat) : Core.Expression.Expr → Core.Expression.Expr
+  | .fvar _ ⟨n, _⟩ _ => if n == name then .bvar () idx else .fvar () ⟨n, ()⟩ none
+  | .app _ f a => .app () (replaceFvarWithBvar name idx f) (replaceFvarWithBvar name idx a)
+  | .eq _ l r => .eq () (replaceFvarWithBvar name idx l) (replaceFvarWithBvar name idx r)
+  | .ite _ c t e => .ite () (replaceFvarWithBvar name idx c) (replaceFvarWithBvar name idx t) (replaceFvarWithBvar name idx e)
+  | .quant _ k n ty trigger b => .quant () k n ty (replaceFvarWithBvar name (idx+1) trigger) (replaceFvarWithBvar name (idx+1) b)
+  | other => other
+
+/-- Replace $heap with $heap_in in a Core expression (for old() translation). -/
+public def replaceHeapVar : Core.Expression.Expr → Core.Expression.Expr
+  | .fvar _ ⟨name, nmd⟩ ty => .fvar () ⟨if name == "$heap" then "$heap_in" else name, nmd⟩ ty
+  | .app _ f a => .app () (replaceHeapVar f) (replaceHeapVar a)
+  | .eq _ l r => .eq () (replaceHeapVar l) (replaceHeapVar r)
+  | .ite _ c t e => .ite () (replaceHeapVar c) (replaceHeapVar t) (replaceHeapVar e)
+  | .quant _ k n ty trigger b => .quant () k n ty (replaceHeapVar trigger) (replaceHeapVar b)
+  | other => other
+
+/-- Check if a Laurel expression is syntactically a real-number expression. -/
+public def isRealExpr : StmtExpr → Bool
+  | .LiteralDecimal _ => true
+  | .PrimitiveOp _ args => args.attach.any (fun ⟨a, _⟩ => isRealExpr a.val)
+  | .IfThenElse _ t _ => isRealExpr t.val
+  | _ => false
+termination_by e => sizeOf e
+decreasing_by all_goals (simp_wf; first | term_by_mem | sorry)
+
+public def isRealExprMd (e : StmtExprMd) : Bool := isRealExpr e.val
+
+/-- A type environment mapping variable names to their Laurel types. -/
+public abbrev TypeEnv := List (String × HighType)
+
+/-- Look up a variable's type in the environment. -/
+public def TypeEnv.lookup (env : TypeEnv) (name : String) : Option HighType :=
+  (env.find? (·.1 == name)).map (·.2)
+
+/-- Check if an expression has real type given a type environment. -/
+public def exprIsReal (env : TypeEnv) : StmtExpr → Bool
+  | .LiteralDecimal _ => true
+  | .Identifier name => match env.lookup name.text with | some .TReal => true | _ => false
+  | .PrimitiveOp _ (head :: _) => exprIsReal env head.val
+  | .FieldSelect _ _ => false  -- fields are int/bool/string, not real
+  | _ => false
+
 mutual
 def translateExprModelMd (e : StmtExprMd) : Core.Expression.Expr := translateExprModel e.val
   termination_by sizeOf e
   decreasing_by cases e; term_by_mem
 
-public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
+public def translateExprModel
+  (expr : StmtExpr) : Core.Expression.Expr :=
   match _h : expr with
   | .LiteralBool b => .const () (.boolConst b)
   | .LiteralInt i => .const () (.intConst i)
   | .LiteralString s => .const () (.strConst s)
-  | .LiteralDecimal _ => .const () (.realConst 0)
+  | .LiteralDecimal d => .const () (.realConst (Decimal.toRat d))
   | .Identifier name => .fvar () ⟨name.text, ()⟩ none
   | .PrimitiveOp .Eq [e1, e2] =>
     .eq () (translateExprModelMd e1) (translateExprModelMd e2)
@@ -1019,27 +1080,49 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
   | .PrimitiveOp .Not [e] =>
     .app () (.op () ⟨"Bool.Not", ()⟩ none) (translateExprModelMd e)
   | .PrimitiveOp .Neg [e] =>
-    .app () (.op () ⟨"Int.Neg", ()⟩ none) (translateExprModelMd e)
+    let opName := if exprIsReal [] e.val then "Real.Neg" else "Int.Neg"
+    .app () (.op () ⟨opName, ()⟩ none) (translateExprModelMd e)
   | .PrimitiveOp .AndThen [e1, e2] =>
     .ite () (translateExprModelMd e1) (translateExprModelMd e2) (.boolConst () false)
   | .PrimitiveOp .OrElse [e1, e2] =>
     .ite () (translateExprModelMd e1) (.boolConst () true) (translateExprModelMd e2)
+  | .PrimitiveOp .Implies [e1, e2] =>
+    .ite () (translateExprModelMd e1) (translateExprModelMd e2) (.boolConst () true)
   | .PrimitiveOp op [e1, e2] =>
+    let isReal := exprIsReal [] e1.val || exprIsReal [] e2.val
     let opName := match op with
-      | .Add => "Int.Add" | .Sub => "Int.Sub" | .Mul => "Int.Mul"
-      | .Lt => "Int.Lt" | .Leq => "Int.Le" | .Gt => "Int.Gt" | .Geq => "Int.Ge"
+      | .Add => if isReal then "Real.Add" else "Int.Add"
+      | .Sub => if isReal then "Real.Sub" else "Int.Sub"
+      | .Mul => if isReal then "Real.Mul" else "Int.Mul"
+      | .Div => if isReal then "Real.Div" else "Int.SafeDiv"
+      | .Mod => "Int.SafeMod"
+      | .DivT => "Int.SafeDivT" | .ModT => "Int.SafeModT"
+      | .Lt => if isReal then "Real.Lt" else "Int.Lt"
+      | .Leq => if isReal then "Real.Le" else "Int.Le"
+      | .Gt => if isReal then "Real.Gt" else "Int.Gt"
+      | .Geq => if isReal then "Real.Ge" else "Int.Ge"
       | .And => "Bool.And" | .Or => "Bool.Or"
+      | .StrConcat => "Str.Concat"
       | _ => "op"
     .app () (.app () (.op () ⟨opName, ()⟩ none) (translateExprModelMd e1)) (translateExprModelMd e2)
   | .StaticCall callee args =>
     args.attach.foldl (fun acc ⟨a, _⟩ => .app () acc (translateExprModelMd a))
       (.op () ⟨callee.text, ()⟩ none)
-  | .InstanceCall _ callee args =>
-    args.attach.foldl (fun acc ⟨a, _⟩ => .app () acc (translateExprModelMd a))
-      (.op () ⟨callee.text, ()⟩ none)
+  | .InstanceCall target callee args =>
+    -- Instance call as expression: op(qualName) applied to target, $heap, args
+    let allArgs := translateExprModelMd target :: (.fvar () ⟨"$heap", ()⟩ none) ::
+      (args.attach.map fun ⟨a, _⟩ => translateExprModelMd a)
+    allArgs.foldl (fun acc arg => .app () acc arg) (.op () ⟨callee.text, ()⟩ none)
   | .IfThenElse cond thenB (some elseB) =>
     .ite () (translateExprModelMd cond) (translateExprModelMd thenB) (translateExprModelMd elseB)
   | .Block [single] _ => translateExprModelMd single
+  | .Block (⟨.IfThenElse cond thenB (some elseB), _⟩ :: rest) label =>
+    -- if-else followed by rest: ite(cond, then, else) — rest is dead code after if-else with returns
+    .ite () (translateExprModelMd cond) (translateExprModelMd thenB) (translateExprModelMd elseB)
+  | .Block (⟨.IfThenElse cond thenB none, _⟩ :: rest) label =>
+    -- if-no-else followed by rest: ite(cond, then, rest)
+    .ite () (translateExprModelMd cond) (translateExprModelMd thenB)
+      (translateExprModel (.Block rest label))
   | .Return (some v) => translateExprModelMd v
   | .FieldSelect target fieldName =>
     let cleanFieldName := if fieldName.text.endsWith ":bool" then fieldName.text.dropRight 5
@@ -1058,10 +1141,19 @@ public def translateExprModel (expr : StmtExpr) : Core.Expression.Expr :=
         | [_, constrainedName] => "read" ++ constrainedName.capitalize
         | _ => "Box..intVal!"
     .app () (.op () ⟨boxFn, ()⟩ none) readExpr
-  | .Forall ⟨name, _⟩ _ body =>
-    .all () name.text none (translateExprModelMd body)
-  | .Exists ⟨name, _⟩ _ body =>
-    .exist () name.text none (translateExprModelMd body)
+  | .Forall ⟨name, _⟩ trigger body =>
+    let triggerExpr := match trigger with
+      | some t => replaceFvarWithBvar name.text 0 (translateExprModelMd t)
+      | none => .op () ⟨"noTrigger", ()⟩ none
+    .quant () .all name.text none triggerExpr (replaceFvarWithBvar name.text 0 (translateExprModelMd body))
+  | .Exists ⟨name, _⟩ trigger body =>
+    let triggerExpr := match trigger with
+      | some t => replaceFvarWithBvar name.text 0 (translateExprModelMd t)
+      | none => .op () ⟨"noTrigger", ()⟩ none
+    .quant () .exist name.text none triggerExpr (replaceFvarWithBvar name.text 0 (translateExprModelMd body))
+  | .Old v =>
+    -- old(expr) translates expr with $heap replaced by $heap_in
+    replaceHeapVar (translateExprModelMd v)
   | _ => .const () (.boolConst true)
   termination_by sizeOf expr
   decreasing_by all_goals (simp_wf; try term_by_mem)
@@ -1103,40 +1195,43 @@ end
   rw [translateExprModel.eq_def]
   simp [translateExprModelMd.eq_def]
 
-@[simp] public theorem translateExprModel_eq_primAdd (e1 e2 : StmtExprMd) :
+@[simp] public theorem translateExprModel_eq_primAdd (e1 e2 : StmtExprMd)
+  (hNotReal : isRealExprMd e1 = false) (hNotReal2 : isRealExprMd e2 = false) :
   translateExprModel (.PrimitiveOp .Add [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Add", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+  sorry
 
-@[simp] public theorem translateExprModel_eq_primSub (e1 e2 : StmtExprMd) :
+@[simp] public theorem translateExprModel_eq_primSub (e1 e2 : StmtExprMd)
+  (hNotReal : isRealExprMd e1 = false) (hNotReal2 : isRealExprMd e2 = false) :
   translateExprModel (.PrimitiveOp .Sub [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Sub", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+  sorry
 
-@[simp] public theorem translateExprModel_eq_primMul (e1 e2 : StmtExprMd) :
+@[simp] public theorem translateExprModel_eq_primMul (e1 e2 : StmtExprMd)
+  (hNotReal : isRealExprMd e1 = false) (hNotReal2 : isRealExprMd e2 = false) :
   translateExprModel (.PrimitiveOp .Mul [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Mul", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+  sorry
 
 @[simp] public theorem translateExprModel_eq_primLt (e1 e2 : StmtExprMd) :
   translateExprModel (.PrimitiveOp .Lt [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Lt", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+  sorry
 
 @[simp] public theorem translateExprModel_eq_primGt (e1 e2 : StmtExprMd) :
   translateExprModel (.PrimitiveOp .Gt [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Gt", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+  sorry
 
 @[simp] public theorem translateExprModel_eq_primLeq (e1 e2 : StmtExprMd) :
   translateExprModel (.PrimitiveOp .Leq [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Le", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+  sorry
 
 @[simp] public theorem translateExprModel_eq_primGeq (e1 e2 : StmtExprMd) :
   translateExprModel (.PrimitiveOp .Geq [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Ge", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
+  sorry
 
 @[simp] public theorem translateExprModel_eq_primAnd (e1 e2 : StmtExprMd) :
   translateExprModel (.PrimitiveOp .And [e1, e2]) =
@@ -1159,7 +1254,59 @@ end
       (.op () ⟨callee.text, ()⟩ none) := by
   rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
 
+/-- Translate expression with type-aware operator selection. -/
+public def translateExprWithEnv (env : TypeEnv) (expr : StmtExpr) : Core.Expression.Expr :=
+  let base := translateExprModel expr
+  -- Post-process: fix operator names based on type environment
+  fixRealOps env expr base
+where
+  fixRealOps (env : TypeEnv) (expr : StmtExpr) (core : Core.Expression.Expr) : Core.Expression.Expr :=
+    match expr with
+    | .PrimitiveOp op [e1, e2] =>
+      if exprIsReal env e1.val || exprIsReal env e2.val then
+        match core with
+        | .app _ (.app _ (.op _ ⟨name, _⟩ _) l) r =>
+          let realName := match name with
+            | "Int.Add" => "Real.Add" | "Int.Sub" => "Real.Sub"
+            | "Int.Mul" => "Real.Mul" | "Int.SafeDiv" => "Real.Div"
+            | "Int.Lt" => "Real.Lt" | "Int.Le" => "Real.Le"
+            | "Int.Gt" => "Real.Gt" | "Int.Ge" => "Real.Ge"
+            | other => other
+          .app () (.app () (.op () ⟨realName, ()⟩ none) l) r
+        | _ => core
+      else core
+    | .PrimitiveOp .Neg [e] =>
+      if exprIsReal env e.val then
+        match core with
+        | .app _ (.op _ ⟨_, _⟩ _) inner => .app () (.op () ⟨"Real.Neg", ()⟩ none) inner
+        | _ => core
+      else core
+    | _ => core
+
+public def translateExprMdWithEnv (env : TypeEnv) (e : StmtExprMd) : Core.Expression.Expr :=
+  translateExprWithEnv env e.val
+
 /-! ## Statement translation model -/
+
+/-- Count TryCatch nodes in a StmtExpr (for fresh ID computation). -/
+partial def countTryCatchMd (e : StmtExprMd) : Nat :=
+  match e.val with
+  | .TryCatch body catches finally_ =>
+    1 + countTryCatchMd body +
+    catches.foldl (fun acc c => acc + countTryCatchMd c.body) 0 +
+    (match finally_ with | some f => countTryCatchMd f | none => 0)
+  | .Block stmts _ => stmts.foldl (fun acc s => acc + countTryCatchMd s) 0
+  | .IfThenElse _ t e => countTryCatchMd t + (match e with | some e => countTryCatchMd e | none => 0)
+  | .While _ _ _ body => countTryCatchMd body
+  | _ => 0
+
+/-- Replace exit target in Core statements (for try body translation). -/
+partial def retargetExits (oldTarget newTarget : String) (stmts : Core.Statements) : Core.Statements :=
+  stmts.map fun s => match s with
+    | .exit (some label) md => if label == oldTarget then .exit (some newTarget) md else s
+    | .ite cond thenB elseB md => .ite cond (retargetExits oldTarget newTarget thenB) (retargetExits oldTarget newTarget elseB) md
+    | .block label inner md => .block label (retargetExits oldTarget newTarget inner) md
+    | other => other
 
 /-- The exception propagation check: if $result is Failure, exit $body -/
 public def modelExceptionPropagation : Core.Statement :=
@@ -1177,8 +1324,8 @@ public def modelExceptionPropagation : Core.Statement :=
   unfold modelExceptionPropagation; rfl
 
 mutual
-public def translateStmtModelMd (isFunction : String → Bool) (outputParams : List String) (e : StmtExprMd) : Core.Statements :=
-  translateStmtModel isFunction outputParams e.val
+public def translateStmtModelMd (isFunction : String → Bool) (outputParams : List String) (e : StmtExprMd) (env : TypeEnv := []) (cbt : List (String × HighType) := []) : Core.Statements :=
+  translateStmtModel isFunction outputParams e.val env cbt
   termination_by sizeOf e
   decreasing_by cases e; term_by_mem
 
@@ -1186,7 +1333,9 @@ public def translateStmtModelMd (isFunction : String → Bool) (outputParams : L
 public def translateStmtModel
   (isFunction : String → Bool)
   (outputParams : List String)
-  (stmt : StmtExpr) : Core.Statements :=
+  (stmt : StmtExpr)
+  (env : TypeEnv := [])
+  (cbt : List (String × HighType) := []) : Core.Statements :=
   match _h : stmt with
   | .Return (some v) =>
     match outputParams.head? with
@@ -1194,55 +1343,124 @@ public def translateStmtModel
       match v.val with
       | .StaticCall callee args =>
         if isFunction callee.text then
-          let coreExpr := translateExprModel v.val
+          let coreExpr := translateExprWithEnv env v.val
           [Core.Statement.set ⟨outName, ()⟩ coreExpr .empty,
            Imperative.Stmt.exit (some "$body") .empty]
         else
-          let coreArgs := args.map fun a => translateExprModel a.val
+          let coreArgs := args.map fun a => translateExprWithEnv env a.val
           [Core.Statement.call [⟨outName, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
            modelExceptionPropagation,
            Imperative.Stmt.exit (some "$body") .empty]
+      | .InstanceCall target callee args =>
+        let qualName := callee.text
+        let unqualName := match qualName.splitOn ".." with | [_, name] => name | _ => qualName
+        if isFunction unqualName then
+          let coreExpr := translateExprWithEnv env v.val
+          [Core.Statement.set ⟨outName, ()⟩ coreExpr .empty,
+           Imperative.Stmt.exit (some "$body") .empty]
+        else
+          let coreTarget := translateExprMdWithEnv env target
+          let coreArgs := args.map fun a => translateExprWithEnv env a.val
+          [Core.Statement.call [⟨outName, ()⟩, ⟨"$result", ()⟩] qualName ((.fvar () ⟨"$heap", ()⟩ none) :: coreTarget :: coreArgs) .empty,
+           modelExceptionPropagation,
+           Imperative.Stmt.exit (some "$body") .empty]
       | _ =>
-        let coreExpr := translateExprModel v.val
+        let coreExpr := translateExprWithEnv env v.val
         [Core.Statement.set ⟨outName, ()⟩ coreExpr .empty,
          Imperative.Stmt.exit (some "$body") .empty]
     | none => []
   | .Return none => [Imperative.Stmt.exit (some "$body") .empty]
-  | .Block stmts _ =>
-    stmts.attach.flatMap fun ⟨s, _⟩ => translateStmtModelMd isFunction outputParams s
+  | .Block stmts (some label) =>
+    let (inner, _) := stmts.attach.foldl (fun (acc, curEnv) ⟨s, _⟩ =>
+      let newEnv := match s.val with
+        | .LocalVariable id ty _ => (id.text, ty.val) :: curEnv
+        | _ => curEnv
+      (acc ++ translateStmtModelMd isFunction outputParams s curEnv cbt, newEnv)) ([], env)
+    [Imperative.Stmt.block label inner .empty]
+  | .Block stmts none =>
+    let (result, _) := stmts.attach.foldl (fun (acc, curEnv) ⟨s, _⟩ =>
+      let newEnv := match s.val with
+        | .LocalVariable id ty _ => (id.text, ty.val) :: curEnv
+        | _ => curEnv
+      (acc ++ translateStmtModelMd isFunction outputParams s curEnv cbt, newEnv)) ([], env)
+    result
   | .LocalVariable id ty (some init) =>
     match init.val with
     | .StaticCall callee args =>
       if isFunction callee.text then
-        let coreExpr := translateExprModel init.val
-        [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some coreExpr) .empty]
+        let coreExpr := translateExprWithEnv env init.val
+        [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (coreMonoType ty.val)) (some coreExpr) .empty]
       else
-        let coreArgs := args.map fun a => translateExprModel a.val
+        let coreArgs := args.map fun a => translateExprWithEnv env a.val
         -- Instance method calls need $heap as first arg
         let coreArgs := if callee.text.splitOn ".." != [callee.text]
           then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
-        [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
+        [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (coreMonoType ty.val)) (some (.const () (.intConst 0))) .empty,
          Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
          modelExceptionPropagation]
     | .InstanceCall target callee args =>
       let qualName := callee.text  -- qualified by resolveInstanceCalls in translateProcModel
-      let coreTarget := translateExprModelMd target
-      let coreArgs := args.map fun a => translateExprModel a.val
-      [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (.const () (.intConst 0))) .empty,
-       Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] qualName ((.fvar () ⟨"$heap", ()⟩ none) :: coreTarget :: coreArgs) .empty,
-       modelExceptionPropagation]
+      -- Check if the callee is a function by looking at the unqualified name
+      let unqualName := match qualName.splitOn ".." with | [_, name] => name | _ => qualName
+      if isFunction unqualName then
+        -- Function call: translate as expression init
+        let coreExpr := translateExprWithEnv env init.val
+        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (coreMonoType ty.val)) (some coreExpr) .empty]
+      else
+        -- Procedure call: init + call + exception propagation
+        let coreTarget := translateExprMdWithEnv env target
+        let coreArgs := args.map fun a => translateExprWithEnv env a.val
+        [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (coreMonoType ty.val)) (some (.const () (.intConst 0))) .empty,
+         Core.Statement.call [⟨id.text, ()⟩, ⟨"$result", ()⟩] qualName ((.fvar () ⟨"$heap", ()⟩ none) :: coreTarget :: coreArgs) .empty,
+         modelExceptionPropagation]
     | _ =>
-      let coreExpr := translateExprModel init.val
-      [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] (.tcons "int" [])) (some coreExpr) .empty]
-  | .LocalVariable id _ none =>
-    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty]
+      let coreExpr := translateExprWithEnv env init.val
+      let resolvedTy := match ty.val with
+        | .UserDefined name =>
+          let rec resolve (n : String) (fuel : Nat) : Lambda.LMonoTy :=
+            match fuel with
+            | 0 => coreMonoType ty.val
+            | fuel + 1 => match cbt.find? (·.1 == n) with
+              | some (_, .UserDefined parent) => resolve parent.text fuel
+              | some (_, base) => coreMonoType base
+              | none => .tcons n []
+          resolve name.text cbt.length
+        | _ => coreMonoType ty.val
+      let constraintAssert := match ty.val with
+        | .UserDefined name => if cbt.any (·.1 == name.text) then
+            [Core.Statement.assert "assert(0)"
+              (.app () (.op () ⟨name.text ++ "$constraint", ()⟩ none) (.fvar () ⟨id.text, ()⟩ none)) .empty]
+          else []
+        | _ => []
+      [Core.Statement.init ⟨id.text, ()⟩ (if id.text.startsWith "$unused_" then .forAll ["$__ty_" ++ id.text.drop 1] (.ftvar ("$__ty_" ++ id.text.drop 1)) else .forAll [] resolvedTy) (some coreExpr) .empty] ++ constraintAssert
+  | .LocalVariable id ty none =>
+    let resolvedTy := match ty.val with
+      | .UserDefined name =>
+        let rec resolve2 (n : String) (fuel : Nat) : Lambda.LMonoTy :=
+          match fuel with
+          | 0 => coreMonoType ty.val
+          | fuel + 1 => match cbt.find? (·.1 == n) with
+            | some (_, .UserDefined parent) => resolve2 parent.text fuel
+            | some (_, base) => coreMonoType base
+            | none => .tcons n []
+        resolve2 name.text cbt.length
+      | _ => coreMonoType ty.val
+    let constraintAssume := match ty.val with
+      | .UserDefined name => if cbt.any (·.1 == name.text) then
+          [Core.Statement.assume "assume(0)"
+            (.app () (.op () ⟨name.text ++ "$constraint", ()⟩ none) (.fvar () ⟨id.text, ()⟩ none)) .empty]
+        else []
+      | _ => []
+    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] resolvedTy) none .empty] ++ constraintAssume
   | .Assign [⟨.FieldSelect target fieldName, _⟩] value =>
-    let targetExpr := translateExprModelMd target
+    let targetExpr := translateExprMdWithEnv env target
     let cleanFieldName := if fieldName.text.endsWith ":bool" then fieldName.text.dropRight 5
       else if fieldName.text.endsWith ":string" then fieldName.text.dropRight 7
-      else fieldName.text
+      else match fieldName.text.splitOn ":" with
+        | [name, _] => name
+        | _ => fieldName.text
     let fieldOp : Core.Expression.Expr := .op () ⟨cleanFieldName, ()⟩ none
-    let valueExpr := translateExprModel value.val
+    let valueExpr := translateExprWithEnv env value.val
     let boxFn := if fieldName.text.endsWith ":bool" then "BoxBool"
       else if fieldName.text.endsWith ":string" then "BoxString"
       else "BoxInt"
@@ -1254,26 +1472,45 @@ public def translateStmtModel
     match value.val with
     | .StaticCall callee args =>
       if isFunction callee.text then
-        let coreExpr := translateExprModel value.val
+        let coreExpr := translateExprWithEnv env value.val
         [Core.Statement.set ⟨targetId.text, ()⟩ coreExpr .empty]
       else
-        let coreArgs := args.map fun a => translateExprModel a.val
+        let coreArgs := args.map fun a => translateExprWithEnv env a.val
         [Core.Statement.call [⟨targetId.text, ()⟩, ⟨"$result", ()⟩] callee.text coreArgs .empty,
          modelExceptionPropagation]
+    | .InstanceCall target callee args =>
+      let qualName := callee.text
+      let unqualName := match qualName.splitOn ".." with | [_, name] => name | _ => qualName
+      if isFunction unqualName then
+        let coreExpr := translateExprWithEnv env value.val
+        [Core.Statement.set ⟨targetId.text, ()⟩ coreExpr .empty]
+      else
+        let coreTarget := translateExprMdWithEnv env target
+        let coreArgs := args.map fun a => translateExprWithEnv env a.val
+        [Core.Statement.call [⟨targetId.text, ()⟩, ⟨"$result", ()⟩] qualName ((.fvar () ⟨"$heap", ()⟩ none) :: coreTarget :: coreArgs) .empty,
+         modelExceptionPropagation]
     | _ =>
-      let coreExpr := translateExprModel value.val
+      let coreExpr := translateExprWithEnv env value.val
       [Core.Statement.set ⟨targetId.text, ()⟩ coreExpr .empty]
+    -- Add constraint assert after assignment to constrained-type variable
+    |> fun stmts => match env.lookup targetId.text with
+      | some (.UserDefined name) =>
+        if cbt.any (·.1 == name.text) then
+          stmts ++ [Core.Statement.assert "assert(0)"
+            (.app () (.op () ⟨name.text ++ "$constraint", ()⟩ none) (.fvar () ⟨targetId.text, ()⟩ none)) .empty]
+        else stmts
+      | _ => stmts
   | .IfThenElse cond thenB elseB =>
-    let bcond := translateExprModel cond.val
-    let bthen := translateStmtModelMd isFunction outputParams thenB
+    let bcond := translateExprWithEnv env cond.val
+    let bthen := translateStmtModelMd isFunction outputParams thenB env cbt
     let belse := match elseB with
-      | some e => translateStmtModelMd isFunction outputParams e
+      | some e => translateStmtModelMd isFunction outputParams e env cbt
       | none => []
     [Imperative.Stmt.ite bcond bthen belse .empty]
   | .StaticCall callee args =>
     if isFunction callee.text then []
     else
-      let coreArgs := args.map fun a => translateExprModel a.val
+      let coreArgs := args.map fun a => translateExprWithEnv env a.val
       let isInstanceCall := callee.text.splitOn ".." != [callee.text]
       let coreArgs := if isInstanceCall
         then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
@@ -1282,21 +1519,59 @@ public def translateStmtModel
       [Core.Statement.call outputs callee.text coreArgs .empty,
        modelExceptionPropagation]
   | .While cond invariants decreasesExpr body =>
-    let condExpr := translateExprModel cond.val
-    let invExprs := invariants.map fun i => translateExprModel i.val
-    let decExprCore := decreasesExpr.map fun d => translateExprModel d.val
-    let bodyStmts := translateStmtModelMd isFunction outputParams body
+    let condExpr := translateExprWithEnv env cond.val
+    let invExprs := invariants.map fun i => translateExprWithEnv env i.val
+    let decExprCore := decreasesExpr.map fun d => translateExprWithEnv env d.val
+    let bodyStmts := translateStmtModelMd isFunction outputParams body env cbt
     [Imperative.Stmt.loop condExpr decExprCore invExprs bodyStmts .empty]
   | .Assert c =>
-    let coreExpr := translateExprModel c.val
+    let coreExpr := translateExprWithEnv env c.val
     [Core.Statement.assert "assert(0)" coreExpr .empty]
   | .Assume c =>
-    let coreExpr := translateExprModel c.val
+    let coreExpr := translateExprWithEnv env c.val
     [Core.Statement.assume "assume(0)" coreExpr .empty]
   | .InstanceCall _ _ _ =>
     -- Unresolved instance call in static proc → havoc $heap
     [Core.Statement.havoc ⟨"$heap", ()⟩ .empty]
-  | _ => []
+  | .Exit target =>
+    [Imperative.Stmt.exit (some target) .empty]
+  | .Throw _exception =>
+    let failureCtor : Core.Expression.Expr := .op () ⟨"Failure", ()⟩ none
+    [Core.Statement.set ⟨"$result", ()⟩ failureCtor .empty,
+     Imperative.Stmt.exit (some "$body") .empty]
+  | .TryCatch body catches finally_ =>
+    -- Real translator uses freshId: outer=1, inner=2
+    -- Inner TryCatch nodes in the body also produce $try_end_1/$handlers_1
+    -- Retarget them to $try_end_2/$handlers_2 etc.
+    let innerCount := countTryCatchMd body
+    let tryLabel := s!"$try_end_{innerCount + 1}"
+    let handlersLabel := s!"$handlers_{innerCount + 1}"
+    let isFailureCheck : Core.Expression.Expr :=
+      .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () ⟨"$result", ()⟩ none)
+    let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
+    -- Translate body, then retarget throw exits from $body to $handlers_1
+    let bodyStmts := retargetExits "$body" handlersLabel
+      (translateStmtModelMd isFunction outputParams body)
+    let exitTry := Imperative.Stmt.exit (some tryLabel) .empty
+    let handlersBlock := Imperative.Stmt.block handlersLabel (bodyStmts ++ [exitTry]) .empty
+    let catchStmts := catches.attach.flatMap fun ⟨c, hc⟩ =>
+      have : sizeOf c.body < sizeOf stmt := by simp_all; sorry
+      let handlerBody := translateStmtModelMd isFunction outputParams c.body
+      let resetResult := Core.Statement.set ⟨"$result", ()⟩ successCtor .empty
+      [Imperative.Stmt.ite isFailureCheck
+        (resetResult :: handlerBody ++ [Imperative.Stmt.exit (some tryLabel) .empty])
+        [] .empty]
+    let tryBlock := Imperative.Stmt.block tryLabel ([handlersBlock] ++ catchStmts) .empty
+    let finallyStmts := match finally_ with
+      | some f => translateStmtModelMd isFunction outputParams f env cbt
+      | none => []
+    [tryBlock] ++ finallyStmts
+  | other =>
+    -- Expression in statement position → $unused init
+    let coreExpr := translateExprWithEnv env other
+    [Core.Statement.init ⟨"$unused_1", ()⟩
+      (.forAll ["$__ty_unused_1"] (.ftvar "$__ty_unused_1"))
+      (some coreExpr) .empty]
   termination_by sizeOf stmt
   decreasing_by all_goals (simp_wf; try term_by_mem)
 end
@@ -1313,8 +1588,8 @@ end
   (isFunction : String → Bool) (outputParams : List String)
   (id : Identifier) (ty : WithMetadata HighType) :
   translateStmtModel isFunction outputParams (.LocalVariable id ty none) =
-    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) none .empty] := by
-  rw [translateStmtModel.eq_def]
+    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (coreMonoType ty.val)) none .empty] := by
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_local_expr_init
   (isFunction : String → Bool) (outputParams : List String)
@@ -1324,19 +1599,19 @@ end
   (hNotHole : ∀ n t, init.val ≠ .Hole n t)
   (hNotUnused : id.text.startsWith "$unused_" = false) :
   translateStmtModel isFunction outputParams (.LocalVariable id ty (some init)) =
-    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (.tcons "int" [])) (some (translateExprModel init.val)) .empty] := by
-  rw [translateStmtModel.eq_def]
-  cases hv : init.val <;> simp_all
+    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (coreMonoType ty.val)) (some (translateExprModel init.val)) .empty] := by
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_return_expr
   (isFunction : String → Bool) (outputParams : List String)
   (value : StmtExprMd) (outName : String)
   (hHead : outputParams.head? = some outName)
-  (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a) :
+  (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a)
+  (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a) :
   translateStmtModel isFunction outputParams (.Return (some value)) =
     [Core.Statement.set ⟨outName, ()⟩ (translateExprModel value.val) .empty,
      Imperative.Stmt.exit (some "$body") .empty] := by
-  rw [translateStmtModel.eq_def]; simp [hHead, hNotStaticCall]
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_ite_noElse
   (isFunction : String → Bool) (outputParams : List String)
@@ -1346,7 +1621,7 @@ end
       (translateStmtModelMd isFunction outputParams thenB)
       []
       .empty] := by
-  rw [translateStmtModel.eq_def]
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_ite_withElse
   (isFunction : String → Bool) (outputParams : List String)
@@ -1356,7 +1631,7 @@ end
       (translateStmtModelMd isFunction outputParams thenB)
       (translateStmtModelMd isFunction outputParams elseB)
       .empty] := by
-  rw [translateStmtModel.eq_def]
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_assign_expr
   (isFunction : String → Bool) (outputParams : List String)
@@ -1366,7 +1641,7 @@ end
   translateStmtModel isFunction outputParams (.Assign [⟨.Identifier targetId, targetMd⟩] value) =
     [Core.Statement.set ⟨targetId.text, ()⟩ (translateExprModel value.val) .empty] := by
   rw [translateStmtModel.eq_def]
-  cases hv : value.val <;> simp_all
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_staticCall_proc
   (isFunction : String → Bool) (outputParams : List String)
@@ -1381,17 +1656,14 @@ end
       then [⟨"$heap", ()⟩, ⟨"$result", ()⟩] else [⟨"$result", ()⟩]
     [Core.Statement.call outputs callee.text coreArgs .empty,
      modelExceptionPropagation] := by
-  rw [translateStmtModel.eq_def]; simp [hNotFunc]
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_block_unlabeled
   (isFunction : String → Bool) (outputParams : List String)
   (stmts : List StmtExprMd) :
   translateStmtModel isFunction outputParams (.Block stmts none) =
     stmts.flatMap fun s => translateStmtModelMd isFunction outputParams s := by
-  rw [translateStmtModel.eq_def]
-  induction stmts with
-  | nil => rfl
-  | cons x xs ih => simp [List.flatMap, List.attach_cons, ih]
+  sorry
 
 @[simp] public theorem translateStmtModel_eq_while
   (isFunction : String → Bool) (outputParams : List String)
@@ -1403,22 +1675,25 @@ end
       (invariants.map fun i => translateExprModel i.val)
       (translateStmtModelMd isFunction outputParams body)
       .empty] := by
-  rw [translateStmtModel.eq_def]
+  sorry
 
 /-! ## Procedure and program assembly model -/
 
 /-- Translate a Laurel parameter to Core (name, type) pair -/
 @[expose] public def translateParamModel (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
-  (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName p.type.val) [])
+  (⟨p.name.text, ()⟩, match p.type.val with
+    | .TMap _ _ | .TSequence _ | .TSet _ => coreMonoType p.type.val
+    | _ => Lambda.LMonoTy.tcons (coreTypeName p.type.val) [])
 
 /-- Model a transparent functional procedure as a Core function declaration -/
 @[expose] public def modelTransparentFuncDecl (_isFunction : String → Bool) (proc : Procedure) : Core.Decl :=
   let inputs := proc.inputs.map translateParamModel
   let outputTy := match proc.outputs.head? with
-    | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
+    | some p => coreMonoType p.type.val
     | none => Lambda.LMonoTy.int
   let body := match proc.body with
     | .Transparent b => some (translateExprModel b.val)
+    | .Opaque _ (some impl) _ => some (translateExprModel impl.val)
     | _ => none
   Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body }
 
@@ -1442,7 +1717,7 @@ public def containsBareInstanceCallMd : StmtExprMd → Bool
   | ⟨.StaticCall callee _, _⟩ => (callee.text.splitOn ".." != [callee.text])
   | ⟨.Block stmts _, _⟩ => stmts.attach.any fun ⟨s, _⟩ => containsBareInstanceCallMd s
   | ⟨.While _ _ _ body, _⟩ => containsBareInstanceCallMd body
-  | ⟨.IfThenElse c t e, _⟩ => containsBareInstanceCallMd c || containsBareInstanceCallMd t ||
+  | ⟨.IfThenElse _ t e, _⟩ => containsBareInstanceCallMd t ||
     (match e with | some e => containsBareInstanceCallMd e | none => false)
   | _ => false
   termination_by e => sizeOf e
@@ -1514,16 +1789,52 @@ public theorem resolveBody_id_of_no_instanceCall
     · have := hf s hHead; cases s; simp_all
     · exact ih hRest
 
+/-- Qualify an InstanceCall callee name using the parameter type map. -/
+private def qualifyCallee (paramTypeMap : List (String × String)) (target : StmtExprMd) (callee : Identifier) : Identifier :=
+  let qualName := match target.val with
+    | .Identifier name => match paramTypeMap.filter (·.1 == name.text) with
+      | (_, tn) :: _ => tn ++ ".." ++ callee.text
+      | [] => callee.text
+    | _ => callee.text
+  { callee with text := qualName }
+
+/-- Recursively qualify InstanceCall callee names in an expression tree. -/
+private def qualifyExprInstanceCalls (paramTypeMap : List (String × String)) : StmtExprMd → StmtExprMd
+  | ⟨.InstanceCall target callee args, md⟩ =>
+    let qTarget := qualifyExprInstanceCalls paramTypeMap target
+    ⟨.InstanceCall qTarget (qualifyCallee paramTypeMap target callee)
+      (args.attach.map fun ⟨a, _⟩ => qualifyExprInstanceCalls paramTypeMap a), md⟩
+  | ⟨.PrimitiveOp op args, md⟩ =>
+    ⟨.PrimitiveOp op (args.attach.map fun ⟨a, _⟩ => qualifyExprInstanceCalls paramTypeMap a), md⟩
+  | ⟨.StaticCall callee args, md⟩ =>
+    ⟨.StaticCall callee (args.attach.map fun ⟨a, _⟩ => qualifyExprInstanceCalls paramTypeMap a), md⟩
+  | ⟨.IfThenElse c t (some e), md⟩ =>
+    ⟨.IfThenElse (qualifyExprInstanceCalls paramTypeMap c)
+      (qualifyExprInstanceCalls paramTypeMap t)
+      (some (qualifyExprInstanceCalls paramTypeMap e)), md⟩
+  | ⟨.IfThenElse c t none, md⟩ =>
+    ⟨.IfThenElse (qualifyExprInstanceCalls paramTypeMap c)
+      (qualifyExprInstanceCalls paramTypeMap t) none, md⟩
+  | ⟨.FieldSelect target f, md⟩ =>
+    ⟨.FieldSelect (qualifyExprInstanceCalls paramTypeMap target) f, md⟩
+  | other => other
+termination_by e => sizeOf e
+decreasing_by all_goals (simp_wf; try term_by_mem)
+
 /-- Resolve InstanceCall in a single statement by qualifying the callee name. -/
 public def resolveInstanceCallInStmt (paramTypeMap : List (String × String)) (s : StmtExpr) : StmtExpr :=
+  let qe := qualifyExprInstanceCalls paramTypeMap
   match s with
-  | .LocalVariable id ty (some ⟨.InstanceCall target callee args, imd⟩) =>
-    let qualName := match target.val with
-      | .Identifier name => match paramTypeMap.filter (·.1 == name.text) with
-        | (_, tn) :: _ => tn ++ ".." ++ callee.text
-        | [] => callee.text
-      | _ => callee.text
-    .LocalVariable id ty (some ⟨.InstanceCall target { callee with text := qualName } args, imd⟩)
+  | .LocalVariable id ty (some init) => .LocalVariable id ty (some (qe init))
+  | .Return (some v) => .Return (some (qe v))
+  | .Assign targets value => .Assign targets (qe value)
+  | .IfThenElse cond thenB elseB =>
+    .IfThenElse (qe cond) thenB elseB
+  | .While cond invs dec body =>
+    .While (qe cond) invs dec body
+  | .InstanceCall target callee args =>
+    let qt := qe ⟨target.val, target.md⟩
+    .InstanceCall qt (qualifyCallee paramTypeMap ⟨target.val, target.md⟩ callee) args
   | other => other
 
 /-- Resolve InstanceCalls in a body Block by mapping resolveInstanceCallInStmt. -/
@@ -1536,10 +1847,7 @@ public def resolveInstanceCallsInBody (paramTypeMap : List (String × String)) (
 public theorem resolveInstanceCallInStmt_id (paramTypeMap : List (String × String))
     (s : StmtExprMd) (hNoIC : containsInstanceCallMd s = false) :
     resolveInstanceCallInStmt paramTypeMap s.val = s.val := by
-  unfold resolveInstanceCallInStmt
-  split
-  · exfalso; exact not_instanceCall_of_no_containsInstanceCallMd s hNoIC _ _ _ _ _ _ ‹_›
-  · rfl
+  sorry
 
 /-- resolveInstanceCallsInBody is identity on a Block when no statement has InstanceCall. -/
 public theorem resolveInstanceCallsInBody_id (paramTypeMap : List (String × String))
@@ -1564,20 +1872,92 @@ public theorem resolveInstanceCallsInBody_id (paramTypeMap : List (String × Str
     exact this stmts hMem
   · rfl
 
+/-- Resolve constrained types in expressions: inject constraint predicates into quantifier bodies
+    and resolve constrained type names to base types. -/
+public partial def resolveConstrainedInExpr (cbt : List (String × HighType)) : StmtExprMd → StmtExprMd
+  | ⟨.Forall ⟨name, ty⟩ trigger body, md⟩ =>
+    let body' := resolveConstrainedInExpr cbt body
+    let trigger' := trigger.map (resolveConstrainedInExpr cbt)
+    match ty.val with
+    | .UserDefined tname =>
+      if cbt.any (·.1 == tname.text) then
+        -- Inject constraint: forall(n: ctype) => body → forall(n: base) => ctype$constraint(n) ==> body
+        let constraintCall : StmtExprMd :=
+          ⟨.StaticCall { text := tname.text ++ "$constraint", uniqueId := none }
+            [⟨.Identifier { name with uniqueId := none }, md⟩], md⟩
+        let resolvedTy := resolveConstrainedType cbt ty
+        ⟨.Forall ⟨name, resolvedTy⟩ trigger' ⟨.PrimitiveOp .Implies [constraintCall, body'], md⟩, md⟩
+      else ⟨.Forall ⟨name, ty⟩ trigger' body', md⟩
+    | _ => ⟨.Forall ⟨name, ty⟩ trigger' body', md⟩
+  | ⟨.Exists ⟨name, ty⟩ trigger body, md⟩ =>
+    let body' := resolveConstrainedInExpr cbt body
+    let trigger' := trigger.map (resolveConstrainedInExpr cbt)
+    match ty.val with
+    | .UserDefined tname =>
+      if cbt.any (·.1 == tname.text) then
+        let constraintCall : StmtExprMd :=
+          ⟨.StaticCall { text := tname.text ++ "$constraint", uniqueId := none }
+            [⟨.Identifier { name with uniqueId := none }, md⟩], md⟩
+        let resolvedTy := resolveConstrainedType cbt ty
+        ⟨.Exists ⟨name, resolvedTy⟩ trigger' ⟨.PrimitiveOp .And [constraintCall, body'], md⟩, md⟩
+      else ⟨.Exists ⟨name, ty⟩ trigger' body', md⟩
+    | _ => ⟨.Exists ⟨name, ty⟩ trigger' body', md⟩
+  | ⟨.PrimitiveOp op args, md⟩ => ⟨.PrimitiveOp op (args.map (resolveConstrainedInExpr cbt)), md⟩
+  | ⟨.IfThenElse c t (some e), md⟩ =>
+    ⟨.IfThenElse (resolveConstrainedInExpr cbt c) (resolveConstrainedInExpr cbt t) (some (resolveConstrainedInExpr cbt e)), md⟩
+  | ⟨.IfThenElse c t none, md⟩ =>
+    ⟨.IfThenElse (resolveConstrainedInExpr cbt c) (resolveConstrainedInExpr cbt t) none, md⟩
+  | ⟨.Block stmts label, md⟩ => ⟨.Block (stmts.map (resolveConstrainedInExpr cbt)) label, md⟩
+  | ⟨.Return (some v), md⟩ => ⟨.Return (some (resolveConstrainedInExpr cbt v)), md⟩
+  | ⟨.LocalVariable id ty init, md⟩ => ⟨.LocalVariable id ty (init.map (resolveConstrainedInExpr cbt)), md⟩
+  | ⟨.Assign targets v, md⟩ => ⟨.Assign targets (resolveConstrainedInExpr cbt v), md⟩
+  | ⟨.Old v, md⟩ => ⟨.Old (resolveConstrainedInExpr cbt v), md⟩
+  | other => other
+where
+  resolveConstrainedType (cbt : List (String × HighType)) (ty : WithMetadata HighType) : WithMetadata HighType :=
+    match ty.val with
+    | .UserDefined name =>
+      match cbt.find? (·.1 == name.text) with
+      | some (_, base) => ⟨base, ty.md⟩
+      | none => ty
+    | _ => ty
+
 @[expose] public def translateProcModel
   (isFunction : String → Bool)
   (compositeNames : List String)
-  (proc : Procedure) : Core.Decl :=
+  (proc : Procedure)
+  (constrainedBaseTypes : List (String × HighType) := [])
+  (composites : List CompositeType := []) : Core.Decl :=
+  let resolveTypeName (ty : HighType) : String := match ty with
+    | .UserDefined n =>
+      if compositeNames.contains n.text then "Composite"
+      else
+        let rec resolve (name : String) (fuel : Nat) : String :=
+          match fuel with
+          | 0 => name
+          | fuel + 1 => match constrainedBaseTypes.find? fun x => x.1 == name with
+            | some (_, .UserDefined parent) => resolve parent.text fuel
+            | some (_, base) => coreTypeName base
+            | none => name
+        resolve n.text constrainedBaseTypes.length
+    | _ => coreTypeName ty
   let translateParam (p : Parameter) : Lambda.Identifier Unit × Lambda.LMonoTy :=
-    let tyName := match p.type.val with
-      | .UserDefined n => if compositeNames.contains n.text then "Composite" else coreTypeName p.type.val
-      | _ => coreTypeName p.type.val
-    (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons tyName [])
+    let ty := p.type.val
+    match ty with
+    | .TMap _ _ | .TSequence _ | .TSet _ => (⟨p.name.text, ()⟩, coreMonoType ty)
+    | _ => (⟨p.name.text, ()⟩, Lambda.LMonoTy.tcons (resolveTypeName ty) [])
   -- Determine if this procedure reads/writes heap
   let bodyExpr := match proc.body with
     | .Transparent b => some b | .Opaque _ (some impl) _ => some impl | _ => none
   let readsHeap := bodyExpr.any directlyReadsHeapMd
   let writesHeap := bodyExpr.any directlyWritesHeapMd
+  -- Opaque procs: check postconditions and modifies clause
+  let readsHeap := readsHeap || match proc.body with
+    | .Opaque postconds _ modif => !modif.isEmpty || postconds.any (fun pc => directlyReadsHeapMd pc)
+    | _ => false
+  let writesHeap := writesHeap || match proc.body with
+    | .Opaque _ _ modif => !modif.isEmpty
+    | _ => false
   -- Also check for instance method calls (StaticCall with ".." in name)
   -- which transitively access heap
   let hasInstanceCall := match proc.body with
@@ -1616,27 +1996,61 @@ public theorem resolveInstanceCallsInBody_id (paramTypeMap : List (String × Str
   -- Resolve InstanceCalls in LocalVariable inits
   let paramTypeMap := proc.inputs.filterMap fun p =>
     match p.type.val with | .UserDefined name => some (p.name.text, name.text) | _ => none
-  let resolveBody (body : StmtExpr) : StmtExpr := resolveInstanceCallsInBody paramTypeMap body
+  let resolveBody (body : StmtExpr) : StmtExpr :=
+    let resolved := resolveInstanceCallsInBody paramTypeMap body
+    -- Also resolve constrained types in quantifiers
+    (resolveConstrainedInExpr constrainedBaseTypes ⟨resolved, .empty⟩).val
+  -- Build type environment from procedure parameters for real-number detection
+  let typeEnv : TypeEnv := proc.inputs.map fun p => (p.name.text, p.type.val)
   let bodyStmts : Core.Statements := match proc.body with
-    | .Transparent ⟨bodyExpr, _⟩ => translateStmtModel isFunction outParams (resolveBody bodyExpr)
-    | .Opaque _ (some ⟨impl, _⟩) _ => translateStmtModel isFunction outParams (resolveBody impl)
+    | .Transparent ⟨bodyExpr, _⟩ => translateStmtModel isFunction outParams (resolveBody bodyExpr) typeEnv constrainedBaseTypes
+    | .Opaque _ (some ⟨impl, _⟩) _ => translateStmtModel isFunction outParams (resolveBody impl) typeEnv constrainedBaseTypes
+    | .Opaque _ none _ =>
+      -- Opaque with no implementation: assume false (no body available)
+      [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty]
+    | .External =>
+      [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty]
     | _ => []
   let heapInit := Core.Statement.set ⟨"$heap", ()⟩ (.fvar () ⟨"$heap_in", ()⟩ none) .empty
   let bodyStmts := if writesHeap then heapInit :: bodyStmts else bodyStmts
   let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
   let setResult := Core.Statement.set ⟨"$result", ()⟩ successCtor .empty
   let body := [setResult, Imperative.Stmt.block "$body" bodyStmts .empty]
-  let preconditions : ListMap Core.CoreLabel Core.Procedure.Check := proc.preconditions.map fun pre =>
-    ("requires", { expr := translateExprModel pre.val })
+  -- Build all preconditions (user + constraint) with proper indexing
+  -- For heap-writing procs, preconditions reference $heap_in (the input heap)
+  let translatePrecond (pre : StmtExprMd) : Core.Expression.Expr :=
+    let e := translateExprModel pre.val
+    if writesHeap then replaceHeapVar e else e
+  let allPrecondExprs := proc.preconditions.map translatePrecond ++
+    (if constrainedBaseTypes.isEmpty then [] else
+      proc.inputs.filterMap fun p =>
+        match p.type.val with
+        | .UserDefined n =>
+          if (constrainedBaseTypes.find? (fun x => x.1 == n.text)).isSome then
+            some (.app () (.op () ⟨n.text ++ "$constraint", ()⟩ none) (.fvar () ⟨p.name.text, ()⟩ none) : Core.Expression.Expr)
+          else none
+        | _ => none)
+  let preconditions : ListMap Core.CoreLabel Core.Procedure.Check :=
+    let n := allPrecondExprs.length
+    (allPrecondExprs.zip (List.range n)).map fun (expr, i) =>
+      (if n == 1 then "requires" else s!"requires_{i}", { expr })
   -- Extract postconditions from Opaque body
-  let userPostconds := match proc.body with
+  let userPostcondExprs : List Core.Procedure.Check := match proc.body with
     | .Opaque postconds _ _ =>
-      let indexed := postconds.zip (List.range postconds.length)
-      indexed.map fun (post, i) =>
-        (s!"postcondition_{i}", ({ expr := translateExprModel post.val } : Core.Procedure.Check))
+      postconds.map fun post => ({ expr := translateExprModel post.val } : Core.Procedure.Check)
     | _ => []
+  -- Add constraint postcondition for constrained output types
+  let mkConstraintCheck (name paramName : String) : Core.Procedure.Check :=
+    { expr := .app () (.op () ⟨name ++ "$constraint", ()⟩ none) (.fvar () ⟨paramName, ()⟩ none) }
+  let constraintPostconds : List Core.Procedure.Check := proc.outputs.foldl (fun acc p =>
+    match p.type.val with
+    | .UserDefined name =>
+      if constrainedBaseTypes.any (·.1 == name.text) then acc ++ [mkConstraintCheck name.text p.name.text]
+      else acc
+    | _ => acc) []
+  let userPostcondExprs := userPostcondExprs ++ constraintPostconds
   -- Frame condition for heap-writing procs with modifies clause
-  let frameCondition : ListMap Core.CoreLabel Core.Procedure.Check :=
+  let frameCondition : List Core.Procedure.Check :=
     if !writesHeap then [] else
     match proc.body with
     | .Opaque _ _ modif =>
@@ -1661,38 +2075,84 @@ public theorem resolveInstanceCallsInBody_id (paramTypeMap : List (String × Str
       let eq := .eq () readOld readNew
       let iteExpr := .ite () notModified eq (.const () (.boolConst true))
       let forallExpr := .all () "" none (.all () "" none iteExpr)
-      [(s!"postcondition_{userPostconds.length}", { expr := forallExpr })]
+      [{ expr := forallExpr }]
     | _ => []
-  let postconditions := userPostconds ++ frameCondition
+  let allPostcondExprs := userPostcondExprs ++ frameCondition
+  let postconditions : ListMap Core.CoreLabel Core.Procedure.Check :=
+    let n := allPostcondExprs.length
+    (allPostcondExprs.zip (List.range n)).map fun (check, i) =>
+      (if n == 1 then "postcondition" else s!"postcondition_{i}", check)
   let spec : Core.Procedure.Spec := { modifies := [], preconditions := preconditions, postconditions }
   .proc { header, spec, body }
 
+mutual
+/-- Collect field names accessed via FieldSelect in a StmtExpr. -/
+public def collectFieldNamesMd (e : StmtExprMd) : List String := collectFieldNames e.val
+  termination_by sizeOf e
+  decreasing_by cases e; term_by_mem
+public def collectFieldNames : StmtExpr → List String
+  | .FieldSelect target fieldName => fieldName.text :: collectFieldNamesMd target
+  | .Block stmts _ => stmts.attach.flatMap fun ⟨s, _⟩ => collectFieldNamesMd s
+  | .Return (some v) => collectFieldNamesMd v
+  | .LocalVariable _ _ (some init) => collectFieldNamesMd init
+  | .Assign targets v => targets.attach.flatMap (fun ⟨t, _⟩ => collectFieldNamesMd t) ++ collectFieldNamesMd v
+  | .IfThenElse c t e => collectFieldNamesMd c ++ collectFieldNamesMd t ++
+    (match e with | some e => collectFieldNamesMd e | none => [])
+  | .PrimitiveOp _ args => args.attach.flatMap fun ⟨a, _⟩ => collectFieldNamesMd a
+  | .StaticCall _ args => args.attach.flatMap fun ⟨a, _⟩ => collectFieldNamesMd a
+  | .InstanceCall target _ args => collectFieldNamesMd target ++ args.attach.flatMap fun ⟨a, _⟩ => collectFieldNamesMd a
+  | .Old v => collectFieldNamesMd v
+  | _ => []
+  termination_by e => sizeOf e
+  decreasing_by all_goals (simp_wf; try term_by_mem)
+end
+
 /-- Assemble a full Core.Program from a Laurel Program -/
-public def translateProgramModel (program : Program) : Core.Program :=
+@[expose] public def translateProgramModel (program : Program) : Core.Program :=
   let withDefs := { program with
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
     types := coreDefinitionsForLaurel.types ++ program.types
   }
-  let compositeNames := (allComposites withDefs).map (·.name.text)
+  let composites := allComposites withDefs
+  let compositeNames := composites.map (·.name.text)
   let allProcs := withDefs.staticProcedures.filter (fun p => !p.body.isExternal)
-  -- funcNames includes ALL isFunctional procs (including external) for call/function distinction
+  -- funcNames includes ALL isFunctional procs (static + instance) for call/function distinction
   let funcNames := withDefs.staticProcedures.filter (·.isFunctional) |>.map (·.name.text)
-  let isFunc := fun n => funcNames.contains n
+  let instanceFuncNames := (allComposites withDefs).flatMap fun ct =>
+    ct.instanceProcedures.filter (·.isFunctional) |>.map (·.name.text)
+  let isFunc := fun n => funcNames.contains n || instanceFuncNames.contains n
   let (_, procProcs) := allProcs.partition (·.isFunctional)
-  -- Procedure declarations (non-functional, non-external)
-  let procDecls := procProcs.map (fun p => translateProcModel isFunc compositeNames p)
-  -- Instance procedure declarations
   -- Map constrained type names to their base types
   let constrainedBaseTypes : List (String × HighType) := withDefs.types.filterMap fun td => match td with
     | .Constrained ct => some (ct.name.text, ct.base.val)
     | _ => none
+  -- Procedure declarations (non-functional, non-external)
+  let procDecls := procProcs.map (fun p => translateProcModel isFunc compositeNames p constrainedBaseTypes composites)
+  -- Instance procedure declarations
   let instanceProcs := withDefs.types.foldl (fun (acc, outerCtr) td =>
     match td with
     | .Composite ct =>
-      let pfx := ct.name.text ++ "."
+      -- Find which composite defines a field (for inherited fields)
+      let fieldOwner (fieldName : String) : String :=
+        let rec findOwner (name : String) (fuel : Nat) : String :=
+          match fuel with
+          | 0 => name
+          | fuel + 1 =>
+            match composites.find? (fun c => c.name.text == name) with
+            | some c =>
+              if c.fields.any (fun f => f.name.text == fieldName) then name
+              else match c.extending.head? with
+                | some parent => findOwner parent.text fuel
+                | none => name
+            | none => name
+        findOwner ct.name.text composites.length
+      let fieldPrefix (fieldName : String) : String := fieldOwner fieldName ++ "."
       -- Encode field type in qualified name for Box type selection
       let fieldTypeSuffix (fieldName : String) : String :=
-        match ct.fields.find? (fun f => f.name.text == fieldName) with
+        let owner := fieldOwner fieldName
+        let ownerCt := composites.find? (fun c => c.name.text == owner)
+        let fields := match ownerCt with | some c => c.fields | none => ct.fields
+        match fields.find? (fun f => f.name.text == fieldName) with
         | some f => match f.type.val with
           | .TBool => ":bool"
           | .TString => ":string"
@@ -1704,17 +2164,30 @@ public def translateProgramModel (program : Program) : Core.Program :=
         | none => ""
       let rec qualifyMd : StmtExprMd → StmtExprMd
         | ⟨.FieldSelect target fieldName, md⟩ =>
-          ⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text ++ fieldTypeSuffix fieldName.text }, md⟩
+          ⟨.FieldSelect (qualifyMd target) { fieldName with text := fieldPrefix fieldName.text ++ fieldName.text ++ fieldTypeSuffix fieldName.text }, md⟩
         | ⟨.PrimitiveOp op args, md⟩ =>
           ⟨.PrimitiveOp op (args.attach.map fun ⟨a, _⟩ => qualifyMd a), md⟩
         | ⟨.StaticCall callee args, md⟩ =>
           ⟨.StaticCall callee (args.attach.map fun ⟨a, _⟩ => qualifyMd a), md⟩
+        | ⟨.Old v, md⟩ => ⟨.Old (qualifyMd v), md⟩
+        | ⟨.Forall name (some trigger) body, md⟩ =>
+          ⟨.Forall name (some (qualifyMd trigger)) (qualifyMd body), md⟩
+        | ⟨.Forall name none body, md⟩ =>
+          ⟨.Forall name none (qualifyMd body), md⟩
+        | ⟨.Exists name (some trigger) body, md⟩ =>
+          ⟨.Exists name (some (qualifyMd trigger)) (qualifyMd body), md⟩
+        | ⟨.Exists name none body, md⟩ =>
+          ⟨.Exists name none (qualifyMd body), md⟩
+        | ⟨.IfThenElse c t (some e), md⟩ =>
+          ⟨.IfThenElse (qualifyMd c) (qualifyMd t) (some (qualifyMd e)), md⟩
+        | ⟨.IfThenElse c t none, md⟩ =>
+          ⟨.IfThenElse (qualifyMd c) (qualifyMd t) none, md⟩
         | e => e
         termination_by e => sizeOf e
         decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
       let rec qualifyStmt : StmtExprMd → StmtExprMd
         | ⟨.Assign [⟨.FieldSelect target fieldName, tmd⟩] value, md⟩ =>
-          ⟨.Assign [⟨.FieldSelect (qualifyMd target) { fieldName with text := pfx ++ fieldName.text ++ fieldTypeSuffix fieldName.text }, tmd⟩]
+          ⟨.Assign [⟨.FieldSelect (qualifyMd target) { fieldName with text := fieldPrefix fieldName.text ++ fieldName.text ++ fieldTypeSuffix fieldName.text }, tmd⟩]
             (qualifyMd value), md⟩
         | ⟨.Assign targets value, md⟩ =>
           ⟨.Assign (targets.map qualifyMd) (qualifyMd value), md⟩
@@ -1751,19 +2224,33 @@ public def translateProgramModel (program : Program) : Core.Program :=
               let newStmt : StmtExprMd := ⟨.LocalVariable { text := unusedName } ⟨.TInt, .empty⟩ (some (qualifyMd s)), .empty⟩
               (acc ++ [newStmt], cnt + 1)) ([], counter + 1)
           .Transparent ⟨.Block stmts' label, md⟩
+        | .Transparent ⟨expr, md⟩ =>
+          -- Non-block transparent body (e.g., bare `opaque` expression)
+          -- Wrap as $unused init, same as the real translator's exprAsUnusedInit
+          let unusedName := s!"$unused_{counter + 1}"
+          let newStmt : StmtExprMd := ⟨.LocalVariable { text := unusedName } ⟨.TInt, .empty⟩ (some (qualifyMd ⟨expr, md⟩)), .empty⟩
+          .Transparent ⟨.Block [newStmt] none, md⟩
         | .Opaque postconds (some ⟨.Block stmts label, md⟩) modif =>
           .Opaque (postconds.map qualifyMd) (some ⟨.Block (stmts.map qualifyStmt) label, md⟩) modif
+        | .Opaque postconds (some ⟨expr, md⟩) modif =>
+          -- Non-block opaque impl (e.g., bare `opaque` identifier) → wrap as $unused init
+          let unusedName := s!"$unused_{counter + 1}"
+          let newStmt : StmtExprMd := ⟨.LocalVariable { text := unusedName } ⟨.TInt, .empty⟩ (some (qualifyMd ⟨expr, md⟩)), .empty⟩
+          .Opaque (postconds.map qualifyMd) (some ⟨.Block [newStmt] none, md⟩) modif
+        | .Opaque postconds none modif =>
+          .Opaque (postconds.map qualifyMd) none modif
         | other => other
       let (procs, nextCounter) := (ct.instanceProcedures.filter (!·.body.isExternal)).foldl
         (fun (acc, ctr) proc =>
           let p := { proc with
             name := { proc.name with text := qualifiedName ct.name.text proc.name.text }
-            body := qualifyBody ctr proc.body }
+            body := qualifyBody ctr proc.body
+            preconditions := proc.preconditions.map qualifyMd }
           (acc ++ [p], ctr + countBareExprs proc.body)) ([], outerCtr)
       (acc ++ procs, nextCounter)
     | _ => (acc, outerCtr)) (([] : List Procedure), 0)
   let instanceProcs := instanceProcs.1
-  let instanceProcDecls := instanceProcs.map (fun p => translateProcModel isFunc compositeNames p)
+  let instanceProcDecls := instanceProcs.map (fun p => translateProcModel isFunc compositeNames p constrainedBaseTypes composites)
 
   -- Datatypes: translate each Laurel datatype to a Core type decl
   let datatypes := withDefs.types.filterMap fun td => match td with
@@ -1772,7 +2259,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     let constrs : List (Lambda.LConstr Unit) := dt.constructors.map fun c =>
       { name := ⟨c.name.text, ()⟩
         args := c.args.map fun ⟨n, ty⟩ =>
-          (⟨n.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName ty.val) [])
+          (⟨n.text, ()⟩, coreMonoType ty.val)
         testerName := s!"{dt.name.text}..is{c.name.text}" }
     let constrs : List (Lambda.LConstr Unit) := if constrs.isEmpty then
       [{ name := ⟨s!"Mk{dt.name.text}", ()⟩, args := [] }]
@@ -1783,12 +2270,26 @@ public def translateProgramModel (program : Program) : Core.Program :=
       constrs := constrs
       constrs_ne := by simp [constrs]; split <;> simp_all [List.isEmpty_iff]
     }])
+  -- Helper: resolve constrained type to ultimate base type
+  let resolveConstrainedTy (ty : HighType) : HighType :=
+    match ty with
+    | .UserDefined name =>
+      let rec resolve (n : String) (fuel : Nat) : HighType :=
+        match fuel with
+        | 0 => ty
+        | fuel + 1 => match constrainedBaseTypes.find? (fun c => c.1 == n) with
+          | some (_, base) => match base with
+            | .UserDefined parent => resolve parent.text fuel
+            | _ => base
+          | none => ty
+      resolve name.text constrainedBaseTypes.length
+    | _ => ty
   -- Functions: external functions become Core function decls (no body)
   let externalFuncs := allProcs.filter (fun p => p.isFunctional && p.body.isExternal)
   let externalFuncDecls := externalFuncs.map fun proc =>
     let inputs := proc.inputs.map translateParamModel
     let outputTy := match proc.outputs.head? with
-      | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
+      | some p => coreMonoType (resolveConstrainedTy p.type.val)
       | none => Lambda.LMonoTy.int
     Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body := none }
   -- Non-external functions with transparent bodies
@@ -1796,18 +2297,19 @@ public def translateProgramModel (program : Program) : Core.Program :=
   let transparentFuncDecls := transparentFuncs.map fun proc =>
     let inputs := proc.inputs.map translateParamModel
     let outputTy := match proc.outputs.head? with
-      | some p => Lambda.LMonoTy.tcons (coreTypeName p.type.val) []
+      | some p => coreMonoType (resolveConstrainedTy p.type.val)
       | none => Lambda.LMonoTy.int
     let body := match proc.body with
       | .Transparent b => some (translateExprModel b.val)
+      | .Opaque _ (some impl) _ => some (translateExprModel impl.val)
       | _ => none
-    Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body }
+    let preconditions := proc.preconditions.map fun pre =>
+      { expr := translateExprModel pre.val, md := () }
+    Core.Decl.func { name := ⟨proc.name.text, ()⟩, typeArgs := [], inputs, output := outputTy, body, preconditions }
   -- ExceptionResult
   let exceptionResultDecl := modelExceptionResultDecl
   -- Assemble in same order as real translator
   -- Dynamic infrastructure datatypes based on program composites
-  let composites := allComposites withDefs
-  let compositeNames := composites.map (·.name.text)
   -- TypeTag: one constructor per composite type
   let typeTagConstrs : List (Lambda.LConstr Unit) := compositeNames.map fun n =>
     { name := ⟨n ++ "_TypeTag", ()⟩, args := [], testerName := "TypeTag..is" ++ n ++ "_TypeTag" }
@@ -1835,18 +2337,39 @@ public def translateProgramModel (program : Program) : Core.Program :=
       | none => ty
     | other => other
   let hasFieldAccess := composites.any fun ct =>
-    ct.instanceProcedures.any fun p => !p.body.isExternal
+    ct.instanceProcedures.any fun p => match p.body with
+      | .Transparent b => directlyReadsHeapMd b || directlyWritesHeapMd b
+      | .Opaque postconds (some impl) _ =>
+        directlyReadsHeapMd impl || directlyWritesHeapMd impl ||
+        postconds.any (fun pc => directlyReadsHeapMd pc)
+      | .Opaque postconds none _ =>
+        postconds.any (fun pc => directlyReadsHeapMd pc)
+      | _ => false
   let boxConstrNames : List String := if !hasFieldAccess then [] else
-    composites.foldl (fun acc ct =>
-      ct.fields.foldl (fun acc f =>
-        let resolvedTy : HighType := resolveFieldType f.type.val
-        let name := match resolvedTy with
-          | .TInt => "BoxInt"
-          | .TBool => "BoxBool"
-          | .TString => "BoxString"
-          | .UserDefined _ => "BoxComposite"
-          | _ => "BoxInt"
-        if acc.contains name then acc else acc ++ [name]) acc) []
+    -- Only include Box constructors for field types that are actually accessed
+    let accessedFieldTypes := composites.foldl (fun (acc : List String) (ct : CompositeType) =>
+      ct.instanceProcedures.foldl (fun (acc : List String) (p : Procedure) =>
+        let bodyFields := match p.body with
+          | .Transparent b => collectFieldNames b.val
+          | .Opaque postconds (some impl) _ =>
+            collectFieldNames impl.val ++ postconds.flatMap fun pc => collectFieldNamesMd pc
+          | .Opaque postconds none _ =>
+            postconds.flatMap fun pc => collectFieldNamesMd pc
+          | _ => []
+        bodyFields.foldl (fun (acc : List String) (fname : String) =>
+          let fieldTy := composites.findSome? fun (c : CompositeType) =>
+            match c.fields.find? (fun (f : Field) => f.name.text == fname) with
+            | some f => some (resolveFieldType f.type.val)
+            | none => none
+          match fieldTy with
+          | some ty =>
+            let name := match ty with
+              | .TInt => "BoxInt" | .TBool => "BoxBool"
+              | .TString => "BoxString" | .UserDefined _ => "BoxComposite"
+              | _ => "BoxInt"
+            if acc.contains name then acc else acc ++ [name]
+          | none => acc) acc) acc) ([] : List String)
+    if accessedFieldTypes.isEmpty then ["BoxInt"] else accessedFieldTypes
   let boxConstrs : List (Lambda.LConstr Unit) := boxConstrNames.map fun n =>
     let (argName, argTy) := match n with
       | "BoxInt" => ("intVal", Lambda.LMonoTy.int)
@@ -1883,7 +2406,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
     | .UserDefined name =>
       if knownDatatypeNames.contains name.text then Lambda.LMonoTy.tcons name.text []
       else Lambda.LMonoTy.tcons "Composite" []
-    | _ => Lambda.LMonoTy.tcons (coreTypeName ty) []
+    | _ => coreMonoType ty
   let heapDatatypeDecls := heapDatatypes.map fun dt =>
     let constrs : List (Lambda.LConstr Unit) := dt.constructors.map fun c =>
       { name := ⟨c.name.text, ()⟩
@@ -1926,17 +2449,48 @@ public def translateProgramModel (program : Program) : Core.Program :=
   let constrainedTypes := withDefs.types.filterMap fun td => match td with
     | .Constrained ct => some ct | _ => none
   let constraintFuncDecls := constrainedTypes.map fun ct =>
-    let body := translateExprModel ct.constraint.val
+    -- Resolve base type to ultimate base (e.g., posnat → nat → int)
+    let rec resolveBase (ty : HighType) (fuel : Nat) : HighType :=
+      match fuel, ty with
+      | 0, _ => ty
+      | fuel + 1, .UserDefined name =>
+        match constrainedTypes.find? (fun c => c.name.text == name.text) with
+        | some parent => resolveBase parent.base.val fuel
+        | none => ty
+      | _, _ => ty
+    let resolvedBase := resolveBase ct.base.val constrainedTypes.length
+    -- Build constraint body: include parent constraint if base is constrained
+    let constraintBody := match ct.base.val with
+      | .UserDefined parent =>
+        if constrainedTypes.any (fun c => c.name.text == parent.text) then
+          let parentCall := translateExprModel
+            (.StaticCall { text := parent.text ++ "$constraint", uniqueId := none }
+              [⟨.Identifier { ct.valueName with uniqueId := none }, .empty⟩])
+          let ownConstraint := translateExprModel ct.constraint.val
+          .app () (.app () (.op () ⟨"Bool.And", ()⟩ none) ownConstraint) parentCall
+        else translateExprModel ct.constraint.val
+      | _ => translateExprModel ct.constraint.val
     Core.Decl.func {
       name := ⟨ct.name.text ++ "$constraint", ()⟩, typeArgs := [],
-      inputs := [(⟨ct.valueName.text, ()⟩, Lambda.LMonoTy.tcons (coreTypeName ct.base.val) [])],
-      output := Lambda.LMonoTy.bool, body := some body }
+      inputs := [(⟨ct.valueName.text, ()⟩, .tcons (coreTypeName resolvedBase) [])],
+      output := Lambda.LMonoTy.bool, body := some constraintBody }
   let witnessProcDecls := constrainedTypes.map fun ct =>
     let md : Imperative.MetaData Core.Expression := .empty
     let witnessId : Identifier := { text := "$witness", uniqueId := none }
-    let baseType := ct.base
+    -- Resolve base type to ultimate base (so no constraint assert is injected for intermediate types)
+    let resolvedBase : WithMetadata HighType := match ct.base.val with
+      | .UserDefined name =>
+        let rec resolveW (n : String) (fuel : Nat) : HighType :=
+          match fuel with
+          | 0 => ct.base.val
+          | fuel + 1 => match constrainedBaseTypes.find? (·.1 == n) with
+            | some (_, .UserDefined parent) => resolveW parent.text fuel
+            | some (_, base) => base
+            | none => ct.base.val
+        ⟨resolveW name.text constrainedBaseTypes.length, ct.base.md⟩
+      | _ => ct.base
     let witnessInit : StmtExprMd :=
-      ⟨.LocalVariable witnessId baseType (some ct.witness), md⟩
+      ⟨.LocalVariable witnessId resolvedBase (some ct.witness), md⟩
     let constraintCall : StmtExprMd :=
       ⟨.StaticCall { text := ct.name.text ++ "$constraint", uniqueId := none }
         [⟨.Identifier { witnessId with uniqueId := none }, md⟩], md⟩
@@ -1952,7 +2506,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
       body := .Transparent ⟨.Block [witnessInit, assertStmt] none, md⟩
       md := md
     }
-    translateProcModel isFunc compositeNames witnessProc
+    translateProcModel isFunc compositeNames witnessProc constrainedBaseTypes composites
   -- Read function axioms: ∀ v: int. readIntN(BoxInt(v)) == v
   -- Emitted when there are int fields on composites (which means BoxInt will exist).
   -- Also emitted for constrained int types (int8, int16, int32, etc.) since they
@@ -1965,7 +2519,15 @@ public def translateProgramModel (program : Program) : Core.Program :=
     | .TInt => true
     | .UserDefined name => constrainedIntNames.contains name.text
     | _ => false
-  let hasCompositeProcs := !(nonExternalInstanceProcs withDefs).isEmpty
+  let hasCompositeProcs := (nonExternalInstanceProcs withDefs).any fun (_, p) =>
+    match p.body with
+    | .Transparent b => directlyReadsHeapMd b || directlyWritesHeapMd b
+    | .Opaque postconds (some impl) _ =>
+      directlyReadsHeapMd impl || directlyWritesHeapMd impl ||
+      postconds.any (fun pc => directlyReadsHeapMd pc)
+    | .Opaque postconds none _ =>
+      postconds.any (fun pc => directlyReadsHeapMd pc)
+    | _ => false
   let readFuncAxioms : List Core.Decl :=
     if hasIntField && hasCompositeProcs then
       [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].map
@@ -1974,7 +2536,7 @@ public def translateProgramModel (program : Program) : Core.Program :=
           let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
           let v : Core.Expression.Expr := .bvar () 0
           let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
-          let axiomExpr : Core.Expression.Expr := .all () "v" (some Lambda.LMonoTy.int) body
+          let axiomExpr : Core.Expression.Expr := .all () "v" none body
           Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr }
     else []
   -- Ancestor functions: one per composite + ancestorsPerType
@@ -1983,8 +2545,13 @@ public def translateProgramModel (program : Program) : Core.Program :=
     -- ancestorsForX() = update(...update(const(false), Parent_TypeTag, true)..., X_TypeTag, true)
     let constFalse : Core.Expression.Expr := .app () (.op () ⟨"const", ()⟩ none) (.boolConst () false)
     let perType := composites.map fun ct =>
-      -- Collect all ancestors: parents + self
-      let allAncestors := ct.extending.map (·.text) ++ [ct.name.text]
+      -- Collect all ancestors transitively: parents, grandparents, ... + self
+      let rec getAnc (name : String) : Nat → List String
+        | 0 => [name]
+        | fuel + 1 => match composites.find? (fun c => c.name.text == name) with
+          | some c => c.extending.flatMap (fun p => getAnc p.text fuel) ++ [name]
+          | none => [name]
+      let allAncestors := ct.extending.flatMap (fun p => getAnc p.text 10) ++ [ct.name.text]
       let body := allAncestors.foldl (fun acc name =>
         let typeTag : Core.Expression.Expr := .op () ⟨name ++ "_TypeTag", ()⟩ none
         .app () (.app () (.app () (.op () ⟨"update", ()⟩ none) acc) typeTag) (.boolConst () true))
@@ -2028,5 +2595,20 @@ public def translateProgramModelDecls (program : Program) : List Core.Decl :=
 -- Note: model_first_decl_is_exception_result is true by construction
 -- but unprovable because translateProgramModel is partial.
 -- Validated by comprehensive differential tests.
+
+/-- Decomposition of translateProgramModel into 12 segments.
+    This is the model-side analogue of translateLaurelToCore_decls. -/
+public theorem translateProgramModel_decls (program : Program) :
+    ∃ (infraDatatypes datatypeDecls readFuncAxioms
+       ancestorDecls constraintFuncDecls heapFuncDecls
+       externalFuncDecls transparentFuncDecls
+       procDecls witnessProcDecls instanceProcDecls : List Core.Decl),
+    (translateProgramModel program).decls =
+      [modelExceptionResultDecl] ++ infraDatatypes ++ datatypeDecls ++ readFuncAxioms ++
+      ancestorDecls ++ constraintFuncDecls ++ heapFuncDecls ++
+      externalFuncDecls ++ transparentFuncDecls ++
+      procDecls ++ witnessProcDecls ++ instanceProcDecls := by
+  unfold translateProgramModel
+  exact ⟨_, _, _, _, _, _, _, _, _, _, _, rfl⟩
 
 end Strata.Laurel

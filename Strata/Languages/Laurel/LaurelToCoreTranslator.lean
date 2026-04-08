@@ -110,7 +110,7 @@ def emitDiagnostic (d : DiagnosticModel) : TranslateM Unit :=
   modify fun s => { s with diagnostics := s.diagnostics ++ [d] }
 
 /-- Run a `TranslateM` action, returning either a hard error or the result and final state -/
-def runTranslateM (s : TranslateState) (m : TranslateM α) : (Option α × TranslateState) :=
+@[expose] def runTranslateM (s : TranslateState) (m : TranslateM α) : (Option α × TranslateState) :=
   m s
 
 def returnNone: TranslateM α :=
@@ -907,21 +907,15 @@ def translateTypes (program : Program) (model : SemanticModel) : TranslateM (Lis
   let groups := groupDatatypes laurelDatatypes ldatatypes
   return groups.map fun group => Core.Decl.type (.data group)
 
-/-- The ExceptionResult datatype declaration, shared by real translator and model. -/
-def exceptionResultDecl : Core.Decl :=
-  let exceptionResultDt : Lambda.LDatatype Unit := {
-    name := "ExceptionResult"
-    typeArgs := []
-    constrs := [
-      { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
-      { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
-    ]
-    constrs_ne := by decide
-  }
-  Core.Decl.type (.data [exceptionResultDt]) .empty
+/-- The ExceptionResult datatype declaration, shared with the model. -/
+@[expose] def exceptionResultDecl : Core.Decl := modelExceptionResultDecl
+
+/-- The real and model ExceptionResult declarations are the same. -/
+public theorem exceptionResultDecl_eq_model :
+    exceptionResultDecl = modelExceptionResultDecl := rfl
 
 /-- Generate read function axioms based on Box constructors in the program. -/
-def mkReadFuncAxioms (program : Program) : List Core.Decl :=
+@[expose] def mkReadFuncAxioms (program : Program) : List Core.Decl :=
   let boxConstrs := program.types.foldl (fun acc td => match td with
     | .Datatype dt => if dt.name.text == "Box" then
         dt.constructors.map (·.name.text)
@@ -947,7 +941,7 @@ def collectInstanceProcs (program : Program) : List (String × Procedure) :=
     | _ => acc) ([] : List (String × Procedure))
   instanceProcs.filter (fun (_, p) => !p.body.isExternal)
 
-def translateLaurelToCore (program : Program): TranslateM Core.Program := do
+@[expose] def translateLaurelToCore (program : Program): TranslateM Core.Program := do
   let model := (← get).model
 
   let nonExternal := program.staticProcedures.filter (fun p => !p.body.isExternal)

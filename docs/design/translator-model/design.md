@@ -1,156 +1,141 @@
 # Translator Functional Model: Design
 
 **Date:** 2026-03-31
-**Status:** Design
+**Updated:** 2026-04-08
+**Status:** Testing Complete, Proof In Progress (Category 3 proven)
 
 ## Overview
 
-A pure functional model of the `translate` function that serves
-as the definition of correct Laurel→Core translation. The model
-is executable (differential testing) and provable (Lean theorems).
-
-## Architecture
+A pure functional model of the `translate` function that serves as the
+definition of correct Laurel→Core translation. The model is executable
+(differential testing) and provable (Lean theorems).
 
 ```
-Laurel Program ──→ translateModel ──→ Core Program
+Laurel Program ──→ translateProgramModel ──→ Core Program
                         │
-                   (pure function,
-                    no state monad,
-                    no error handling)
+                   (pure function, no state monad, no error handling)
 
 Laurel Program ──→ translate ──→ Core Program
                         │
-                   (imperative,
-                    state monad,
-                    10+ passes)
+                   (imperative, state monad, 10+ passes)
 ```
 
-Both take the same input and should produce the same output.
-When they disagree, care must be taken.
+Both take the same input and should produce the same output (after
+`stripMetaData ∘ eraseTypes` normalization). When they disagree, we
+investigate which is correct and fix the other.
 
-## Model Structure
+## Key Files
 
-The model is organized by the Core declarations it produces.
-For a given Laurel program, the Core program contains:
+| File | Purpose |
+|------|---------|
+| `TranslatorModel.lean` | Pure model: `translateProgramModel`, `translateProcModel`, `translateStmtModel`, `translateExprModel` |
+| `TranslatorEquivalence.lean` | Proof infrastructure: lemmas, decomposition, category proofs |
+| `TranslatorModelProof.lean` | Computational proofs |
+| `LaurelToCoreTranslator.lean` | Real translator + main theorem statement |
+| `TranslatorModelTest.lean` | 118 differential tests |
 
-### 1. Datatype declarations
+## Model Architecture
 
-Generated from the Laurel program's composites and field types:
+The model translates directly from Laurel AST to Core AST without
+intermediate passes. The real translator runs ~10 passes (resolution,
+heap parameterization, type hierarchy transform, etc.) then calls
+`translateLaurelToCore`. The model captures the end-to-end effect.
 
-- `ExceptionResult` — always present (Success | Failure)
-- `TypeTag` — one constructor per composite type
-- `Field` — one constructor per field across all composites
-- `Composite` — always `MkComposite(ref: int, typeTag: TypeTag)`
-- `Box` — one constructor per distinct field base type
-- `Heap` — always `MkHeap(data: Map Composite (Map Field Box), nextReference: int)`
+### Expression Translation (`translateExprModel`)
 
-```lean
-def modelDatatypes (program : Program) : List Core.Decl := ...
-```
+Maps Laurel `StmtExpr` to Core `Expression.Expr`. Handles:
+- Literals (int, bool, string, decimal)
+- Identifiers, field selects (with Box destructor wrapping)
+- All primitive operators (arithmetic, comparison, boolean, implies, short-circuit)
+- Static and instance function calls
+- Conditional expressions, quantifiers (forall/exists), old()
+- String concatenation, reference equality
 
-### 2. Function declarations
+### Statement Translation (`translateStmtModel`)
 
-- `readField`, `updateField`, `increment` — heap operations
-- `ancestorsForT` — one per composite type T
-- `ancestorsPerType` — maps TypeTag to ancestor map
-- `int8$constraint`, ..., `nat32$constraint` — constrained types
-- Read function axioms (`readInt32_eq`, etc.)
-- Instance functions (isFunctional instance procedures)
-- Static functions (isFunctional static procedures)
+Maps Laurel `StmtExpr` to Core `Statements`. Handles:
+- Return (with/without value, from static/instance call)
+- Local variable (with/without init, from static/instance call)
+- Assignment (to identifier, to field, from static/instance call)
+- Control flow (if/else, while with invariants, labeled blocks)
+- Procedure calls (static, instance, with exception propagation)
+- Assert, assume
+- Throw (→ `$result := Failure; exit <target>`)
+- TryCatch (→ labeled blocks + catch dispatch + finally)
+- Exit (→ `exit <label>`)
 
-```lean
-def modelFunctions (program : Program) : List Core.Decl := ...
-```
+### Procedure Translation (`translateProcModel`)
 
-### 3. Procedure declarations
+Assembles a full Core procedure declaration from a Laurel procedure:
+- Header: inputs (with heap params), outputs (with heap/result)
+- Spec: preconditions (with constraint preconditions), postconditions (with frame conditions)
+- Body: `$result := Success; $body: { ... }`
 
-- Static procedures (non-functional)
-- Instance procedures (non-functional, qualified names)
-- Constrained type witness procedures
+Key concerns:
+- Heap detection: reads/writes heap based on field access, instance calls, opaque modifies
+- Instance call qualification: `qualifyMd` rewrites field names and call targets
+- Opaque bodies: `$unused` init wrapping, postcondition qualification
+- Precondition heap variable: `$heap_in` for heap-writing procs
 
-```lean
-def modelProcedures (program : Program) : List Core.Decl := ...
-```
+### Program Translation (`translateProgramModel`)
 
-### 4. Body translation
+Assembles the full Core program in 7 segments:
+1. ExceptionResult datatype
+2. Infrastructure + user datatypes (TypeTag, Field, Box, Composite, Heap, user types)
+3. Read function axioms (readInt32_eq, etc.)
+4. Ancestor declarations (ancestorsForX, ancestorsPerType)
+5. Function declarations (constraint, heap, external, transparent)
+6. Procedure declarations (static procs + witness procs)
+7. Instance procedure declarations
 
-Each Laurel procedure body maps to a Core procedure body.
-This is the most complex part — it handles:
+## Testing Strategy
 
-- Variable declarations → Core `init`
-- Assignments → Core `set` or `call`
-- If/else → Core `if`
-- While loops → Core `while`
-- Static calls → Core `call` (procedures) or expression (functions)
-- Instance calls → Core `call` with qualified name
-- Field access → `readField` / `readInt32` etc.
-- Field write → `updateField`
-- Return → Core `set` output + `exit`
-- Assertions → Core `assert`
-- Exception propagation → Core `if isFailure($result) then exit`
+### Differential Testing
 
-```lean
-def modelBody (ctx : ModelContext) (body : StmtExpr) : Core.Statement := ...
-```
+The primary bug-finding tool. Each test:
+1. Parses a Laurel program
+2. Runs both `translateProgramModel` and `translate {}`
+3. Compares declaration names
+4. Compares structural output after `stripMetaData ∘ eraseTypes`
 
-The `ModelContext` carries:
-- Which procedures are functions vs procedures
-- Which procedures access the heap
-- The composite/field/type structure
+### Coverage Approach
 
-This replaces the `SemanticModel` + `TranslateState` from the
-real code with a pure, computed context.
+Three dimensions of coverage:
 
-## Differential Testing
+1. **Branch coverage:** Every match arm in `translateExprModel`, `translateStmtModel`,
+   `translateProcModel` has at least one test exercising it.
 
-```lean
-#eval do
-  let laurelProgram := parseLaurelFile "test.laurel"
-  let realResult := translate {} laurelProgram
-  let modelResult := translateModel laurelProgram
-  assert (realResult == modelResult)
-```
+2. **Feature interaction coverage:** Bugs cluster at feature boundaries (e.g., instance
+   call + if condition, opaque + postcondition + field access). Tests combine features
+   from different dimensions.
 
-Run on every test file. Catches bugs without proofs.
+3. **Real-world coverage:** The JVerify test suite (~35 programs in
+   `StrataTest/Languages/Laurel/Examples/`) exercises realistic feature combinations.
+   These should all pass the differential test.
 
-## Proof Structure
+### When to Return to Proof
 
-### Phase 1: Properties of the model (tractable)
+Criteria:
+1. Zero structural test failures on hand-crafted tests
+2. Zero structural test failures on JVerify test suite programs
+3. All 9 known model gaps fixed
 
-Prove P1-P7 from decisions.md about `translateModel`. These
-are properties of a pure function — standard Lean theorem
-proving.
+## Proof Strategy
 
-### Phase 2: Equivalence (hard, deferred)
+### Phase 1: Testing (current)
+Find and fix model bugs via differential testing. Build confidence that
+the model is correct before investing in proofs.
 
-Prove `translate L = translateModel L` for well-formed `L`.
-This requires reasoning about the state monad, HashMap lookups,
-and the interaction of 10+ passes. Deferred until Phase 1 is
-complete and the model is stable.
+### Phase 2: Proof
+Prove `translate ≡ translateProgramModel` using the 7-category decomposition.
+Each category is independently provable. The assembly step combines them.
 
-### Phase 3: Semantic preservation (research-level)
+### Key Insight
 
-Prove that if Core verifies a property, the property holds for
-the Laurel program. This connects to the existing P1-P12 proofs
-in Strata's Core. Deferred until Phase 2 is complete.
+The proof and tests serve different purposes:
+- **Tests** find bugs in the model (fast, concrete, catches interactions)
+- **Proof** guarantees correctness for ALL inputs (slow, abstract, complete)
 
-## File Organization
-
-```
-Strata/Languages/Laurel/
-  TranslatorModel.lean          -- the pure functional model
-  TranslatorModelProperties.lean -- P1-P7 theorems
-  TranslatorEquivalence.lean    -- translate = translateModel (Phase 2)
-```
-
-## Implementation Plan
-
-1. Write `modelDatatypes` — generate the correct datatypes
-2. Write `modelFunctions` — generate heap ops, constraints, etc.
-3. Write `modelProcedures` — translate procedure signatures
-4. Write `modelBody` — translate procedure bodies
-5. Assemble into `translateModel`
-6. Differential testing against `translate`
-7. Prove P1 (name consistency)
-8. Prove P2-P7
-9. Prove equivalence (Phase 2)
+Attempting to prove an incorrect model wastes effort. The first week of proof
+work found zero bugs. The first day of differential testing found 11. Testing
+must come first.

@@ -391,7 +391,7 @@ def HighType.isBool : HighType → Bool
   | TBool => true
   | _ => false
 
-def Body.isExternal : Body → Bool
+@[expose] def Body.isExternal : Body → Bool
   | .External => true
   | _ => false
 

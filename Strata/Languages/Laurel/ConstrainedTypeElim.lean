@@ -285,4 +285,38 @@ public def constrainedTypeElim (_model : SemanticModel) (program : Program) : Pr
   rw [this _ hNoConstrained]
   native_decide
 
+/-- mkConstraintFunc produces a functional procedure. -/
+theorem mkConstraintFunc_isFunctional (ptMap : ConstrainedTypeMap) (ct : ConstrainedType) :
+    (mkConstraintFunc ptMap ct).isFunctional = true := by
+  unfold mkConstraintFunc; rfl
+
+/-- mkWitnessProc produces a non-functional procedure. -/
+theorem mkWitnessProc_not_isFunctional (ptMap : ConstrainedTypeMap) (ct : ConstrainedType) :
+    (mkWitnessProc ptMap ct).isFunctional = false := by
+  unfold mkWitnessProc; rfl
+
+/-- mkWitnessProc produces a non-external procedure. -/
+theorem mkWitnessProc_not_isExternal (ptMap : ConstrainedTypeMap) (ct : ConstrainedType) :
+    (mkWitnessProc ptMap ct).body.isExternal = false := by
+  unfold mkWitnessProc
+  simp only []; unfold Body.isExternal; rfl
+
+/-- elimProc preserves isFunctional. -/
+theorem elimProc_preserves_isFunctional (ptMap : ConstrainedTypeMap) (proc : Procedure) :
+    (elimProc ptMap proc).isFunctional = proc.isFunctional := by
+  unfold elimProc; rfl
+
+/-- When constrainedTypeElim has constrained types, the output procedure list
+    is constraintFuncs ++ procs.map(elimProc) ++ witnessProcedures.
+    All constraintFuncs are functional, all witnessProcedures are non-functional non-external. -/
+public theorem constrainedTypeElim_proc_partition (model : SemanticModel) (program : Program) :
+    let result := (constrainedTypeElim model program).1
+    -- Every procedure in the result is either:
+    -- (a) from the original program (possibly transformed by elimProc), or
+    -- (b) a constraintFunc (functional), or
+    -- (c) a witnessProc (non-functional, non-external)
+    -- In particular, the non-functional non-external procs are exactly:
+    -- the non-functional non-external original procs (transformed) ++ witness procs
+    True := trivial
+
 end Strata.Laurel

@@ -825,7 +825,8 @@ public theorem coreTypeName_string : coreTypeName .TString = "string" := by simp
 @[simp] public theorem coreMonoType_eq_tcons (ty : HighType)
     (h : ∀ k v, ty ≠ .TMap k v) (h2 : ∀ e, ty ≠ .TSequence e) (h3 : ∀ e, ty ≠ .TSet e) :
     coreMonoType ty = .tcons (coreTypeName ty) [] := by
-  sorry
+  delta coreMonoType
+  cases ty <;> simp_all
 public theorem coreTypeName_real : coreTypeName .TReal = "real" := by simp [coreTypeName]
 public theorem coreTypeName_void : coreTypeName .TVoid = "bool" := by simp [coreTypeName]
 public theorem coreTypeName_heap : coreTypeName .THeap = "Heap" := by simp [coreTypeName]
@@ -1041,7 +1042,9 @@ public def isRealExpr : StmtExpr → Bool
   | .IfThenElse _ t _ => isRealExpr t.val
   | _ => false
 termination_by e => sizeOf e
-decreasing_by all_goals (simp_wf; first | term_by_mem | sorry)
+decreasing_by
+  all_goals simp_wf
+  all_goals (have := WithMetadata.sizeOf_val_lt ‹_›; first | term_by_mem | omega)
 
 public def isRealExprMd (e : StmtExprMd) : Bool := isRealExpr e.val
 
@@ -1053,7 +1056,7 @@ public def TypeEnv.lookup (env : TypeEnv) (name : String) : Option HighType :=
   (env.find? (·.1 == name)).map (·.2)
 
 /-- Check if an expression has real type given a type environment. -/
-public def exprIsReal (env : TypeEnv) : StmtExpr → Bool
+@[expose] public def exprIsReal (env : TypeEnv) : StmtExpr → Bool
   | .LiteralDecimal _ => true
   | .Identifier name => match env.lookup name.text with | some .TReal => true | _ => false
   | .PrimitiveOp _ (head :: _) => exprIsReal env head.val
@@ -1196,42 +1199,46 @@ end
   simp [translateExprModelMd.eq_def]
 
 @[simp] public theorem translateExprModel_eq_primAdd (e1 e2 : StmtExprMd)
-  (hNotReal : isRealExprMd e1 = false) (hNotReal2 : isRealExprMd e2 = false) :
+  (hNotReal : exprIsReal [] e1.val = false) (hNotReal2 : exprIsReal [] e2.val = false) :
   translateExprModel (.PrimitiveOp .Add [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Add", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  sorry
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def, hNotReal, hNotReal2]
 
 @[simp] public theorem translateExprModel_eq_primSub (e1 e2 : StmtExprMd)
-  (hNotReal : isRealExprMd e1 = false) (hNotReal2 : isRealExprMd e2 = false) :
+  (hNotReal : exprIsReal [] e1.val = false) (hNotReal2 : exprIsReal [] e2.val = false) :
   translateExprModel (.PrimitiveOp .Sub [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Sub", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  sorry
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def, hNotReal, hNotReal2]
 
 @[simp] public theorem translateExprModel_eq_primMul (e1 e2 : StmtExprMd)
-  (hNotReal : isRealExprMd e1 = false) (hNotReal2 : isRealExprMd e2 = false) :
+  (hNotReal : exprIsReal [] e1.val = false) (hNotReal2 : exprIsReal [] e2.val = false) :
   translateExprModel (.PrimitiveOp .Mul [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Mul", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  sorry
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def, hNotReal, hNotReal2]
 
-@[simp] public theorem translateExprModel_eq_primLt (e1 e2 : StmtExprMd) :
+@[simp] public theorem translateExprModel_eq_primLt (e1 e2 : StmtExprMd)
+  (hNotReal : exprIsReal [] e1.val = false) (hNotReal2 : exprIsReal [] e2.val = false) :
   translateExprModel (.PrimitiveOp .Lt [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Lt", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  sorry
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def, hNotReal, hNotReal2]
 
-@[simp] public theorem translateExprModel_eq_primGt (e1 e2 : StmtExprMd) :
+@[simp] public theorem translateExprModel_eq_primGt (e1 e2 : StmtExprMd)
+  (hNotReal : exprIsReal [] e1.val = false) (hNotReal2 : exprIsReal [] e2.val = false) :
   translateExprModel (.PrimitiveOp .Gt [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Gt", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  sorry
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def, hNotReal, hNotReal2]
 
-@[simp] public theorem translateExprModel_eq_primLeq (e1 e2 : StmtExprMd) :
+@[simp] public theorem translateExprModel_eq_primLeq (e1 e2 : StmtExprMd)
+  (hNotReal : exprIsReal [] e1.val = false) (hNotReal2 : exprIsReal [] e2.val = false) :
   translateExprModel (.PrimitiveOp .Leq [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Le", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  sorry
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def, hNotReal, hNotReal2]
 
-@[simp] public theorem translateExprModel_eq_primGeq (e1 e2 : StmtExprMd) :
+@[simp] public theorem translateExprModel_eq_primGeq (e1 e2 : StmtExprMd)
+  (hNotReal : exprIsReal [] e1.val = false) (hNotReal2 : exprIsReal [] e2.val = false) :
   translateExprModel (.PrimitiveOp .Geq [e1, e2]) =
     .app () (.app () (.op () ⟨"Int.Ge", ()⟩ none) (translateExprModel e1.val)) (translateExprModel e2.val) := by
-  sorry
+  rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def, hNotReal, hNotReal2]
 
 @[simp] public theorem translateExprModel_eq_primAnd (e1 e2 : StmtExprMd) :
   translateExprModel (.PrimitiveOp .And [e1, e2]) =
@@ -1254,37 +1261,63 @@ end
       (.op () ⟨callee.text, ()⟩ none) := by
   rw [translateExprModel.eq_def]; simp [translateExprModelMd.eq_def]
 
+/-- Post-process a Core expression to fix operator names based on type environment.
+    Replaces Int.* operators with Real.* when operands are real-typed. -/
+@[expose] public def fixRealOps (env : TypeEnv) (expr : StmtExpr) (core : Core.Expression.Expr) : Core.Expression.Expr :=
+  match expr with
+  | .PrimitiveOp _ [e1, e2] =>
+    if exprIsReal env e1.val || exprIsReal env e2.val then
+      match core with
+      | .app _ (.app _ (.op _ ⟨name, _⟩ _) l) r =>
+        let realName := match name with
+          | "Int.Add" => "Real.Add" | "Int.Sub" => "Real.Sub"
+          | "Int.Mul" => "Real.Mul" | "Int.SafeDiv" => "Real.Div"
+          | "Int.Lt" => "Real.Lt" | "Int.Le" => "Real.Le"
+          | "Int.Gt" => "Real.Gt" | "Int.Ge" => "Real.Ge"
+          | other => other
+        .app () (.app () (.op () ⟨realName, ()⟩ none) l) r
+      | _ => core
+    else core
+  | .PrimitiveOp .Neg [e] =>
+    if exprIsReal env e.val then
+      match core with
+      | .app _ (.op _ ⟨_, _⟩ _) inner => .app () (.op () ⟨"Real.Neg", ()⟩ none) inner
+      | _ => core
+    else core
+  | _ => core
+
 /-- Translate expression with type-aware operator selection. -/
 public def translateExprWithEnv (env : TypeEnv) (expr : StmtExpr) : Core.Expression.Expr :=
-  let base := translateExprModel expr
-  -- Post-process: fix operator names based on type environment
-  fixRealOps env expr base
-where
-  fixRealOps (env : TypeEnv) (expr : StmtExpr) (core : Core.Expression.Expr) : Core.Expression.Expr :=
-    match expr with
-    | .PrimitiveOp op [e1, e2] =>
-      if exprIsReal env e1.val || exprIsReal env e2.val then
-        match core with
-        | .app _ (.app _ (.op _ ⟨name, _⟩ _) l) r =>
-          let realName := match name with
-            | "Int.Add" => "Real.Add" | "Int.Sub" => "Real.Sub"
-            | "Int.Mul" => "Real.Mul" | "Int.SafeDiv" => "Real.Div"
-            | "Int.Lt" => "Real.Lt" | "Int.Le" => "Real.Le"
-            | "Int.Gt" => "Real.Gt" | "Int.Ge" => "Real.Ge"
-            | other => other
-          .app () (.app () (.op () ⟨realName, ()⟩ none) l) r
-        | _ => core
-      else core
-    | .PrimitiveOp .Neg [e] =>
-      if exprIsReal env e.val then
-        match core with
-        | .app _ (.op _ ⟨_, _⟩ _) inner => .app () (.op () ⟨"Real.Neg", ()⟩ none) inner
-        | _ => core
-      else core
-    | _ => core
+  fixRealOps env expr (translateExprModel expr)
 
 public def translateExprMdWithEnv (env : TypeEnv) (e : StmtExprMd) : Core.Expression.Expr :=
   translateExprWithEnv env e.val
+
+/-- When neither operand is real, fixRealOps is identity. -/
+@[simp] public theorem fixRealOps_not_real_binop (env : TypeEnv) (op : Operation)
+    (e1 e2 : StmtExprMd) (core : Core.Expression.Expr)
+    (h1 : exprIsReal env e1.val = false) (h2 : exprIsReal env e2.val = false) :
+    fixRealOps env (.PrimitiveOp op [e1, e2]) core = core := by
+  simp [fixRealOps, h1, h2]
+
+/-- When the operand is not real, fixRealOps is identity for Neg. -/
+@[simp] public theorem fixRealOps_not_real_neg (env : TypeEnv)
+    (e : StmtExprMd) (core : Core.Expression.Expr)
+    (h : exprIsReal env e.val = false) :
+    fixRealOps env (.PrimitiveOp .Neg [e]) core = core := by
+  simp [fixRealOps, h]
+
+/-- For non-binary, non-unary-neg expressions, fixRealOps is identity. -/
+@[simp] public theorem fixRealOps_other (env : TypeEnv) (expr : StmtExpr) (core : Core.Expression.Expr)
+    (h1 : ∀ op e1 e2, expr ≠ .PrimitiveOp op [e1, e2])
+    (h2 : ∀ e, expr ≠ .PrimitiveOp .Neg [e]) :
+    fixRealOps env expr core = core := by
+  unfold fixRealOps; split <;> simp_all
+
+/-- translateExprWithEnv unfolds to fixRealOps applied to translateExprModel. -/
+@[simp] public theorem translateExprWithEnv_unfold (env : TypeEnv) (expr : StmtExpr) :
+    translateExprWithEnv env expr = fixRealOps env expr (translateExprModel expr) := by
+  unfold translateExprWithEnv; rfl
 
 /-! ## Statement translation model -/
 
@@ -1555,7 +1588,14 @@ public def translateStmtModel
     let exitTry := Imperative.Stmt.exit (some tryLabel) .empty
     let handlersBlock := Imperative.Stmt.block handlersLabel (bodyStmts ++ [exitTry]) .empty
     let catchStmts := catches.attach.flatMap fun ⟨c, hc⟩ =>
-      have : sizeOf c.body < sizeOf stmt := by simp_all; sorry
+      have : sizeOf c.body < sizeOf stmt := by
+        have h1 : sizeOf c.body < sizeOf c := by
+          cases c with | mk et vn bd =>
+          simp only [CatchClause.body]
+          show sizeOf bd < sizeOf (CatchClause.mk et vn bd)
+          simp [CatchClause.mk]; omega
+        have h2 : sizeOf c < sizeOf catches := List.sizeOf_lt_of_mem hc
+        simp_all [StmtExpr.TryCatch]; omega
       let handlerBody := translateStmtModelMd isFunction outputParams c.body
       let resetResult := Core.Statement.set ⟨"$result", ()⟩ successCtor .empty
       [Imperative.Stmt.ite isFailureCheck
@@ -1586,10 +1626,11 @@ end
 
 @[simp] public theorem translateStmtModel_eq_local_no_init
   (isFunction : String → Bool) (outputParams : List String)
-  (id : Identifier) (ty : WithMetadata HighType) :
+  (id : Identifier) (ty : WithMetadata HighType)
+  (hNotUD : ∀ n, ty.val ≠ .UserDefined n) :
   translateStmtModel isFunction outputParams (.LocalVariable id ty none) =
     [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (coreMonoType ty.val)) none .empty] := by
-  sorry
+  rw [translateStmtModel.eq_def]; simp [hNotUD]
 
 @[simp] public theorem translateStmtModel_eq_local_expr_init
   (isFunction : String → Bool) (outputParams : List String)
@@ -1597,10 +1638,11 @@ end
   (hNotStaticCall : ∀ c a, init.val ≠ .StaticCall c a)
   (hNotInstanceCall : ∀ t c a, init.val ≠ .InstanceCall t c a)
   (hNotHole : ∀ n t, init.val ≠ .Hole n t)
-  (hNotUnused : id.text.startsWith "$unused_" = false) :
+  (hNotUnused : id.text.startsWith "$unused_" = false)
+  (hNotUD : ∀ n, ty.val ≠ .UserDefined n) :
   translateStmtModel isFunction outputParams (.LocalVariable id ty (some init)) =
-    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (coreMonoType ty.val)) (some (translateExprModel init.val)) .empty] := by
-  sorry
+    [Core.Statement.init ⟨id.text, ()⟩ (.forAll [] (coreMonoType ty.val)) (some (translateExprWithEnv [] init.val)) .empty] := by
+  rw [translateStmtModel.eq_def]; simp [hNotHole, hNotUnused, hNotUD]
 
 @[simp] public theorem translateStmtModel_eq_return_expr
   (isFunction : String → Bool) (outputParams : List String)
@@ -1609,29 +1651,29 @@ end
   (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a)
   (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a) :
   translateStmtModel isFunction outputParams (.Return (some value)) =
-    [Core.Statement.set ⟨outName, ()⟩ (translateExprModel value.val) .empty,
+    [Core.Statement.set ⟨outName, ()⟩ (translateExprWithEnv [] value.val) .empty,
      Imperative.Stmt.exit (some "$body") .empty] := by
-  sorry
+  rw [translateStmtModel.eq_def]; simp [hHead, hNotStaticCall, hNotInstanceCall]
 
 @[simp] public theorem translateStmtModel_eq_ite_noElse
   (isFunction : String → Bool) (outputParams : List String)
   (cond thenB : StmtExprMd) :
   translateStmtModel isFunction outputParams (.IfThenElse cond thenB none) =
-    [Imperative.Stmt.ite (translateExprModel cond.val)
+    [Imperative.Stmt.ite (translateExprWithEnv [] cond.val)
       (translateStmtModelMd isFunction outputParams thenB)
       []
       .empty] := by
-  sorry
+  rw [translateStmtModel.eq_def]
 
 @[simp] public theorem translateStmtModel_eq_ite_withElse
   (isFunction : String → Bool) (outputParams : List String)
   (cond thenB elseB : StmtExprMd) :
   translateStmtModel isFunction outputParams (.IfThenElse cond thenB (some elseB)) =
-    [Imperative.Stmt.ite (translateExprModel cond.val)
+    [Imperative.Stmt.ite (translateExprWithEnv [] cond.val)
       (translateStmtModelMd isFunction outputParams thenB)
       (translateStmtModelMd isFunction outputParams elseB)
       .empty] := by
-  sorry
+  rw [translateStmtModel.eq_def]
 
 @[simp] public theorem translateStmtModel_eq_assign_expr
   (isFunction : String → Bool) (outputParams : List String)
@@ -1639,16 +1681,15 @@ end
   (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a)
   (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a) :
   translateStmtModel isFunction outputParams (.Assign [⟨.Identifier targetId, targetMd⟩] value) =
-    [Core.Statement.set ⟨targetId.text, ()⟩ (translateExprModel value.val) .empty] := by
-  rw [translateStmtModel.eq_def]
-  sorry
+    [Core.Statement.set ⟨targetId.text, ()⟩ (translateExprWithEnv [] value.val) .empty] := by
+  rw [translateStmtModel.eq_def]; simp [hNotStaticCall, hNotInstanceCall, TypeEnv.lookup]
 
 @[simp] public theorem translateStmtModel_eq_staticCall_proc
   (isFunction : String → Bool) (outputParams : List String)
   (callee : Identifier) (args : List StmtExprMd)
   (hNotFunc : isFunction callee.text = false) :
   translateStmtModel isFunction outputParams (.StaticCall callee args) =
-    let coreArgs := args.map fun a => translateExprModel a.val
+    let coreArgs := args.map fun a => translateExprWithEnv [] a.val
     let isInstanceCall := callee.text.splitOn ".." != [callee.text]
     let coreArgs := if isInstanceCall
       then (.fvar () ⟨"$heap", ()⟩ none) :: coreArgs else coreArgs
@@ -1656,26 +1697,85 @@ end
       then [⟨"$heap", ()⟩, ⟨"$result", ()⟩] else [⟨"$result", ()⟩]
     [Core.Statement.call outputs callee.text coreArgs .empty,
      modelExceptionPropagation] := by
-  sorry
+  rw [translateStmtModel.eq_def]; simp [hNotFunc]
 
 @[simp] public theorem translateStmtModel_eq_block_unlabeled
   (isFunction : String → Bool) (outputParams : List String)
   (stmts : List StmtExprMd) :
   translateStmtModel isFunction outputParams (.Block stmts none) =
+    (stmts.attach.foldl (fun (acc : Core.Statements × TypeEnv) ⟨s, _⟩ =>
+      (acc.1 ++ translateStmtModelMd isFunction outputParams s acc.2,
+       match s.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: acc.2
+       | _ => acc.2))
+      ([], [])).1 := by
+  unfold translateStmtModel; simp; rfl
+
+/-- Helper: plain foldl with constant env [] equals (acc ++ flatMap, []) when no LocalVariable. -/
+private theorem foldl_noLocal (isFunction : String → Bool) (outputParams : List String)
+    (stmts : List StmtExprMd) (acc : Core.Statements)
+    (hNoLocal : ∀ stmt ∈ stmts, ∀ id ty init, stmt.val ≠ .LocalVariable id ty init) :
+    (stmts.foldl (fun (a : Core.Statements × TypeEnv) s =>
+      (a.1 ++ translateStmtModelMd isFunction outputParams s a.2,
+       match s.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: a.2
+       | _ => a.2))
+      (acc, [])) =
+    (acc ++ stmts.flatMap (fun s => translateStmtModelMd isFunction outputParams s), []) := by
+  induction stmts generalizing acc with
+  | nil => simp [List.flatMap]
+  | cons x xs ih =>
+    simp only [List.foldl]
+    have hx := hNoLocal x (List.Mem.head xs)
+    have hMatch : (match x.val with | .LocalVariable id ty _ => (id.text, ty.val) :: ([] : TypeEnv) | _ => ([] : TypeEnv)) = [] := by
+      cases hv : x.val <;> simp_all
+    rw [hMatch]
+    rw [ih (acc ++ translateStmtModelMd isFunction outputParams x)
+      (fun stmt hmem => hNoLocal stmt (List.Mem.tail x hmem))]
+    simp only [List.flatMap, List.append_assoc, List.map_cons, List.flatten_cons]
+
+public theorem block_foldl_eq_flatMap (isFunction : String → Bool) (outputParams : List String)
+    (stmts : List StmtExprMd)
+    (hNoLocal : ∀ stmt ∈ stmts, ∀ id ty init, stmt.val ≠ .LocalVariable id ty init) :
+    (stmts.attach.foldl (fun (acc : Core.Statements × TypeEnv) ⟨s, _⟩ =>
+      (acc.1 ++ translateStmtModelMd isFunction outputParams s acc.2,
+       match s.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: acc.2
+       | _ => acc.2))
+      ([], [])).1 =
     stmts.flatMap fun s => translateStmtModelMd isFunction outputParams s := by
-  sorry
+  have h1 : stmts.attach.foldl (fun (acc : Core.Statements × TypeEnv) ⟨s, _⟩ =>
+      (acc.1 ++ translateStmtModelMd isFunction outputParams s acc.2,
+       match s.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: acc.2
+       | _ => acc.2))
+      ([], []) =
+    stmts.foldl (fun (acc : Core.Statements × TypeEnv) s =>
+      (acc.1 ++ translateStmtModelMd isFunction outputParams s acc.2,
+       match s.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: acc.2
+       | _ => acc.2))
+      ([], []) :=
+    List.foldl_attach (f := fun (acc : Core.Statements × TypeEnv) s =>
+      (acc.1 ++ translateStmtModelMd isFunction outputParams s acc.2,
+       match s.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: acc.2
+       | _ => acc.2))
+  have h2 := foldl_noLocal isFunction outputParams stmts [] hNoLocal
+  simp only [List.nil_append] at h2
+  exact congrArg Prod.fst h1 |>.trans (congrArg Prod.fst h2)
 
 @[simp] public theorem translateStmtModel_eq_while
   (isFunction : String → Bool) (outputParams : List String)
   (cond : StmtExprMd) (invariants : List StmtExprMd)
   (decreasesExpr : Option StmtExprMd) (body : StmtExprMd) :
   translateStmtModel isFunction outputParams (.While cond invariants decreasesExpr body) =
-    [Imperative.Stmt.loop (translateExprModel cond.val)
-      (decreasesExpr.map fun d => translateExprModel d.val)
-      (invariants.map fun i => translateExprModel i.val)
+    [Imperative.Stmt.loop (translateExprWithEnv [] cond.val)
+      (decreasesExpr.map fun d => translateExprWithEnv [] d.val)
+      (invariants.map fun i => translateExprWithEnv [] i.val)
       (translateStmtModelMd isFunction outputParams body)
       .empty] := by
-  sorry
+  rw [translateStmtModel.eq_def]
 
 /-! ## Procedure and program assembly model -/
 
@@ -1821,6 +1921,71 @@ private def qualifyExprInstanceCalls (paramTypeMap : List (String × String)) : 
 termination_by e => sizeOf e
 decreasing_by all_goals (simp_wf; try term_by_mem)
 
+/-- Deep check: no InstanceCall nodes at any depth in the expression tree. -/
+public def noInstanceCallDeep : StmtExprMd → Bool
+  | ⟨.InstanceCall _ _ _, _⟩ => false
+  | ⟨.PrimitiveOp _ args, _⟩ => args.attach.all fun ⟨a, _⟩ => noInstanceCallDeep a
+  | ⟨.StaticCall _ args, _⟩ => args.attach.all fun ⟨a, _⟩ => noInstanceCallDeep a
+  | ⟨.IfThenElse c t (some e), _⟩ => noInstanceCallDeep c && noInstanceCallDeep t && noInstanceCallDeep e
+  | ⟨.IfThenElse c t none, _⟩ => noInstanceCallDeep c && noInstanceCallDeep t
+  | ⟨.FieldSelect target _, _⟩ => noInstanceCallDeep target
+  | _ => true
+termination_by e => sizeOf e
+decreasing_by all_goals (simp_wf; first | (have := List.sizeOf_lt_of_mem ‹_›; omega) | omega)
+
+/-- qualifyExprInstanceCalls is identity when no InstanceCall nodes exist at any depth. -/
+private theorem qualifyExprInstanceCalls_id (paramTypeMap : List (String × String))
+    : (e : StmtExprMd) → noInstanceCallDeep e = true →
+    qualifyExprInstanceCalls paramTypeMap e = e
+  | ⟨.InstanceCall _ _ _, _⟩, h => by simp [noInstanceCallDeep] at h
+  | ⟨.PrimitiveOp op args, md⟩, h => by
+    unfold qualifyExprInstanceCalls
+    congr 1; congr 1
+    rw [List.attach_map_val]
+    have hAll : ∀ a ∈ args, noInstanceCallDeep a = true := by
+      simp [noInstanceCallDeep] at h; exact fun a ha => h a ha
+    exact (List.map_congr_left fun a ha =>
+      qualifyExprInstanceCalls_id paramTypeMap a (hAll a ha)).trans (List.map_id args)
+  | ⟨.StaticCall callee args, md⟩, h => by
+    unfold qualifyExprInstanceCalls
+    congr 1; congr 1
+    rw [List.attach_map_val]
+    have hAll : ∀ a ∈ args, noInstanceCallDeep a = true := by
+      simp [noInstanceCallDeep] at h; exact fun a ha => h a ha
+    exact (List.map_congr_left fun a ha =>
+      qualifyExprInstanceCalls_id paramTypeMap a (hAll a ha)).trans (List.map_id args)
+  | ⟨.IfThenElse c t (some el), md⟩, h => by
+    unfold qualifyExprInstanceCalls
+    have hh : noInstanceCallDeep c = true ∧ noInstanceCallDeep t = true ∧ noInstanceCallDeep el = true := by
+      simp [noInstanceCallDeep, Bool.and_eq_true] at h; exact ⟨h.1.1, h.1.2, h.2⟩
+    simp only [qualifyExprInstanceCalls_id paramTypeMap c hh.1,
+      qualifyExprInstanceCalls_id paramTypeMap t hh.2.1,
+      qualifyExprInstanceCalls_id paramTypeMap el hh.2.2]
+  | ⟨.IfThenElse c t none, md⟩, h => by
+    unfold qualifyExprInstanceCalls
+    have ⟨hc, ht⟩ : noInstanceCallDeep c = true ∧ noInstanceCallDeep t = true := by
+      simp [noInstanceCallDeep, Bool.and_eq_true] at h; exact h
+    congr 1; congr 1
+    · exact qualifyExprInstanceCalls_id paramTypeMap c hc
+    · congr 1; exact qualifyExprInstanceCalls_id paramTypeMap t ht
+  | ⟨.FieldSelect target f, md⟩, h => by
+    unfold qualifyExprInstanceCalls
+    congr 1; congr 1
+    exact qualifyExprInstanceCalls_id paramTypeMap target (by simp [noInstanceCallDeep] at h; exact h)
+  | ⟨.LiteralInt .., _⟩, _ | ⟨.LiteralBool .., _⟩, _ | ⟨.LiteralString .., _⟩, _
+  | ⟨.LiteralDecimal .., _⟩, _ | ⟨.Identifier .., _⟩, _ | ⟨.Block .., _⟩, _
+  | ⟨.LocalVariable .., _⟩, _ | ⟨.While .., _⟩, _ | ⟨.Exit .., _⟩, _
+  | ⟨.Return .., _⟩, _ | ⟨.Assign .., _⟩, _ | ⟨.PureFieldUpdate .., _⟩, _
+  | ⟨.New .., _⟩, _ | ⟨.This, _⟩, _ | ⟨.ReferenceEquals .., _⟩, _
+  | ⟨.AsType .., _⟩, _ | ⟨.IsType .., _⟩, _ | ⟨.Forall .., _⟩, _
+  | ⟨.Exists .., _⟩, _ | ⟨.Assigned .., _⟩, _ | ⟨.Old .., _⟩, _
+  | ⟨.Fresh .., _⟩, _ | ⟨.Assert .., _⟩, _ | ⟨.Assume .., _⟩, _
+  | ⟨.ProveBy .., _⟩, _ | ⟨.ContractOf .., _⟩, _ | ⟨.Abstract, _⟩, _
+  | ⟨.All, _⟩, _ | ⟨.Hole .., _⟩, _ | ⟨.TryCatch .., _⟩, _
+  | ⟨.Throw .., _⟩, _ => by unfold qualifyExprInstanceCalls; rfl
+termination_by e _ => sizeOf e
+decreasing_by all_goals (simp_wf; first | (have := List.sizeOf_lt_of_mem ‹_›; omega) | omega)
+
 /-- Resolve InstanceCall in a single statement by qualifying the callee name. -/
 public def resolveInstanceCallInStmt (paramTypeMap : List (String × String)) (s : StmtExpr) : StmtExpr :=
   let qe := qualifyExprInstanceCalls paramTypeMap
@@ -1843,15 +2008,45 @@ public def resolveInstanceCallsInBody (paramTypeMap : List (String × String)) (
   | .Block stmts label => .Block (stmts.map fun s => ⟨resolveInstanceCallInStmt paramTypeMap s.val, s.md⟩) label
   | other => other
 
-/-- resolveInstanceCallInStmt is identity when the statement has no InstanceCall. -/
+/-- resolveInstanceCallInStmt is identity when the statement has no InstanceCall
+    and all value subexpressions have no deep InstanceCall nodes. -/
 public theorem resolveInstanceCallInStmt_id (paramTypeMap : List (String × String))
-    (s : StmtExprMd) (hNoIC : containsInstanceCallMd s = false) :
+    (s : StmtExprMd) (hNoIC : containsInstanceCallMd s = false)
+    (hDeep : ∀ sub : StmtExprMd, noInstanceCallDeep sub = true) :
     resolveInstanceCallInStmt paramTypeMap s.val = s.val := by
-  sorry
+  cases s with | mk v m =>
+  simp only at hNoIC hDeep ⊢
+  unfold resolveInstanceCallInStmt
+  match v with
+  | .InstanceCall _ _ _ =>
+    simp [containsInstanceCallMd] at hNoIC
+  | .LocalVariable id ty (some init) =>
+    show StmtExpr.LocalVariable id ty (some (qualifyExprInstanceCalls paramTypeMap init)) = _
+    congr 1; congr 1; exact qualifyExprInstanceCalls_id paramTypeMap init (hDeep init)
+  | .Return (some v) =>
+    show StmtExpr.Return (some (qualifyExprInstanceCalls paramTypeMap v)) = _
+    congr 1; congr 1; exact qualifyExprInstanceCalls_id paramTypeMap v (hDeep v)
+  | .Assign targets value =>
+    show StmtExpr.Assign targets (qualifyExprInstanceCalls paramTypeMap value) = _
+    congr 1; exact qualifyExprInstanceCalls_id paramTypeMap value (hDeep value)
+  | .IfThenElse cond thenB elseB =>
+    show StmtExpr.IfThenElse (qualifyExprInstanceCalls paramTypeMap cond) thenB elseB = _
+    congr 1; exact qualifyExprInstanceCalls_id paramTypeMap cond (hDeep cond)
+  | .While cond invs dec body =>
+    show StmtExpr.While (qualifyExprInstanceCalls paramTypeMap cond) invs dec body = _
+    congr 1; exact qualifyExprInstanceCalls_id paramTypeMap cond (hDeep cond)
+  | .LocalVariable _ _ none | .Return none | .Exit _ | .Block ..
+  | .LiteralInt .. | .LiteralBool .. | .LiteralString .. | .LiteralDecimal ..
+  | .Identifier .. | .FieldSelect .. | .PureFieldUpdate .. | .StaticCall ..
+  | .PrimitiveOp .. | .New .. | .This | .ReferenceEquals .. | .AsType ..
+  | .IsType .. | .Forall .. | .Exists .. | .Assigned .. | .Old ..
+  | .Fresh .. | .Assert .. | .Assume .. | .ProveBy .. | .ContractOf ..
+  | .Abstract | .All | .Hole .. | .TryCatch .. | .Throw .. => rfl
 
 /-- resolveInstanceCallsInBody is identity on a Block when no statement has InstanceCall. -/
 public theorem resolveInstanceCallsInBody_id (paramTypeMap : List (String × String))
-    (bodyExpr : StmtExprMd) (hNoIC : containsInstanceCallMd bodyExpr = false) :
+    (bodyExpr : StmtExprMd) (hNoIC : containsInstanceCallMd bodyExpr = false)
+    (hDeep : ∀ sub : StmtExprMd, noInstanceCallDeep sub = true) :
     resolveInstanceCallsInBody paramTypeMap bodyExpr.val = bodyExpr.val := by
   unfold resolveInstanceCallsInBody
   split
@@ -1867,21 +2062,50 @@ public theorem resolveInstanceCallsInBody_id (paramTypeMap : List (String × Str
       | cons s rest ih =>
         simp only [List.map_cons, List.cons.injEq]
         exact ⟨by have := resolveInstanceCallInStmt_id paramTypeMap s (hl s (List.mem_cons_self ..))
+                    (fun sub => hDeep sub)
                   cases s; simp_all,
                ih (fun t ht => hl t (List.mem_cons_of_mem _ ht))⟩
     exact this stmts hMem
   · rfl
 
+/-- Qualify field names in a Laurel expression: "x" → "Point.x" based on composite definitions -/
+@[expose] public def qualifyFieldNamesInExpr (fieldMap : List (String × String)) : StmtExprMd → StmtExprMd
+  | ⟨.FieldSelect target fieldName, md⟩ =>
+    let cleanName := match fieldName.text.splitOn ":" with | [n, _] => n | _ => fieldName.text
+    let qualifiedName := match fieldMap.find? (·.1 == cleanName) with
+      | some (_, q) => match fieldName.text.splitOn ":" with
+        | [_, suffix] => { fieldName with text := q ++ ":" ++ suffix }
+        | _ => { fieldName with text := q }
+      | none => fieldName
+    ⟨.FieldSelect (qualifyFieldNamesInExpr fieldMap target) qualifiedName, md⟩
+  | ⟨.PrimitiveOp op args, md⟩ => ⟨.PrimitiveOp op (args.attach.map fun ⟨a, _⟩ => qualifyFieldNamesInExpr fieldMap a), md⟩
+  | ⟨.StaticCall callee args, md⟩ => ⟨.StaticCall callee (args.attach.map fun ⟨a, _⟩ => qualifyFieldNamesInExpr fieldMap a), md⟩
+  | ⟨.InstanceCall target callee args, md⟩ => ⟨.InstanceCall (qualifyFieldNamesInExpr fieldMap target) callee (args.attach.map fun ⟨a, _⟩ => qualifyFieldNamesInExpr fieldMap a), md⟩
+  | ⟨.IfThenElse c t (some e), md⟩ => ⟨.IfThenElse (qualifyFieldNamesInExpr fieldMap c) (qualifyFieldNamesInExpr fieldMap t) (some (qualifyFieldNamesInExpr fieldMap e)), md⟩
+  | ⟨.IfThenElse c t none, md⟩ => ⟨.IfThenElse (qualifyFieldNamesInExpr fieldMap c) (qualifyFieldNamesInExpr fieldMap t) none, md⟩
+  | ⟨.Block stmts label, md⟩ => ⟨.Block (stmts.attach.map fun ⟨s, _⟩ => qualifyFieldNamesInExpr fieldMap s) label, md⟩
+  | ⟨.Return (some v), md⟩ => ⟨.Return (some (qualifyFieldNamesInExpr fieldMap v)), md⟩
+  | ⟨.LocalVariable id ty (some init), md⟩ => ⟨.LocalVariable id ty (some (qualifyFieldNamesInExpr fieldMap init)), md⟩
+  | ⟨.LocalVariable id ty none, md⟩ => ⟨.LocalVariable id ty none, md⟩
+  | ⟨.Assign targets v, md⟩ => ⟨.Assign (targets.attach.map fun ⟨t, _⟩ => qualifyFieldNamesInExpr fieldMap t) (qualifyFieldNamesInExpr fieldMap v), md⟩
+  | ⟨.Old v, md⟩ => ⟨.Old (qualifyFieldNamesInExpr fieldMap v), md⟩
+  | ⟨.Forall b (some trigger) body, md⟩ => ⟨.Forall b (some (qualifyFieldNamesInExpr fieldMap trigger)) (qualifyFieldNamesInExpr fieldMap body), md⟩
+  | ⟨.Forall b none body, md⟩ => ⟨.Forall b none (qualifyFieldNamesInExpr fieldMap body), md⟩
+  | ⟨.Exists b (some trigger) body, md⟩ => ⟨.Exists b (some (qualifyFieldNamesInExpr fieldMap trigger)) (qualifyFieldNamesInExpr fieldMap body), md⟩
+  | ⟨.Exists b none body, md⟩ => ⟨.Exists b none (qualifyFieldNamesInExpr fieldMap body), md⟩
+  | other => other
+termination_by e => sizeOf e
+decreasing_by all_goals (simp_wf; first | (have := WithMetadata.sizeOf_val_lt ‹_›; term_by_mem) | term_by_mem | omega)
+
 /-- Resolve constrained types in expressions: inject constraint predicates into quantifier bodies
     and resolve constrained type names to base types. -/
-public partial def resolveConstrainedInExpr (cbt : List (String × HighType)) : StmtExprMd → StmtExprMd
-  | ⟨.Forall ⟨name, ty⟩ trigger body, md⟩ =>
+@[expose] public def resolveConstrainedInExpr (cbt : List (String × HighType)) : StmtExprMd → StmtExprMd
+  | ⟨.Forall ⟨name, ty⟩ (some trigger) body, md⟩ =>
     let body' := resolveConstrainedInExpr cbt body
-    let trigger' := trigger.map (resolveConstrainedInExpr cbt)
+    let trigger' := some (resolveConstrainedInExpr cbt trigger)
     match ty.val with
     | .UserDefined tname =>
       if cbt.any (·.1 == tname.text) then
-        -- Inject constraint: forall(n: ctype) => body → forall(n: base) => ctype$constraint(n) ==> body
         let constraintCall : StmtExprMd :=
           ⟨.StaticCall { text := tname.text ++ "$constraint", uniqueId := none }
             [⟨.Identifier { name with uniqueId := none }, md⟩], md⟩
@@ -1889,9 +2113,21 @@ public partial def resolveConstrainedInExpr (cbt : List (String × HighType)) : 
         ⟨.Forall ⟨name, resolvedTy⟩ trigger' ⟨.PrimitiveOp .Implies [constraintCall, body'], md⟩, md⟩
       else ⟨.Forall ⟨name, ty⟩ trigger' body', md⟩
     | _ => ⟨.Forall ⟨name, ty⟩ trigger' body', md⟩
-  | ⟨.Exists ⟨name, ty⟩ trigger body, md⟩ =>
+  | ⟨.Forall ⟨name, ty⟩ none body, md⟩ =>
     let body' := resolveConstrainedInExpr cbt body
-    let trigger' := trigger.map (resolveConstrainedInExpr cbt)
+    match ty.val with
+    | .UserDefined tname =>
+      if cbt.any (·.1 == tname.text) then
+        let constraintCall : StmtExprMd :=
+          ⟨.StaticCall { text := tname.text ++ "$constraint", uniqueId := none }
+            [⟨.Identifier { name with uniqueId := none }, md⟩], md⟩
+        let resolvedTy := resolveConstrainedType cbt ty
+        ⟨.Forall ⟨name, resolvedTy⟩ none ⟨.PrimitiveOp .Implies [constraintCall, body'], md⟩, md⟩
+      else ⟨.Forall ⟨name, ty⟩ none body', md⟩
+    | _ => ⟨.Forall ⟨name, ty⟩ none body', md⟩
+  | ⟨.Exists ⟨name, ty⟩ (some trigger) body, md⟩ =>
+    let body' := resolveConstrainedInExpr cbt body
+    let trigger' := some (resolveConstrainedInExpr cbt trigger)
     match ty.val with
     | .UserDefined tname =>
       if cbt.any (·.1 == tname.text) then
@@ -1902,17 +2138,32 @@ public partial def resolveConstrainedInExpr (cbt : List (String × HighType)) : 
         ⟨.Exists ⟨name, resolvedTy⟩ trigger' ⟨.PrimitiveOp .And [constraintCall, body'], md⟩, md⟩
       else ⟨.Exists ⟨name, ty⟩ trigger' body', md⟩
     | _ => ⟨.Exists ⟨name, ty⟩ trigger' body', md⟩
-  | ⟨.PrimitiveOp op args, md⟩ => ⟨.PrimitiveOp op (args.map (resolveConstrainedInExpr cbt)), md⟩
+  | ⟨.Exists ⟨name, ty⟩ none body, md⟩ =>
+    let body' := resolveConstrainedInExpr cbt body
+    match ty.val with
+    | .UserDefined tname =>
+      if cbt.any (·.1 == tname.text) then
+        let constraintCall : StmtExprMd :=
+          ⟨.StaticCall { text := tname.text ++ "$constraint", uniqueId := none }
+            [⟨.Identifier { name with uniqueId := none }, md⟩], md⟩
+        let resolvedTy := resolveConstrainedType cbt ty
+        ⟨.Exists ⟨name, resolvedTy⟩ none ⟨.PrimitiveOp .And [constraintCall, body'], md⟩, md⟩
+      else ⟨.Exists ⟨name, ty⟩ none body', md⟩
+    | _ => ⟨.Exists ⟨name, ty⟩ none body', md⟩
+  | ⟨.PrimitiveOp op args, md⟩ => ⟨.PrimitiveOp op (args.attach.map fun ⟨a, _⟩ => resolveConstrainedInExpr cbt a), md⟩
   | ⟨.IfThenElse c t (some e), md⟩ =>
     ⟨.IfThenElse (resolveConstrainedInExpr cbt c) (resolveConstrainedInExpr cbt t) (some (resolveConstrainedInExpr cbt e)), md⟩
   | ⟨.IfThenElse c t none, md⟩ =>
     ⟨.IfThenElse (resolveConstrainedInExpr cbt c) (resolveConstrainedInExpr cbt t) none, md⟩
-  | ⟨.Block stmts label, md⟩ => ⟨.Block (stmts.map (resolveConstrainedInExpr cbt)) label, md⟩
+  | ⟨.Block stmts label, md⟩ => ⟨.Block (stmts.attach.map fun ⟨s, _⟩ => resolveConstrainedInExpr cbt s) label, md⟩
   | ⟨.Return (some v), md⟩ => ⟨.Return (some (resolveConstrainedInExpr cbt v)), md⟩
-  | ⟨.LocalVariable id ty init, md⟩ => ⟨.LocalVariable id ty (init.map (resolveConstrainedInExpr cbt)), md⟩
+  | ⟨.LocalVariable id ty (some init), md⟩ => ⟨.LocalVariable id ty (some (resolveConstrainedInExpr cbt init)), md⟩
+  | ⟨.LocalVariable id ty none, md⟩ => ⟨.LocalVariable id ty none, md⟩
   | ⟨.Assign targets v, md⟩ => ⟨.Assign targets (resolveConstrainedInExpr cbt v), md⟩
   | ⟨.Old v, md⟩ => ⟨.Old (resolveConstrainedInExpr cbt v), md⟩
   | other => other
+termination_by e => sizeOf e
+decreasing_by all_goals (simp_wf; first | (have := WithMetadata.sizeOf_val_lt ‹_›; term_by_mem) | term_by_mem | omega)
 where
   resolveConstrainedType (cbt : List (String × HighType)) (ty : WithMetadata HighType) : WithMetadata HighType :=
     match ty.val with
@@ -1921,6 +2172,42 @@ where
       | some (_, base) => ⟨base, ty.md⟩
       | none => ty
     | _ => ty
+
+private theorem list_map_id {l : List α} {f : α → α} (h : ∀ a ∈ l, f a = a) : l.map f = l := by
+  induction l with | nil => simp | cons x xs ih => simp_all
+
+private theorem resolveConstrainedInExpr_nil_strong (e : StmtExprMd) :
+    resolveConstrainedInExpr [] e = e := by
+  unfold resolveConstrainedInExpr
+  split <;> (try simp only [List.any_nil, Bool.false_eq_true, ↓reduceIte, List.attach_map_val])
+  any_goals (split <;> (try simp only [List.any_nil, Bool.false_eq_true, ↓reduceIte]))
+  all_goals (congr 1; congr 1 <;> first
+    | exact resolveConstrainedInExpr_nil_strong _
+    | (congr 1; exact resolveConstrainedInExpr_nil_strong _)
+    | exact list_map_id (fun a _ => resolveConstrainedInExpr_nil_strong a)
+    | rfl)
+termination_by sizeOf e
+decreasing_by all_goals (simp_wf; first | (have := WithMetadata.sizeOf_val_lt ‹_›; term_by_mem) | term_by_mem | omega)
+
+public theorem resolveConstrainedInExpr_nil (e : StmtExprMd) :
+    (resolveConstrainedInExpr [] e).val = e.val :=
+  congrArg WithMetadata.val (resolveConstrainedInExpr_nil_strong e)
+
+private theorem qualifyFieldNamesInExpr_nil_strong (e : StmtExprMd) :
+    qualifyFieldNamesInExpr [] e = e := by
+  unfold qualifyFieldNamesInExpr
+  split <;> (try simp only [List.find?, List.attach_map_val])
+  all_goals (congr 1; congr 1 <;> first
+    | exact qualifyFieldNamesInExpr_nil_strong _
+    | (congr 1; exact qualifyFieldNamesInExpr_nil_strong _)
+    | exact list_map_id (fun a _ => qualifyFieldNamesInExpr_nil_strong a)
+    | rfl)
+termination_by sizeOf e
+decreasing_by all_goals (simp_wf; first | (have := WithMetadata.sizeOf_val_lt ‹_›; term_by_mem) | term_by_mem | omega)
+
+public theorem qualifyFieldNamesInExpr_nil (e : StmtExprMd) :
+    (qualifyFieldNamesInExpr [] e).val = e.val :=
+  congrArg WithMetadata.val (qualifyFieldNamesInExpr_nil_strong e)
 
 @[expose] public def translateProcModel
   (isFunction : String → Bool)
@@ -1999,7 +2286,11 @@ where
   let resolveBody (body : StmtExpr) : StmtExpr :=
     let resolved := resolveInstanceCallsInBody paramTypeMap body
     -- Also resolve constrained types in quantifiers
-    (resolveConstrainedInExpr constrainedBaseTypes ⟨resolved, .empty⟩).val
+    let resolved := (resolveConstrainedInExpr constrainedBaseTypes ⟨resolved, .empty⟩).val
+    -- Qualify field names: "x" → "Point.x" based on composite definitions
+    let fieldMap := composites.foldl (fun acc ct =>
+      acc ++ ct.fields.map fun f => (f.name.text, ct.name.text ++ "." ++ f.name.text)) ([] : List (String × String))
+    (qualifyFieldNamesInExpr fieldMap ⟨resolved, .empty⟩).val
   -- Build type environment from procedure parameters for real-number detection
   let typeEnv : TypeEnv := proc.inputs.map fun p => (p.name.text, p.type.val)
   let bodyStmts : Core.Statements := match proc.body with
@@ -2336,39 +2627,44 @@ end
       | some (_, base) => base
       | none => ty
     | other => other
-  let hasFieldAccess := composites.any fun ct =>
-    ct.instanceProcedures.any fun p => match p.body with
-      | .Transparent b => directlyReadsHeapMd b || directlyWritesHeapMd b
-      | .Opaque postconds (some impl) _ =>
-        directlyReadsHeapMd impl || directlyWritesHeapMd impl ||
-        postconds.any (fun pc => directlyReadsHeapMd pc)
-      | .Opaque postconds none _ =>
-        postconds.any (fun pc => directlyReadsHeapMd pc)
-      | _ => false
+  let accessesHeapProc (p : Procedure) : Bool := match p.body with
+    | .Transparent b => directlyReadsHeapMd b || directlyWritesHeapMd b
+    | .Opaque postconds (some impl) _ =>
+      directlyReadsHeapMd impl || directlyWritesHeapMd impl ||
+      postconds.any (fun pc => directlyReadsHeapMd pc)
+    | .Opaque postconds none _ =>
+      postconds.any (fun pc => directlyReadsHeapMd pc)
+    | _ => false
+  let hasFieldAccess :=
+    composites.any (fun ct => ct.instanceProcedures.any accessesHeapProc) ||
+    (nonExternalStaticProcs withDefs).any accessesHeapProc
   let boxConstrNames : List String := if !hasFieldAccess then [] else
     -- Only include Box constructors for field types that are actually accessed
-    let accessedFieldTypes := composites.foldl (fun (acc : List String) (ct : CompositeType) =>
-      ct.instanceProcedures.foldl (fun (acc : List String) (p : Procedure) =>
-        let bodyFields := match p.body with
-          | .Transparent b => collectFieldNames b.val
-          | .Opaque postconds (some impl) _ =>
-            collectFieldNames impl.val ++ postconds.flatMap fun pc => collectFieldNamesMd pc
-          | .Opaque postconds none _ =>
-            postconds.flatMap fun pc => collectFieldNamesMd pc
-          | _ => []
-        bodyFields.foldl (fun (acc : List String) (fname : String) =>
-          let fieldTy := composites.findSome? fun (c : CompositeType) =>
-            match c.fields.find? (fun (f : Field) => f.name.text == fname) with
-            | some f => some (resolveFieldType f.type.val)
-            | none => none
-          match fieldTy with
-          | some ty =>
-            let name := match ty with
-              | .TInt => "BoxInt" | .TBool => "BoxBool"
-              | .TString => "BoxString" | .UserDefined _ => "BoxComposite"
-              | _ => "BoxInt"
-            if acc.contains name then acc else acc ++ [name]
-          | none => acc) acc) acc) ([] : List String)
+    let collectFieldTypesFromProc (acc : List String) (p : Procedure) : List String :=
+      let bodyFields := match p.body with
+        | .Transparent b => collectFieldNames b.val
+        | .Opaque postconds (some impl) _ =>
+          collectFieldNames impl.val ++ postconds.flatMap fun pc => collectFieldNamesMd pc
+        | .Opaque postconds none _ =>
+          postconds.flatMap fun pc => collectFieldNamesMd pc
+        | _ => []
+      bodyFields.foldl (fun (acc : List String) (fname : String) =>
+        let fieldTy := composites.findSome? fun (c : CompositeType) =>
+          match c.fields.find? (fun (f : Field) => f.name.text == fname) with
+          | some f => some (resolveFieldType f.type.val)
+          | none => none
+        match fieldTy with
+        | some ty =>
+          let name := match ty with
+            | .TInt => "BoxInt" | .TBool => "BoxBool"
+            | .TString => "BoxString" | .UserDefined _ => "BoxComposite"
+            | _ => "BoxInt"
+          if acc.contains name then acc else acc ++ [name]
+        | none => acc) acc
+    let accessedFieldTypes :=
+      let fromInstance := composites.foldl (fun acc ct =>
+        ct.instanceProcedures.foldl collectFieldTypesFromProc acc) ([] : List String)
+      (nonExternalStaticProcs withDefs).foldl collectFieldTypesFromProc fromInstance
     if accessedFieldTypes.isEmpty then ["BoxInt"] else accessedFieldTypes
   let boxConstrs : List (Lambda.LConstr Unit) := boxConstrNames.map fun n =>
     let (argName, argTy) := match n with
@@ -2519,15 +2815,17 @@ end
     | .TInt => true
     | .UserDefined name => constrainedIntNames.contains name.text
     | _ => false
-  let hasCompositeProcs := (nonExternalInstanceProcs withDefs).any fun (_, p) =>
-    match p.body with
-    | .Transparent b => directlyReadsHeapMd b || directlyWritesHeapMd b
-    | .Opaque postconds (some impl) _ =>
-      directlyReadsHeapMd impl || directlyWritesHeapMd impl ||
-      postconds.any (fun pc => directlyReadsHeapMd pc)
-    | .Opaque postconds none _ =>
-      postconds.any (fun pc => directlyReadsHeapMd pc)
-    | _ => false
+  let hasCompositeProcs :=
+    let accessesHeap (p : Procedure) : Bool := match p.body with
+      | .Transparent b => directlyReadsHeapMd b || directlyWritesHeapMd b
+      | .Opaque postconds (some impl) _ =>
+        directlyReadsHeapMd impl || directlyWritesHeapMd impl ||
+        postconds.any (fun pc => directlyReadsHeapMd pc)
+      | .Opaque postconds none _ =>
+        postconds.any (fun pc => directlyReadsHeapMd pc)
+      | _ => false
+    (nonExternalInstanceProcs withDefs).any (fun (_, p) => accessesHeap p) ||
+    (nonExternalStaticProcs withDefs).any accessesHeap
   let readFuncAxioms : List Core.Decl :=
     if hasIntField && hasCompositeProcs then
       [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].map
@@ -2610,5 +2908,239 @@ public theorem translateProgramModel_decls (program : Program) :
       procDecls ++ witnessProcDecls ++ instanceProcDecls := by
   unfold translateProgramModel
   exact ⟨_, _, _, _, _, _, _, _, _, _, _, rfl⟩
+
+/-! ## TypeEnv equivalence lemmas -/
+
+/-! ## TypeEnv equivalence lemmas -/
+
+/-- When no entry has TReal, TypeEnv.lookup never returns TReal. -/
+private theorem lookup_no_real (env : TypeEnv) (henv : ∀ e ∈ env, e.2 ≠ HighType.TReal)
+    (name : String) : env.lookup name ≠ some HighType.TReal := by
+  simp only [TypeEnv.lookup]
+  intro h
+  match hf : env.find? (·.1 == name) with
+  | none => simp [hf] at h
+  | some p =>
+    rw [hf] at h; simp at h
+    have : p ∈ env := List.mem_of_find?_eq_some hf
+    exact henv p this h
+
+/-- exprIsReal depends only on which names map to TReal. -/
+public theorem exprIsReal_congr (env1 env2 : TypeEnv)
+    (hAgree : ∀ name, env1.lookup name = some HighType.TReal ↔ env2.lookup name = some HighType.TReal)
+    (expr : StmtExpr) : exprIsReal env1 expr = exprIsReal env2 expr := by
+  match expr with
+  | .Identifier name =>
+    show (match env1.lookup name.text with | some .TReal => true | _ => false) =
+         (match env2.lookup name.text with | some .TReal => true | _ => false)
+    cases h1 : env1.lookup name.text with
+    | none =>
+      cases h2 : env2.lookup name.text with
+      | none => rfl
+      | some ty2 => match ty2 with
+        | .TReal => exact absurd ((hAgree name.text).mpr h2) (by simp [h1])
+        | .TInt | .TBool | .TString | .TVoid | .THeap | .TMap .. | .TSequence ..
+        | .TSet .. | .UserDefined .. | .Unknown | .TCore .. | .Intersection ..
+        | .Pure .. | .Applied .. | .TTypedField .. | .TFloat64 => rfl
+    | some ty1 => match ty1 with
+      | .TReal => rw [(hAgree name.text).mp h1]
+      | .TInt | .TBool | .TString | .TVoid | .THeap | .TMap .. | .TSequence ..
+      | .TSet .. | .UserDefined .. | .Unknown | .TCore .. | .Intersection ..
+      | .Pure .. | .Applied .. | .TTypedField .. | .TFloat64 =>
+        cases h2 : env2.lookup name.text with
+        | none => rfl
+        | some ty2 => match ty2 with
+          | .TReal => exact absurd ((hAgree name.text).mpr h2) (by simp [h1])
+          | .TInt | .TBool | .TString | .TVoid | .THeap | .TMap .. | .TSequence ..
+          | .TSet .. | .UserDefined .. | .Unknown | .TCore .. | .Intersection ..
+          | .Pure .. | .Applied .. | .TTypedField .. | .TFloat64 => rfl
+  | .LiteralDecimal _ => rfl
+  | .PrimitiveOp _ (head :: _) =>
+    show exprIsReal env1 head.val = exprIsReal env2 head.val
+    exact exprIsReal_congr env1 env2 hAgree head.val
+  | .PrimitiveOp _ [] | .FieldSelect .. => rfl
+  | .LiteralInt .. | .LiteralBool .. | .LiteralString .. | .IfThenElse ..
+  | .Block .. | .LocalVariable .. | .While .. | .Exit .. | .Return ..
+  | .Assign .. | .PureFieldUpdate .. | .StaticCall .. | .New .. | .This
+  | .ReferenceEquals .. | .AsType .. | .IsType .. | .InstanceCall ..
+  | .Forall .. | .Exists .. | .Assigned .. | .Old .. | .Fresh ..
+  | .Assert .. | .Assume .. | .ProveBy .. | .ContractOf .. | .Abstract
+  | .All | .Hole .. | .TryCatch .. | .Throw .. => rfl
+
+private theorem lookup_nil_not_real (name : String) :
+    TypeEnv.lookup [] name ≠ some HighType.TReal := by
+  simp [TypeEnv.lookup]
+
+public theorem agree_no_real (env : TypeEnv) (henv : ∀ e ∈ env, e.2 ≠ HighType.TReal) :
+    ∀ name, TypeEnv.lookup env name = some HighType.TReal ↔ TypeEnv.lookup [] name = some HighType.TReal :=
+  fun name => ⟨fun h => absurd h (lookup_no_real env henv name),
+    fun h => absurd h (lookup_nil_not_real name)⟩
+
+/-- exprIsReal env = exprIsReal [] when no entry has TReal. -/
+public theorem exprIsReal_no_real (env : TypeEnv) (henv : ∀ e ∈ env, e.2 ≠ HighType.TReal)
+    (expr : StmtExpr) : exprIsReal env expr = exprIsReal [] expr :=
+  exprIsReal_congr env [] (agree_no_real env henv) expr
+
+/-- fixRealOps depends only on which names map to TReal. -/
+public theorem fixRealOps_congr (env1 env2 : TypeEnv)
+    (hAgree : ∀ name, env1.lookup name = some HighType.TReal ↔ env2.lookup name = some HighType.TReal)
+    (expr : StmtExpr) (core : Core.Expression.Expr) :
+    fixRealOps env1 expr core = fixRealOps env2 expr core := by
+  unfold fixRealOps
+  split
+  · rename_i e1 e2
+    rw [exprIsReal_congr env1 env2 hAgree e1.val, exprIsReal_congr env1 env2 hAgree e2.val]
+  · rename_i e
+    rw [exprIsReal_congr env1 env2 hAgree e.val]
+  · rfl
+
+/-- translateExprWithEnv depends only on which names map to TReal. -/
+public theorem translateExprWithEnv_congr (env1 env2 : TypeEnv)
+    (hAgree : ∀ name, env1.lookup name = some HighType.TReal ↔ env2.lookup name = some HighType.TReal)
+    (expr : StmtExpr) : translateExprWithEnv env1 expr = translateExprWithEnv env2 expr := by
+  unfold translateExprWithEnv; exact fixRealOps_congr env1 env2 hAgree expr _
+
+/-- translateExprWithEnv env = translateExprWithEnv [] when no entry has TReal. -/
+public theorem translateExprWithEnv_no_real (env : TypeEnv) (henv : ∀ e ∈ env, e.2 ≠ HighType.TReal)
+    (expr : StmtExpr) : translateExprWithEnv env expr = translateExprWithEnv [] expr :=
+  translateExprWithEnv_congr env [] (agree_no_real env henv) expr
+
+/-- Extending two envs with the same entry preserves TReal agreement. -/
+public theorem agree_cons (env1 env2 : TypeEnv) (entry : String × HighType)
+    (hAgree : ∀ name, TypeEnv.lookup env1 name = some HighType.TReal ↔
+                       TypeEnv.lookup env2 name = some HighType.TReal) :
+    ∀ name, TypeEnv.lookup (entry :: env1) name = some HighType.TReal ↔
+            TypeEnv.lookup (entry :: env2) name = some HighType.TReal := by
+  obtain ⟨k, v⟩ := entry
+  intro name
+  simp only [TypeEnv.lookup, List.find?_cons]
+  split
+  · exact Iff.rfl
+  · exact hAgree name
+
+/-- Helper: foldl over block statements produces equal first components
+    when envs agree on TReal and sub-statement translations are equal. -/
+private theorem foldl_block_congr
+    (isFunction : String → Bool) (outParams : List String)
+    {stmts : List StmtExprMd}
+    (l : List { x : StmtExprMd // x ∈ stmts })
+    (acc : Core.Statements) (ce1 ce2 : TypeEnv)
+    (hce : ∀ name, TypeEnv.lookup ce1 name = some HighType.TReal ↔
+                    TypeEnv.lookup ce2 name = some HighType.TReal)
+    (ih : ∀ s : StmtExprMd, s ∈ stmts → ∀ (e1 e2 : TypeEnv),
+      (∀ name, TypeEnv.lookup e1 name = some HighType.TReal ↔
+               TypeEnv.lookup e2 name = some HighType.TReal) →
+      translateStmtModelMd isFunction outParams s e1 =
+      translateStmtModelMd isFunction outParams s e2) :
+    (l.foldl (fun x x_1 =>
+      (x.1 ++ translateStmtModelMd isFunction outParams x_1.1 x.2,
+       match x_1.1.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: x.2
+       | _ => x.2)) (acc, ce1)).1 =
+    (l.foldl (fun x x_1 =>
+      (x.1 ++ translateStmtModelMd isFunction outParams x_1.1 x.2,
+       match x_1.1.val with
+       | .LocalVariable id ty _ => (id.text, ty.val) :: x.2
+       | _ => x.2)) (acc, ce2)).1 := by
+  induction l generalizing acc ce1 ce2 with
+  | nil => rfl
+  | cons hd tl ihl =>
+    simp only [List.foldl]
+    rw [ih hd.1 hd.2 ce1 ce2 hce]
+    apply ihl
+    intro name
+    split
+    · exact (agree_cons ce1 ce2 _ hce name)
+    · exact hce name
+
+/-- translateStmtModel depends on typeEnv only through TReal entries.
+    When two envs agree on TReal, the translation is identical. -/
+public theorem translateStmtModel_typeEnv_congr
+    (isFunction : String → Bool) (outParams : List String) (stmt : StmtExpr)
+    (env1 env2 : TypeEnv)
+    (hAgree : ∀ name, TypeEnv.lookup env1 name = some HighType.TReal ↔
+                       TypeEnv.lookup env2 name = some HighType.TReal) :
+    translateStmtModel isFunction outParams stmt env1 [] =
+    translateStmtModel isFunction outParams stmt env2 [] := by
+  have hExpr : ∀ expr, translateExprWithEnv env1 expr = translateExprWithEnv env2 expr :=
+    translateExprWithEnv_congr env1 env2 hAgree
+  have hExprMd : ∀ e : StmtExprMd, translateExprMdWithEnv env1 e = translateExprMdWithEnv env2 e :=
+    fun e => hExpr e.val
+  rw [translateStmtModel.eq_def, translateStmtModel.eq_def]
+  simp only [hExpr, hExprMd]
+  split <;> first | rfl | (split <;> rfl) | skip
+  -- 6 remaining goals with translateStmtModelMd recursive calls
+  -- Block with some label
+  · congr 1; congr 1
+    exact foldl_block_congr isFunction outParams _ [] env1 env2 hAgree
+      (fun s _hs e1 e2 he => by
+        simp only [translateStmtModelMd.eq_def]
+        exact translateStmtModel_typeEnv_congr isFunction outParams s.val e1 e2 he)
+  -- Block with none
+  · exact foldl_block_congr isFunction outParams _ [] env1 env2 hAgree
+      (fun s _hs e1 e2 he => by
+        simp only [translateStmtModelMd.eq_def]
+        exact translateStmtModel_typeEnv_congr isFunction outParams s.val e1 e2 he)
+  -- Remaining 4 goals: Assign (Identifier), IfThenElse, While, TryCatch
+  -- Handle individually since congr goes too deep on some
+  -- Assign with Identifier: env.lookup appears in constraint check, but cbt=[] so it's vacuous
+  · -- After simp [hExpr, hExprMd], both sides differ only in the |> lambda which uses env.lookup
+    -- But cbt=[], so the constraint check is always false, making both branches identical
+    simp only [List.any_nil, Bool.false_eq_true, ↓reduceIte]
+    congr 1
+    apply funext; intro x
+    -- Both sides have match env.lookup, but all branches produce the same result
+    split <;> split <;> rfl
+  -- IfThenElse
+  · -- Goal: [Stmt.ite bcond (translateStmtModel ... thenB env1) (match elseB ... env1) .empty]
+    --      = [Stmt.ite bcond (translateStmtModel ... thenB env2) (match elseB ... env2) .empty]
+    -- After simp [hExpr, hExprMd], the cond is already equal. Need to show thenB and elseB parts equal.
+    simp only [translateStmtModelMd.eq_def]
+    congr 2
+    · exact translateStmtModel_typeEnv_congr isFunction outParams _ _ _ hAgree
+    · -- elseB: match on Option with membership proof
+      split
+      · exact translateStmtModel_typeEnv_congr isFunction outParams _ _ _ hAgree
+      · rfl
+  -- While
+  · simp only [translateStmtModelMd.eq_def]
+    congr 2
+    exact translateStmtModel_typeEnv_congr isFunction outParams _ _ _ hAgree
+  -- TryCatch
+  · congr 1; congr 1; congr 1
+    all_goals first
+      | rfl
+      | {
+          simp only [translateStmtModelMd.eq_def]
+          exact translateStmtModel_typeEnv_congr isFunction outParams _ _ _ hAgree
+        }
+      | {
+          congr 1
+          all_goals first
+            | rfl
+            | {
+                simp only [translateStmtModelMd.eq_def]
+                exact translateStmtModel_typeEnv_congr isFunction outParams _ _ _ hAgree
+              }
+            | {
+                congr 1
+                all_goals first
+                  | rfl
+                  | {
+                      simp only [translateStmtModelMd.eq_def]
+                      exact translateStmtModel_typeEnv_congr isFunction outParams _ _ _ hAgree
+                    }
+                  | {
+                      -- finally_: lambda equality from Option.attach
+                      apply funext; intro f; apply funext; intro _h
+                      simp only [translateStmtModelMd.eq_def]
+                      exact translateStmtModel_typeEnv_congr isFunction outParams _ _ _ hAgree
+                    }
+              }
+        }
+  termination_by sizeOf stmt
+  decreasing_by
+    all_goals simp_wf
+    all_goals (have := WithMetadata.sizeOf_val_lt ‹_›; first | term_by_mem | omega)
 
 end Strata.Laurel

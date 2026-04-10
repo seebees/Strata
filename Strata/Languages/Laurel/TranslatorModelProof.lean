@@ -464,3 +464,139 @@ theorem block_strip_erase_cmd_block (c : Core.Command)
      Imperative.Stmt.block label (Imperative.Block.stripMetaData (Core.Statements.eraseTypes stmts)) .empty] := by
   simp [Core.Statements.eraseTypes, Core.Statement.eraseTypes,
     Imperative.Block.stripMetaData, Imperative.Stmt.stripMetaData]
+
+/-! ### Targeted tests for translate_decls_match categories -/
+
+/-- A program with a single procedure that returns an int literal.
+    Exercises: Category 6 (procedures), Category 2 (datatypes from coreDefinitions). -/
+def progWithProc : Program :=
+  { staticProcedures := [{
+      name := { text := "foo" }
+      inputs := []
+      outputs := [{ name := { text := "result" }, type := ⟨.TInt, .empty⟩ }]
+      preconditions := []
+      determinism := .deterministic none
+      decreases := none
+      body := .Transparent ⟨.LiteralInt 42, .empty⟩
+      isFunctional := false
+      md := .empty
+    }]
+    staticFields := []
+    types := []
+    constants := [] }
+
+theorem translate_progWithProc_produces_some :
+    (translate {} progWithProc).1.isSome = true := by native_decide
+
+theorem translate_eq_model_progWithProc :
+    (translate {} progWithProc).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel progWithProc) := by native_decide
+
+/-- A program with a pure function (isFunctional = true).
+    Exercises: Category 5 (pure functions). -/
+def progWithPureFunc : Program :=
+  { staticProcedures := [{
+      name := { text := "add1" }
+      inputs := [{ name := { text := "x" }, type := ⟨.TInt, .empty⟩ }]
+      outputs := [{ name := { text := "result" }, type := ⟨.TInt, .empty⟩ }]
+      preconditions := []
+      determinism := .deterministic none
+      decreases := none
+      body := .Transparent ⟨.PrimitiveOp .Add [⟨.Identifier { text := "x" }, .empty⟩, ⟨.LiteralInt 1, .empty⟩], .empty⟩
+      isFunctional := true
+      md := .empty
+    }]
+    staticFields := []
+    types := []
+    constants := [] }
+
+theorem translate_progWithPureFunc_produces_some :
+    (translate {} progWithPureFunc).1.isSome = true := by native_decide
+
+theorem translate_eq_model_progWithPureFunc :
+    (translate {} progWithPureFunc).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel progWithPureFunc) := by native_decide
+
+/-- A program with a composite type.
+    Exercises: Category 2 (datatypes), Category 4 (ancestors). -/
+def progWithComposite : Program :=
+  { staticProcedures := []
+    staticFields := []
+    types := [.Composite {
+      name := { text := "Point" }
+      extending := []
+      fields := [
+        { name := { text := "x" }, isMutable := false, type := ⟨.TInt, .empty⟩ },
+        { name := { text := "y" }, isMutable := false, type := ⟨.TInt, .empty⟩ }
+      ]
+      instanceProcedures := []
+    }]
+    constants := [] }
+
+theorem translate_progWithComposite_produces_some :
+    (translate {} progWithComposite).1.isSome = true := by native_decide
+
+theorem translate_eq_model_progWithComposite :
+    (translate {} progWithComposite).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel progWithComposite) := by native_decide
+
+/-- A program with a composite type + procedure accessing fields.
+    Exercises: Category 2, 3 (read func axioms), 4 (ancestors, constraints, heap), 6 (procedures). -/
+def progWithIntComposite : Program :=
+  { staticProcedures := [{
+      name := { text := "getX" }
+      inputs := [{ name := { text := "p" }, type := ⟨.UserDefined { text := "Point" }, .empty⟩ }]
+      outputs := [{ name := { text := "result" }, type := ⟨.TInt, .empty⟩ }]
+      preconditions := []
+      determinism := .deterministic none
+      decreases := none
+      body := .Transparent ⟨.FieldSelect ⟨.Identifier { text := "p" }, .empty⟩ { text := "x" }, .empty⟩
+      isFunctional := false
+      md := .empty
+    }]
+    staticFields := []
+    types := [.Composite {
+      name := { text := "Point" }
+      extending := []
+      fields := [
+        { name := { text := "x" }, isMutable := false, type := ⟨.TInt, .empty⟩ },
+        { name := { text := "y" }, isMutable := false, type := ⟨.TInt, .empty⟩ }
+      ]
+      instanceProcedures := []
+    }]
+    constants := [] }
+
+theorem translate_progWithIntComposite_produces_some :
+    (translate {} progWithIntComposite).1.isSome = true := by native_decide
+
+theorem translate_eq_model_progWithIntComposite :
+    (translate {} progWithIntComposite).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel progWithIntComposite) := by native_decide
+
+/-- A program with type hierarchy (parent-child composites).
+    Exercises: Category 4 (ancestor functions). -/
+def progWithHierarchy : Program :=
+  { staticProcedures := []
+    staticFields := []
+    types := [
+      .Composite {
+        name := { text := "Animal" }
+        extending := []
+        fields := [{ name := { text := "age" }, isMutable := false, type := ⟨.TInt, .empty⟩ }]
+        instanceProcedures := []
+      },
+      .Composite {
+        name := { text := "Dog" }
+        extending := [{ text := "Animal" }]
+        fields := [{ name := { text := "breed" }, isMutable := false, type := ⟨.TInt, .empty⟩ }]
+        instanceProcedures := []
+      }
+    ]
+    constants := [] }
+
+theorem translate_progWithHierarchy_produces_some :
+    (translate {} progWithHierarchy).1.isSome = true := by native_decide
+
+theorem translate_eq_model_progWithHierarchy :
+    (translate {} progWithHierarchy).1.map (Core.Program.stripMetaData ∘ Core.Program.eraseTypes) =
+    some (translateProgramModel progWithHierarchy) := by native_decide

@@ -148,8 +148,8 @@ theorem translate_eq_model (program : Program) (coreProgram : Core.Program)
 | Cat | Real segment | Model segment | Status |
 |-----|-------------|---------------|--------|
 | 1 | `[exceptionResultDecl]` | `[modelExceptionResultDecl]` | ✅ Proven |
-| 2 | `groupedDatatypeDecls` | `infraDatatypes ++ datatypeDecls` | sorry |
-| 3 | `mkReadFuncAxioms(prog)` | `modelReadFuncAxioms` | sorry |
+| 2 | `groupedDatatypeDecls` | `infraDatatypes ++ datatypeDecls` | strip/erase proven, content sorry |
+| 3 | `mkReadFuncAxioms(prog)` | `modelReadFuncAxioms` | ✅ Proven (building block) |
 | 4 | `constantDecls` | `ancestorDecls` | sorry |
 | 5 | `pureFuncDecls` | `constraintFuncs ++ heapFuncs ++ extFuncs ++ transFuncs` | sorry |
 | 6 | `procedures.map (.proc · .empty)` | `procDecls ++ witnessProcDecls` | sorry |
@@ -267,3 +267,69 @@ earlier proof attempts. When `mkReadFuncAxioms` unfolds to `have boxConstrs := f
 
 **Status:** 0 sorry. Building block proven. Integration into `translate_decls_match` still
 needs connecting the precondition (BoxInt exists) to the pipeline output.
+
+## D13: Category 2 (Datatypes) Proof — Strip/Erase Identity
+
+**Date:** 2026-04-08
+
+The Category 2 proof has two layers:
+
+### Layer 1: strip/erase identity (PROVEN, 0 sorry)
+
+All declarations produced by `translateTypes` are `.type` decls. Since
+`Core.Decl.stripMetaData (Core.Decl.eraseTypes (.type t .empty)) = .type t` (identity),
+the `strip ∘ erase` map over `groupedDatatypeDecls` is the identity function.
+
+**Proven lemmas:**
+- `translateTypes_all_type`: all translateTypes output are `.type` decls
+- `type_decls_strip_erase_id`: strip/erase is identity on a list of `.type` decls
+- `translateTypes_strip_erase`: combining the above
+- `translateTypes_pure`: translateTypes always succeeds and preserves state
+- `translateTypes_preserves_state`: translateTypes doesn't modify TranslateState
+
+These are in `LaurelToCoreTranslator.lean` and used in `translate_decls_match`.
+
+### Layer 2: datatype content equivalence (TODO)
+
+The deep claim: `groupedDatatypeDecls = infraDatatypes ++ datatypeDecls` from the model.
+
+This requires:
+1. `translateDatatypeDefinition model dt` produces the same `LDatatype` as the model's
+   `coreMonoType`-based construction for user types
+2. `translateDatatypeDefinition model dt` produces the same `LDatatype` as the model's
+   `heapTranslateType`-based construction for heap infrastructure types
+3. `groupDatatypes` (Tarjan SCC) preserves the infra-then-user ordering
+
+The key challenge is (1): `translateType model ty` uses the `SemanticModel` to resolve
+`UserDefined` types, while `coreMonoType ty` is a pure function. After `constrainedTypeElim`,
+all constrained types are resolved, so the remaining cases are:
+- Basic types (int, bool, string, real): both produce the same result
+- `UserDefined` composite types: both produce `"Composite"`
+- `UserDefined` datatype types: `translateType` looks up the SemanticModel, `coreMonoType`
+  uses the type name directly — these should agree after resolution
+
+**Approach:** Prove `translateType model ty = coreMonoType ty` under the hypothesis that
+the SemanticModel correctly reflects the program's type definitions. This is a semantic
+invariant maintained by the `resolve` pass.
+
+## D14: Equation Lemma Pattern for Cross-Module Proofs
+
+**Date:** 2026-04-08
+
+The DDM module system makes definitions private by default. Cross-module proofs can't
+`unfold` non-`@[expose]` definitions. The solution: **equation lemmas** — theorems proven
+in the defining module that expose the structure needed by downstream proofs.
+
+**Pattern:** Instead of making `translateTypes` `@[expose]` (which would expose internals),
+we prove `translateLaurelToCore_decls_ext` in `LaurelToCoreTranslator.lean` which:
+1. Decomposes the output into named segments (same as `translateLaurelToCore_decls`)
+2. Asserts `∀ d ∈ groupedDatatypeDecls, ∃ t, d = Core.Decl.type t` (all are `.type` decls)
+3. Asserts `∀ d ∈ mkReadFuncAxioms prog, ∃ a, d = Core.Decl.ax a` (all are `.ax` decls)
+
+This gives `TranslatorEquivalence.lean` everything it needs without exposing internals.
+The proof in the defining module can `unfold translateTypes` freely.
+
+**Key insight:** Equation lemmas are strictly better than `@[expose]` for proof purposes:
+- They state exactly what downstream proofs need
+- They don't leak implementation details
+- They're stable under refactoring (the lemma statement is the contract)

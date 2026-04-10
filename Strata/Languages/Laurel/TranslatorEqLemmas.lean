@@ -257,11 +257,13 @@ theorem translateStmt_eq_ite_withElse (outParams : List Parameter)
     (translateStmt outParams ⟨.IfThenElse cond thenBr (some elseBr), md⟩ s).1.isSome = true := by
   rw [translateStmt.eq_def]; mu; rw [hc]; mu; rw [ht]; mu; rw [he]; mu; rfl
 
-theorem translateStmt_eq_assign_expr (outParams : List Parameter)
-    (target value : StmtExprMd) (md : MetaData)
-    (s s1 : TranslateState) (rv : Core.Expression.Expr)
-    (hv : translateExpr value [] false s = (some rv, s1)) :
-    (translateStmt outParams ⟨.Assign [target] value, md⟩ s).1.isSome = true := by
+theorem translateStmt_eq_assign_expr (targetId : Identifier) (targetMd : MetaData)
+    (value : StmtExprMd) (md : MetaData) (outParams : List Parameter)
+    (s s1 : TranslateState) (coreExpr : Core.Expression.Expr)
+    (hNotStaticCall : ∀ c a, value.val ≠ .StaticCall c a)
+    (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a)
+    (hExpr : translateExpr value [] false s = (some coreExpr, s1)) :
+    (translateStmt outParams ⟨.Assign [⟨.Identifier targetId, targetMd⟩] value, md⟩ s).1.isSome = true := by
   sorry
 
 theorem translateStmt_eq_block_unlabeled (outParams : List Parameter)
@@ -276,7 +278,12 @@ theorem translateStmt_eq_while (outParams : List Parameter)
     (translateStmt outParams ⟨.While cond invs decr body, md⟩ s).1.isSome = true := by
   sorry
 
-/-! ## translateProcedure — sorry for now -/
+/-! ## translateProcedure — proved directly, no equation lemma needed -/
+
+-- translateProcedure properties are proved directly in TranslatorProperties.lean
+-- by unfolding translateProcedure.eq_def. No intermediate equation lemma is needed
+-- because the procedure construction is complex (mapM on inputs/outputs, translateChecks,
+-- translateStmt) and the properties only need to extract individual fields.
 
 theorem translateProcedure_eq_transparent (proc : Procedure)
     (bodyExpr : StmtExprMd) (s s1 : TranslateState)

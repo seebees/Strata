@@ -390,12 +390,14 @@ def resolveStmtExpr (exprMd : StmtExprMd) : ResolveM StmtExprMd := do
     pure (.ContractOf ty fn')
   | .Abstract => pure .Abstract
   | .All => pure .All
-  | .TryCatch body exnName catchBody => do
+  | .TryCatch body catches finally_ => do
     let body' ← resolveStmtExpr body
-    let catchBody' ← match catchBody with
-      | some cb => some <$> resolveStmtExpr cb
-      | none => pure none
-    pure (.TryCatch body' exnName catchBody')
+    let catches' ← catches.attach.mapM fun ⟨c, _hc⟩ => do
+      let exnTy' ← resolveHighType c.exceptionType
+      let body' ← resolveStmtExpr c.body
+      pure { c with exceptionType := exnTy', body := body' }
+    let finally_' ← finally_.attach.mapM (fun a => have := a.property; resolveStmtExpr a.val)
+    pure (.TryCatch body' catches' finally_')
   | .Throw expr => do
     let expr' ← resolveStmtExpr expr
     pure (.Throw expr')
@@ -406,7 +408,15 @@ def resolveStmtExpr (exprMd : StmtExprMd) : ResolveM StmtExprMd := do
     | none => pure (.Hole det none)
   return ⟨val', md⟩
   termination_by exprMd
-  decreasing_by all_goals (first | term_by_mem | sorry)
+  decreasing_by
+    all_goals first
+      | term_by_mem
+      | (-- TryCatch: c.body < c (struct field) and c ∈ catches (from attach)
+         have hBody : sizeOf c.body < sizeOf c := by
+           cases c; simp [CatchClause.mk.sizeOf_spec]; omega
+         add_mem_size_lemmas
+         have hMd := WithMetadata.sizeOf_val_lt exprMd
+         simp_all; omega)
 
 /-- Resolve a parameter: assign a fresh ID and add to scope. -/
 def resolveParameter (param : Parameter) : ResolveM Parameter := do
@@ -626,10 +636,20 @@ private def collectStmtExpr (map : Std.HashMap Nat AstNode) (expr : StmtExprMd)
   | .ContractOf _ fn => collectStmtExpr map fn
   | .New _ | .This | .Exit _ | .LiteralInt _ | .LiteralBool _ | .LiteralString _ | .LiteralDecimal _
   | .Abstract | .All | .Hole _ _ => map
-  | .TryCatch body _ catchBody =>
+  | .TryCatch body catches finally_ =>
     let map := collectStmtExpr map body
-    match catchBody with | some cb => collectStmtExpr map cb | none => map
+    let map := catches.attach.foldl (fun m ⟨c, _⟩ =>
+      let m := collectHighType m c.exceptionType
+      collectStmtExpr m c.body) map
+    match finally_ with | some fb => collectStmtExpr map fb | none => map
   | .Throw expr => collectStmtExpr map expr
+
+termination_by expr
+decreasing_by all_goals first
+  | term_by_mem
+  | (have : sizeOf c.body < sizeOf c := by
+       cases c; simp [CatchClause.mk.sizeOf_spec]; omega
+     add_mem_size_lemmas; simp_all; omega)
 
 private def collectBody (map : Std.HashMap Nat AstNode) (body : Body)
     : Std.HashMap Nat AstNode :=

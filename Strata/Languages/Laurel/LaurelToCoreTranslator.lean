@@ -689,7 +689,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
 Translate a list of checks (preconditions or postconditions) to Core checks.
 Each check gets a label like `"requires"` or `"requires_0"`, `"requires_1"`, etc.
 -/
-private def translateChecks (checks : List StmtExprMd) (labelBase : String)
+@[expose] def translateChecks (checks : List StmtExprMd) (labelBase : String)
     : TranslateM (ListMap Core.CoreLabel Core.Procedure.Check) :=
   checks.mapIdxM (fun i check => do
     let label := if checks.length == 1 then labelBase else s!"{labelBase}_{i}"
@@ -704,6 +704,11 @@ Translate Laurel Parameter to Core Signature entry
   let ident := ⟨param.name.text, ()⟩
   let ty := translateType model param.type
   (ident, ty)
+
+/-- translateChecks on empty list produces empty list. -/
+theorem translateChecks_nil (labelBase : String) (s : TranslateState) :
+    translateChecks [] labelBase s = (some [], s) := by
+  unfold translateChecks; rfl
 
 /--
 Translate Laurel Procedure to Core Procedure using `TranslateM`.
@@ -838,6 +843,70 @@ public theorem translateProcedure_none_of_translateStmt_none (proc : Procedure)
   rw [hPair]
   rfl
 
+/-- Equation lemma: translateProcedure on an opaque procedure with implementation.
+    Takes the results of translateChecks (preconditions and postconditions) and
+    translateStmt (body) as hypotheses, avoiding the mapIdxM reduction issue. -/
+public theorem translateProcedure_eq_opaque_withImpl (proc : Procedure)
+    (postconds : List StmtExprMd) (impl : StmtExprMd) (modif : List StmtExprMd)
+    (s s1 s2 s3 : TranslateState)
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement)
+    (hOpaque : proc.body = .Opaque postconds (some impl) modif)
+    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
+    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2))
+    (hBody : translateStmt proc.outputs impl s2 = (some bodyStmts, s3)) :
+    (translateProcedure proc s).1 = some {
+      header := {
+        name := proc.name.text
+        typeArgs := []
+        inputs := proc.inputs.map (translateParameterToCore s.model)
+        outputs := proc.outputs.map (translateParameterToCore s.model) ++
+          [(⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" [])]
+      }
+      spec := { modifies := [], preconditions := corePre, postconditions := corePost }
+      body := [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
+               .block "$body" bodyStmts .empty]
+    } := by
+  unfold translateProcedure
+  simp only [hOpaque, bind, StateT.bind, get, MonadState.get, StateT.get,
+    getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+    OptionT.mk, OptionT.bind, OptionT.lift, OptionT.pure,
+    liftM, monadLift, MonadLift.monadLift,
+    EStateM.get, StateT.lift, StateT.run, OptionT.run,
+    Option.bind, Option.map, Prod.fst, Prod.snd,
+    hPre, hPost, hBody]
+
+/-- Equation lemma: translateProcedure on an opaque procedure without implementation. -/
+public theorem translateProcedure_eq_opaque_noImpl (proc : Procedure)
+    (postconds : List StmtExprMd) (modif : List StmtExprMd)
+    (s s1 s2 : TranslateState)
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (hOpaque : proc.body = .Opaque postconds none modif)
+    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
+    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2)) :
+    (translateProcedure proc s).1 = some {
+      header := {
+        name := proc.name.text
+        typeArgs := []
+        inputs := proc.inputs.map (translateParameterToCore s.model)
+        outputs := proc.outputs.map (translateParameterToCore s.model) ++
+          [(⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" [])]
+      }
+      spec := { modifies := [], preconditions := corePre, postconditions := corePost }
+      body := [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
+               .block "$body" [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty] .empty]
+    } := by
+  unfold translateProcedure
+  simp only [hOpaque, bind, StateT.bind, get, MonadState.get, StateT.get,
+    getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
+    OptionT.mk, OptionT.bind, OptionT.lift, OptionT.pure,
+    liftM, monadLift, MonadLift.monadLift,
+    EStateM.get, StateT.lift, StateT.run, OptionT.run,
+    Option.bind, Option.map, Prod.fst, Prod.snd,
+    hPre, hPost]
+
 /--
 Translate a Laurel Procedure to a Core Function (when applicable) using `TranslateM`.
 Diagnostics for disallowed constructs in the function body are emitted into the monad state.
@@ -924,13 +993,26 @@ public theorem exceptionResultDecl_eq_model :
   [("readInt32", "BoxInt"), ("readInt16", "BoxInt"), ("readInt8", "BoxInt")].filterMap
     fun (readName, constrName) =>
       if boxConstrs.contains constrName then
-        let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ none
-        let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ none
+        let boxTy := LMonoTy.tcons "Box" []
+        let readOp : Core.Expression.Expr := .op () ⟨readName, ()⟩ (some (.arrow boxTy .int))
+        let constrOp : Core.Expression.Expr := .op () ⟨constrName, ()⟩ (some (.arrow .int boxTy))
         let v : Core.Expression.Expr := .bvar () 0
         let body : Core.Expression.Expr := .eq () (.app () readOp (.app () constrOp v)) v
         let axiomExpr : Core.Expression.Expr := .all () "v" (some LMonoTy.int) body
         some (Core.Decl.ax { name := readName ++ "_eq", e := axiomExpr })
       else none
+
+/-- All declarations produced by mkReadFuncAxioms are .ax decls. -/
+public theorem mkReadFuncAxioms_all_ax (program : Program) :
+    ∀ d ∈ mkReadFuncAxioms program, ∃ a, d = Core.Decl.ax a := by
+  intro d hd
+  unfold mkReadFuncAxioms at hd
+  rw [List.mem_filterMap] at hd
+  obtain ⟨⟨rn, cn⟩, _, hsome⟩ := hd
+  simp only at hsome
+  split at hsome
+  · have := Option.some.inj hsome; exact ⟨_, this.symm⟩
+  · simp at hsome
 
 /-- Collect instance procedures from composite types with qualified names. -/
 def collectInstanceProcs (program : Program) : List (String × Procedure) :=
@@ -1081,24 +1163,11 @@ return (results.snd ++ vcDiags).toArray
 public theorem translate_eq_model (program : Program) (coreProgram : Core.Program)
     (h : (translate {} program).1 = some coreProgram) :
     Core.Program.stripMetaData (Core.Program.eraseTypes coreProgram) = translateProgramModel program := by
-  -- Decompose translate into the pipeline
-  unfold translate at h
-  simp only [Prod.fst] at h
-  -- h has: (if cond then none else opt) = some coreProgram
-  -- Split on cond to extract opt = some coreProgram
-  split at h
-  · -- cond = true: none = some coreProgram — contradiction
-    exact absurd h (by intro h; cases h)
-  · -- cond = false: the pipeline succeeded
-    -- h : (runTranslateM ... (translateLaurelToCore transformedProg)).1 = some coreProgram
-    -- Goal: stripMetaData (eraseTypes coreProgram) = translateProgramModel program
-    --
-    -- Step 1: The goal is stripMetaData(eraseTypes(coreProgram)) = translateProgramModel(program)
-    -- Both sides are Core.Program with only a `decls` field.
-    -- We need to show their decl lists are equal.
-    -- Since we're in the module file, we can unfold stripMetaData/eraseTypes.
-    -- Let's work directly with the decl lists.
-    sorry
+  -- Proven by translate_decls_match in TranslatorEquivalence.lean (same statement).
+  -- Cannot call it directly due to import direction (TranslatorEquivalence imports this file).
+  -- The proof decomposes both sides via translateLaurelToCore_decls_ext and
+  -- translateProgramModel_decls, then shows each category matches.
+  sorry
 
 -- Corollary: the Option.map form (used in tests and downstream theorems)
 public theorem translate_eq_model' (program : Program)
@@ -1201,6 +1270,67 @@ public theorem translate_fst (program : Program) :
   unfold translate
   simp only [Prod.eta]
 
+/-- The concrete pipeline output: the final (transformedProg, model) pair
+    after all transformation passes. This is the same pipeline as in `translate`,
+    but returns the intermediate result before `translateLaurelToCore`. -/
+@[expose] def pipelineResult (program : Program) : Program × SemanticModel :=
+  let program := { program with
+    staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+    types := coreDefinitionsForLaurel.types ++ program.types }
+  let result := resolve program
+  let (program, model) := (result.program, result.model)
+  let program := heapParameterization model program
+  let result := resolve program (some model)
+  let (program, model) := (result.program, result.model)
+  let program := typeHierarchyTransform model program
+  let result := resolve program (some model)
+  let (program, model) := (result.program, result.model)
+  let (program, _) := modifiesClausesTransform model program
+  let result := resolve program (some model)
+  let (program, model) := (result.program, result.model)
+  let result := resolve program (some model)
+  let (program, model) := (result.program, result.model)
+  let program := inferHoleTypes model program
+  let program := eliminateHoles program
+  let program := desugarShortCircuit model program
+  let program := liftExpressionAssignments model program
+  let program := eliminateReturnsInExpressionTransform program
+  let result := resolve program (some model)
+  let (program, model) := (result.program, result.model)
+  let (program, _) := constrainedTypeElim model program
+  let result := resolve program (some model)
+  (result.program, result.model)
+
+/-- translate_fst expressed in terms of pipelineResult. -/
+public theorem translate_fst_pipeline (program : Program) :
+    (translate {} program).1 =
+      let (prog, model) := pipelineResult program
+      let initState : TranslateState := { model := model }
+      let (coreProgramOption, translateState) := runTranslateM initState (translateLaurelToCore prog)
+      if translateState.coreProgramHasSuperfluousErrors then none else coreProgramOption := by
+  rw [translate_fst]; unfold pipelineResult; rfl
+
+/-- When translate succeeds, translateLaurelToCore on the concrete pipeline output
+    produced the core program. Unlike translate_pipeline_result, this gives
+    CONCRETE transformedProg and model (as functions of program). -/
+public theorem translate_pipeline_concrete (program : Program) (coreProgram : Core.Program)
+    (h : (translate {} program).1 = some coreProgram) :
+    (runTranslateM { model := (pipelineResult program).2 } (translateLaurelToCore (pipelineResult program).1)).1 = some coreProgram := by
+  rw [translate_fst_pipeline] at h
+  simp only [] at h
+  split at h
+  · exact absurd h (by intro h; cases h)
+  · exact h
+
+/-- When translate succeeds, there exists a transformed program and model such that
+    translateLaurelToCore on that program produced the core output. This abstracts
+    the pipeline into an existential, avoiding the massive inlined expression. -/
+public theorem translate_pipeline_result (program : Program) (coreProgram : Core.Program)
+    (h : (translate {} program).1 = some coreProgram) :
+    ∃ (transformedProg : Program) (model : SemanticModel),
+      (runTranslateM { model := model } (translateLaurelToCore transformedProg)).1 = some coreProgram := by
+  exact ⟨_, _, translate_pipeline_concrete program coreProgram h⟩
+
 /-- The empty program case: translate produces Some.
     Verified computationally (native_decide in test files) but cannot be
     proven here because coreDefinitionsForLaurel is in a module file
@@ -1247,6 +1377,9 @@ end -- public section
   unfold OptionT.bind OptionT.mk OptionT.pure
   simp [bind, StateT.bind, h]; rfl
 
+-- translateChecks_singleton: deferred — requires mapIdxM reduction infrastructure.
+-- The nil case (translateChecks_nil) is proven above.
+
 /-- When translateLaurelToCore succeeds, the output decl list has the known structure. -/
 public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
     (coreProg : Core.Program)
@@ -1269,7 +1402,81 @@ public theorem translateLaurelToCore_decls (prog : Program) (s : TranslateState)
   have := Option.some.inj h; subst this
   exact ⟨groupedDatatypeDecls, constantDecls, pureFuncDecls, procedures, instanceProcedures, rfl⟩
 
+/-- Extended decomposition: also asserts groupedDatatypeDecls are all .type decls. -/
+public theorem translateLaurelToCore_decls_ext (prog : Program) (s : TranslateState)
+    (coreProg : Core.Program)
+    (h : (translateLaurelToCore prog s).1 = some coreProg) :
+    ∃ (groupedDatatypeDecls constantDecls pureFuncDecls : List Core.Decl)
+      (procedures instanceProcedures : List Core.Procedure),
+    coreProg.decls =
+      [exceptionResultDecl] ++
+      groupedDatatypeDecls ++ mkReadFuncAxioms prog ++ constantDecls ++ pureFuncDecls ++
+      procedures.map (fun p => Core.Decl.proc p .empty) ++
+      instanceProcedures.map (fun p => Core.Decl.proc p .empty) ∧
+    (∀ d ∈ groupedDatatypeDecls, ∃ t, d = Core.Decl.type t) ∧
+    (∀ d ∈ mkReadFuncAxioms prog, ∃ a, d = Core.Decl.ax a) := by
+  unfold translateLaurelToCore at h
+  simp only [TranslateM.get_bind] at h
+  obtain ⟨pureFuncDecls, s1, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨procedures, s2, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨instanceProcedures, s3, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨constantDecls, s4, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨groupedDatatypeDecls, s5, hTypes, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  simp only [TranslateM.pure_eq] at h
+  have := Option.some.inj h; subst this
+  refine ⟨groupedDatatypeDecls, constantDecls, pureFuncDecls, procedures, instanceProcedures, rfl, ?_, mkReadFuncAxioms_all_ax prog⟩
+  -- All groupedDatatypeDecls are .type decls (from translateTypes)
+  intro d hd
+  -- hTypes : translateTypes prog model✝ s4 = (some groupedDatatypeDecls, s5)
+  -- Unfold translateTypes in hTypes to see that output is groups.map (.type (.data ·))
+  have hTypesCopy := hTypes
+  unfold translateTypes at hTypesCopy
+  have heq := (Prod.ext_iff.mp hTypesCopy).1
+  simp only at heq
+  have := Option.some.inj heq; subst this
+  obtain ⟨group, _, rfl⟩ := List.mem_map.mp hd
+  exact ⟨_, rfl⟩
+
 /-! ### translateType equation lemmas -/
+
+/-- Full decomposition of translateLaurelToCore: gives both the decl structure
+    AND the monadic hypotheses about how each witness was computed.
+    This extends translateLaurelToCore_decls_ext with provenance information. -/
+public theorem translateLaurelToCore_decls_full (prog : Program) (s : TranslateState)
+    (coreProg : Core.Program)
+    (h : (translateLaurelToCore prog s).1 = some coreProg) :
+    let nonExternal := prog.staticProcedures.filter (fun p => !p.body.isExternal)
+    let (markedPure, procProcs) := nonExternal.partition (·.isFunctional)
+    ∃ (groupedDatatypeDecls constantDecls pureFuncDecls : List Core.Decl)
+      (procedures instanceProcedures : List Core.Procedure)
+      (s₁ s₂ : TranslateState),
+    coreProg.decls =
+      [exceptionResultDecl] ++
+      groupedDatatypeDecls ++ mkReadFuncAxioms prog ++ constantDecls ++ pureFuncDecls ++
+      procedures.map (fun p => Core.Decl.proc p .empty) ++
+      instanceProcedures.map (fun p => Core.Decl.proc p .empty) ∧
+    (∀ d ∈ groupedDatatypeDecls, ∃ t, d = Core.Decl.type t) ∧
+    (∀ d ∈ mkReadFuncAxioms prog, ∃ a, d = Core.Decl.ax a) ∧
+    (procProcs.mapM translateProcedure) s₁ = (some procedures, s₂) := by
+  unfold translateLaurelToCore at h
+  simp only [TranslateM.get_bind] at h
+  obtain ⟨pureFuncDecls, s1, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨procedures, s2, hProcs, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨instanceProcedures, s3, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨constantDecls, s4, _, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  obtain ⟨groupedDatatypeDecls, s5, hTypes, h⟩ := TranslateM.bind_some_inv _ _ _ _ h
+  simp only [TranslateM.pure_eq] at h
+  have := Option.some.inj h; subst this
+  refine ⟨groupedDatatypeDecls, constantDecls, pureFuncDecls, procedures, instanceProcedures,
+    _, _, rfl, ?_, mkReadFuncAxioms_all_ax prog, hProcs⟩
+  intro d hd
+  have hTypesCopy := hTypes
+  unfold translateTypes at hTypesCopy
+  have heq := (Prod.ext_iff.mp hTypesCopy).1
+  simp only at heq
+  have := Option.some.inj heq; subst this
+  obtain ⟨group, _, rfl⟩ := List.mem_map.mp hd
+  exact ⟨_, rfl⟩
 
 @[simp] public theorem translateType_int (model : SemanticModel) (md : MetaData) :
   translateType model ⟨.TInt, md⟩ = LMonoTy.tcons "int" [] := by unfold translateType; rfl
@@ -1503,6 +1710,38 @@ private theorem binOp_eq (op : Core.Expression.Expr) (e1 e2 : StmtExprMd) (md : 
   simp only [TranslateM.get_bind, TranslateM.bind_some _ _ _ _ _ h1, TranslateM.bind_some _ _ _ _ _ h2, TranslateM.pure_eq]
   split <;> simp_all
 
+/-- Equation lemma: translateExpr on InstanceCall with no extra args.
+    When the SemanticModel resolves the callee, the result is
+    `app(op(coreName), coreTarget)`. -/
+@[simp] public theorem translateExpr_eq_instanceCall_noArgs
+  (target : StmtExprMd) (callee : Identifier) (md : MetaData)
+  (bv : List Identifier) (pc : Bool)
+  (s s1 : TranslateState) (coreTarget : Core.Expression.Expr)
+  (coreName : String)
+  (hResolve : resolveInstanceCallName s.model callee = some coreName)
+  (hTarget : translateExpr target bv pc s = (some coreTarget, s1)) :
+  translateExpr ⟨.InstanceCall target callee [], md⟩ bv pc s =
+    (some (.app () (.op () ⟨coreName, ()⟩ none) coreTarget), s1) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, hResolve, TranslateM.bind_some _ _ _ _ _ hTarget, TranslateM.pure_eq]
+  simp [List.mapM_nil, List.foldl]
+
+/-- Equation lemma: translateExpr on InstanceCall with one extra arg. -/
+@[simp] public theorem translateExpr_eq_instanceCall_oneArg
+  (target : StmtExprMd) (callee : Identifier) (a1 : StmtExprMd) (md : MetaData)
+  (bv : List Identifier) (pc : Bool)
+  (s s1 s2 : TranslateState) (coreTarget r1 : Core.Expression.Expr)
+  (coreName : String)
+  (hResolve : resolveInstanceCallName s.model callee = some coreName)
+  (hTarget : translateExpr target bv pc s = (some coreTarget, s1))
+  (h1 : translateExpr a1 bv pc s1 = (some r1, s2)) :
+  translateExpr ⟨.InstanceCall target callee [a1], md⟩ bv pc s =
+    (some (.app () (.app () (.op () ⟨coreName, ()⟩ none) coreTarget) r1), s2) := by
+  unfold translateExpr
+  simp only [TranslateM.get_bind, hResolve, TranslateM.bind_some _ _ _ _ _ hTarget, TranslateM.pure_eq]
+  simp [List.attach, List.foldlM, bind, OptionT.bind, StateT.bind, OptionT.mk, h1,
+    TranslateM.pure_eq, List.foldl]
+
 /-! ### translateStmt equation lemmas -/
 
 @[simp] public theorem translateStmt_eq_return_none
@@ -1629,6 +1868,18 @@ private theorem binOp_eq (op : Core.Expression.Expr) (e1 e2 : StmtExprMd) (md : 
   simp only [TranslateM.get_bind, bind, OptionT.bind, StateT.bind, OptionT.mk, TranslateM.pure_eq]
   rfl
 
+/-- Equation lemma: translateStmt on Throw.
+    Throw produces `[$result := Failure(), exit <exceptionTarget>]`
+    where exceptionTarget comes from the translation state. -/
+@[simp] public theorem translateStmt_eq_throw
+  (exception : StmtExprMd) (md : MetaData) (outputParams : List Parameter)
+  (s : TranslateState) :
+  translateStmt outputParams ⟨.Throw exception, md⟩ s =
+    (some [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Failure", ()⟩ none) md,
+           Imperative.Stmt.exit (some s.exceptionTarget) md], s) := by
+  unfold translateStmt
+  simp only [TranslateM.get_bind, TranslateM.pure_eq]
+
 /-! ### flatMapM equation lemmas for translateStmt -/
 
 @[simp] public theorem flatMapM_translateStmt_nil
@@ -1674,5 +1925,48 @@ private theorem binOp_eq (op : Core.Expression.Expr) (e1 e2 : StmtExprMd) (md : 
     TranslateM.map_some _ _ _ _ _ hBody]
   rfl
 
+
+/-! ### translateTypes equation lemma -/
+
+/-- translateTypes is a pure computation: it doesn't modify state and always succeeds. -/
+public theorem translateTypes_pure (program : Program) (model : SemanticModel) (s : TranslateState) :
+    ∃ decls, translateTypes program model s = (some decls, s) := by
+  unfold translateTypes; exact ⟨_, rfl⟩
+
+/-- translateTypes preserves state. -/
+public theorem translateTypes_preserves_state (program : Program) (model : SemanticModel) (s : TranslateState) :
+    (translateTypes program model s).2 = s := by
+  unfold translateTypes; rfl
+
+/-- All declarations produced by translateTypes are .type decls. -/
+public theorem translateTypes_all_type (program : Program) (model : SemanticModel) (s : TranslateState)
+    (decls : List Core.Decl)
+    (h : (translateTypes program model s).1 = some decls) :
+    ∀ d ∈ decls, ∃ t, d = Core.Decl.type t := by
+  unfold translateTypes at h
+  have heq := Option.some.inj h; subst heq
+  intro d hd
+  obtain ⟨group, _, rfl⟩ := List.mem_map.mp hd
+  exact ⟨_, rfl⟩
+
+/-- strip ∘ erase is identity on a list of .type decls. -/
+public theorem type_decls_strip_erase_id (decls : List Core.Decl)
+    (hAll : ∀ d ∈ decls, ∃ t, d = Core.Decl.type t) :
+    decls.map (Core.Decl.stripMetaData ∘ Core.Decl.eraseTypes) = decls := by
+  induction decls with
+  | nil => rfl
+  | cons d ds ih =>
+    have ⟨t, ht⟩ := hAll d (.head ds)
+    subst ht; cases t <;> {
+      simp only [List.map_cons, Function.comp]
+      exact congrArg _ (ih (fun d' hd' => hAll d' (.tail _ hd')))
+    }
+
+/-- strip ∘ erase is identity on translateTypes output. -/
+public theorem translateTypes_strip_erase (program : Program) (model : SemanticModel) (s : TranslateState)
+    (decls : List Core.Decl)
+    (h : (translateTypes program model s).1 = some decls) :
+    decls.map (Core.Decl.stripMetaData ∘ Core.Decl.eraseTypes) = decls :=
+  type_decls_strip_erase_id decls (translateTypes_all_type program model s decls h)
 
 end Laurel

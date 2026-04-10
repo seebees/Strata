@@ -198,24 +198,17 @@ theorem translateExpr_eq_staticCall_twoArgs (callee : Identifier)
   rw [translateExpr.eq_def]; mu; simp only [hNotPure]
   simp (config := { decide := true }); mu; rw [h1]; mu; rw [h2]; mu; rfl
 
-/-! ## translateExpr: InstanceCall — sorry -/
+/-! ## translateExpr: InstanceCall — NOT YET IMPLEMENTED in translator
 
-theorem translateExpr_eq_instanceCall_noArgs
-    (target : StmtExprMd) (callee : Identifier) (md : MetaData)
-    (bv : List Identifier) (pc : Bool)
-    (s s1 : TranslateState) (rt : Core.Expression.Expr)
-    (ht : translateExpr target bv pc s = (some rt, s1)) :
-    (translateExpr ⟨.InstanceCall target callee [], md⟩ bv pc s).1.isSome = true := by
-  sorry
+InstanceCall in translateExpr calls throwExprDiagnostic (returns none).
+The old properties claiming success were stale. These are removed.
+When InstanceCall support is added to translateExpr, add equation lemmas here. -/
 
-theorem translateExpr_eq_instanceCall_oneArg
-    (target : StmtExprMd) (callee : Identifier) (arg : StmtExprMd)
-    (md : MetaData) (bv : List Identifier) (pc : Bool)
-    (s s1 s2 : TranslateState) (rt ra : Core.Expression.Expr)
-    (ht : translateExpr target bv pc s = (some rt, s1))
-    (ha : translateExpr arg bv pc s1 = (some ra, s2)) :
-    (translateExpr ⟨.InstanceCall target callee [arg], md⟩ bv pc s).1.isSome = true := by
-  sorry
+/-! ## translateStmt: Throw — NOT HANDLED as direct case
+
+Throw falls through to the catch-all in translateStmt which calls
+exprAsUnusedInit → translateExpr → disallowed → throwExprDiagnostic → none.
+The old properties claiming success were stale. -/
 
 /-! ## translateStmt -/
 
@@ -230,13 +223,6 @@ theorem translateStmt_eq_localVar_noInit (outParams : List Parameter)
     (hTy : translateType ty s = (some coreTy, s1)) :
     (translateStmt outParams ⟨.LocalVariable name ty none, md⟩ s).1.isSome = true := by
   rw [translateStmt.eq_def]; mu; rw [hTy]; mu; rfl
-
-theorem translateStmt_eq_throw (outParams : List Parameter)
-    (exc : StmtExprMd) (md : MetaData)
-    (s s1 : TranslateState) (re : Core.Expression.Expr)
-    (he : translateExpr exc [] false s = (some re, s1)) :
-    (translateStmt outParams ⟨.Throw exc, md⟩ s).1.isSome = true := by
-  sorry
 
 theorem translateStmt_eq_ite_noElse (outParams : List Parameter)
     (cond thenBr : StmtExprMd) (md : MetaData)
@@ -267,16 +253,24 @@ theorem translateStmt_eq_assign_expr (targetId : Identifier) (targetMd : MetaDat
   sorry
 
 theorem translateStmt_eq_block_unlabeled (outParams : List Parameter)
-    (stmts : List StmtExprMd) (md : MetaData) (s : TranslateState) :
-    (translateStmt outParams ⟨.Block stmts none, md⟩ s).1.isSome = true := by
-  sorry
+    (stmts : List StmtExprMd) (md : MetaData)
+    (s s1 : TranslateState) (rs : List Core.Statement)
+    (h : (stmts.flatMapM (fun stmt => translateStmt outParams stmt) s) = (some rs, s1)) :
+    (translateStmt outParams ⟨.Block stmts none, md⟩ s) = (some rs, s1) := by
+  rw [translateStmt.eq_def]; mu; rw [h]; mu
 
 theorem translateStmt_eq_while (outParams : List Parameter)
     (cond : StmtExprMd) (invs : List StmtExprMd)
     (decr : Option StmtExprMd) (body : StmtExprMd) (md : MetaData)
-    (s : TranslateState) :
+    (s s1 s2 s3 s4 : TranslateState)
+    (rc : Core.Expression.Expr) (ri : List Core.Expression.Expr)
+    (rd : Option Core.Expression.Expr) (rb : List Core.Statement)
+    (hc : translateExpr cond [] false s = (some rc, s1))
+    (hi : (invs.mapM (fun i => translateExpr i) s1) = (some ri, s2))
+    (hd : (decr.mapM (fun d => translateExpr d) s2) = (some rd, s3))
+    (hb : translateStmt outParams body s3 = (some rb, s4)) :
     (translateStmt outParams ⟨.While cond invs decr body, md⟩ s).1.isSome = true := by
-  sorry
+  rw [translateStmt.eq_def]; mu; rw [hc]; mu; rw [hi]; mu; rw [hd]; mu; rw [hb]; mu; rfl
 
 /-! ## translateProcedure — proved directly, no equation lemma needed -/
 

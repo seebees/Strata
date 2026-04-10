@@ -42,7 +42,7 @@ private def SourceRange.toMetaData (uri : Uri) (sr : SourceRange) : Imperative.M
 def getArgMetaData (arg : Arg) : TransM (Imperative.MetaData Core.Expression) := do
   return match (← get).uri with
   | some uri => SourceRange.toMetaData uri arg.ann
-  | none => default
+  | none => #[⟨Imperative.MetaData.fileRange, .fileRange FileRange.unknown⟩]
 
 def checkOp (op : Strata.Operation) (name : QualifiedIdent) (argc : Nat) :
   TransM Unit := do
@@ -77,11 +77,10 @@ def translateBool (arg : Arg) : TransM Bool := do
   | x => TransM.error s!"translateBool expects expression or operation, got {repr x}"
 
 instance : Inhabited Parameter where
-  default := { name := "" , type := ⟨.TVoid, #[]⟩ }
+  default := { name := "" , type := ⟨.Unknown, #[]⟩ }
 
 def mkHighTypeMd (t : HighType) (md : MetaData) : HighTypeMd := ⟨t, md⟩
 def mkStmtExprMd (e : StmtExpr) (md : MetaData) : StmtExprMd := ⟨e, md⟩
-def mkStmtExprMdEmpty (e : StmtExpr) : StmtExprMd := ⟨e, #[]⟩
 
 partial def translateHighType (arg : Arg) : TransM HighTypeMd := do
   let md ← getArgMetaData arg
@@ -147,10 +146,10 @@ instance : Inhabited Procedure where
     inputs := []
     outputs := []
     preconditions := []
-    determinism := .deterministic none
     decreases := none
     isFunctional := false
-    body := .Transparent ⟨.LiteralBool true, #[]⟩
+    invokeOn := none
+    body := .Transparent ⟨.LiteralBool true, #[]⟩ []
     md := .empty
   }
 
@@ -193,7 +192,7 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
       let cond ← translateStmtExpr arg0
       let md' ← match errMsgArg with
         | .option _ (some (.op errOp)) => match errOp.name, errOp.args with
-          | q`Laurel.errorMessage, #[strArg] => do
+          | q`Laurel.errorSummary, #[strArg] => do
             let msg ← translateString strArg
             pure (md.withPropertySummary msg)
           | _, _ => pure md
@@ -257,7 +256,7 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
       let name ← translateIdent arg0
       let varType ← match typeArg with
         | .option _ (some (.op typeOp)) => match typeOp.name, typeOp.args with
-          | q`Laurel.optionalType, #[typeArg0] => translateHighType typeArg0
+          | q`Laurel.typeAnnotation, #[typeArg0] => translateHighType typeArg0
           | _, _ => TransM.error s!"Variable {name} requires explicit type"
         | _ => TransM.error s!"Variable {name} requires explicit type"
       let value ← match assignArg with
@@ -310,7 +309,7 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
       let thenBranch ← translateStmtExpr arg1
       let elseBranch ← match elseArg with
         | .option _ (some (.op elseOp)) => match elseOp.name, elseOp.args with
-          | q`Laurel.optionalElse, #[elseArg0] => translateStmtExpr elseArg0 >>= (pure ∘ some)
+          | q`Laurel.elseBranch, #[elseArg0] => translateStmtExpr elseArg0 >>= (pure ∘ some)
           | _, _ => pure none
         | _ => pure none
       return mkStmtExprMd (.IfThenElse cond thenBranch elseBranch) md
@@ -350,7 +349,7 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
       let ty ← translateHighType tyArg
       let trigger ← match triggerArg with
         | .option _ (some (.op triggerOp)) => match triggerOp.name, triggerOp.args with
-          | q`Laurel.optionalTrigger, #[triggerExprArg] =>
+          | q`Laurel.trigger, #[triggerExprArg] =>
             translateStmtExpr triggerExprArg >>= (pure ∘ some)
           | _, _ => pure none
         | _ => pure none
@@ -361,7 +360,7 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
       let ty ← translateHighType tyArg
       let trigger ← match triggerArg with
         | .option _ (some (.op triggerOp)) => match triggerOp.name, triggerOp.args with
-          | q`Laurel.optionalTrigger, #[triggerExprArg] =>
+          | q`Laurel.trigger, #[triggerExprArg] =>
             translateStmtExpr triggerExprArg >>= (pure ∘ some)
           | _, _ => pure none
         | _ => pure none
@@ -427,7 +426,7 @@ def translateRequiresClauses (arg : Arg) : TransM (List StmtExprMd) := do
           let expr ← translateStmtExpr exprArg
           let expr' ← match errMsgArg with
             | .option _ (some (.op errOp)) => match errOp.name, errOp.args with
-              | q`Laurel.errorMessage, #[strArg] => do
+              | q`Laurel.errorSummary, #[strArg] => do
                 let msg ← translateString strArg
                 pure { expr with md := expr.md.withPropertySummary msg }
               | _, _ => pure expr
@@ -449,7 +448,7 @@ def translateEnsuresClauses (arg : Arg) : TransM (List StmtExprMd) := do
           let expr ← translateStmtExpr exprArg
           let expr' ← match errMsgArg with
             | .option _ (some (.op errOp)) => match errOp.name, errOp.args with
-              | q`Laurel.errorMessage, #[strArg] => do
+              | q`Laurel.errorSummary, #[strArg] => do
                 let msg ← translateString strArg
                 pure { expr with md := expr.md.withPropertySummary msg }
               | _, _ => pure expr
@@ -464,11 +463,16 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
   let .op op := arg
     | TransM.error s!"parseProcedure expects operation"
 
-  match op.name, op.args with
-  | q`Laurel.procedure, #[nameArg, paramArg, returnTypeArg, returnParamsArg,
-      requiresArg, ensuresArg, modifiesArg, bodyArg]
-  | q`Laurel.function, #[nameArg, paramArg, returnTypeArg, returnParamsArg,
-      requiresArg, ensuresArg, modifiesArg, bodyArg] =>
+  let isFunction := op.name == q`Laurel.function
+  -- Extract opaque modifier for functions (first arg); strip it so both have the same arg shape
+  let (isOpaque, args) := if isFunction then
+    match op.args[0]? with
+    | some (.option _ (some _)) => (true, op.args.extract 1 op.args.size)
+    | _ => (false, op.args.extract 1 op.args.size)
+  else (false, op.args)
+  match args with
+  | #[nameArg, paramArg, returnTypeArg, returnParamsArg,
+      requiresArg, invokeOnArg, ensuresArg, modifiesArg, bodyArg] =>
     let name ← translateIdent nameArg
     let nameMd ← getArgMetaData nameArg
     let parameters ← translateParameters paramArg
@@ -476,10 +480,10 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
     -- If returnTypeArg is set, create a single "result" parameter
     let returnParameters ← match returnTypeArg with
       | .option _ (some (.op returnTypeOp)) => match returnTypeOp.name, returnTypeOp.args with
-        | q`Laurel.optionalReturnType, #[typeArg] =>
+        | q`Laurel.returnType, #[typeArg] =>
           let retType ← translateHighType typeArg
           pure [{ name := "result", type := retType : Parameter }]
-        | _, _ => TransM.error s!"Expected optionalReturnType operation, got {repr returnTypeOp.name}"
+        | _, _ => TransM.error s!"Expected returnType operation, got {repr returnTypeOp.name}"
       | .option _ none =>
         -- No return type, check returnParamsArg instead
         match returnParamsArg with
@@ -488,9 +492,17 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
           | _, _ => TransM.error s!"Expected returnParameters operation, got {repr returnOp.name}"
         | .option _ none => pure []
         | _ => TransM.error s!"Expected returnParameters operation, got {repr returnParamsArg}"
-      | _ => TransM.error s!"Expected optionalReturnType operation, got {repr returnTypeArg}"
+      | _ => TransM.error s!"Expected returnType operation, got {repr returnTypeArg}"
     -- Parse preconditions (requires clauses - zero or more)
     let preconditions ← translateRequiresClauses requiresArg
+    -- Parse optional invokeOn clause
+    let invokeOn ← match invokeOnArg with
+      | .option _ (some (.op invokeOnOp)) => match invokeOnOp.name, invokeOnOp.args with
+        | q`Laurel.invokeOnClause, #[triggerExprArg] =>
+          translateStmtExpr triggerExprArg >>= (pure ∘ some)
+        | _, _ => TransM.error s!"Expected invokeOnClause operation, got {repr invokeOnOp.name}"
+      | .option _ none => pure none
+      | _ => pure none
     -- Parse postconditions (ensures clauses - zero or more)
     let postconditions ← translateEnsuresClauses ensuresArg
     -- Parse modifies clauses (zero or more)
@@ -503,34 +515,33 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
       | _ => pure false
     let body ← match bodyArg with
       | .option _ (some (.op bodyOp)) => match bodyOp.name, bodyOp.args with
-        | q`Laurel.optionalBody, #[exprArg] => translateCommand exprArg >>= (pure ∘ some)
+        | q`Laurel.body, #[exprArg] => translateCommand exprArg >>= (pure ∘ some)
         | q`Laurel.externalBody, #[] => pure none
-        | _, _ => TransM.error s!"Expected optionalBody or externalBody operation, got {repr bodyOp.name}"
+        | _, _ => TransM.error s!"Expected body or externalBody operation, got {repr bodyOp.name}"
       | .option _ none => pure none
-      | _ => TransM.error s!"Expected optionalBody, got {repr bodyArg}"
+      | _ => TransM.error s!"Expected body, got {repr bodyArg}"
     -- Determine procedure body kind
     let procBody :=
       if isExternal then Body.External
+      else if isFunction && !isOpaque then match body with
+        | some b => Body.Transparent b postconditions
+        | none => Body.Opaque postconditions none modifies
       else match postconditions, body with
       | _ :: _, bodyOpt => Body.Opaque postconditions bodyOpt modifies
-      | [], some b => Body.Transparent b
+      | [], some b => Body.Transparent b []
       | [], none => Body.Opaque [] none modifies
     return {
       name := name
       inputs := parameters
       outputs := returnParameters
       preconditions := preconditions
-      determinism := .deterministic none
       decreases := none
-      isFunctional := op.name == q`Laurel.function
+      isFunctional := isFunction
+      invokeOn := invokeOn
       body := procBody
       md := nameMd
     }
-  | q`Laurel.procedure, args
-  | q`Laurel.function, args =>
-    TransM.error s!"parseProcedure expects 8 arguments, got {args.size}"
-  | _, _ =>
-    TransM.error s!"parseProcedure expects procedure or function, got {repr op.name}"
+  | _ => TransM.error s!"parseProcedure expects correct number of arguments, got {args.size}"
 
 def parseField (arg : Arg) : TransM Field := do
   let .op op := arg
@@ -555,7 +566,7 @@ def parseComposite (arg : Arg) : TransM TypeDefinition := do
     let name ← translateIdent nameArg
     let extending ← match extendsArg with
       | .option _ (some (.op extendsOp)) => match extendsOp.name, extendsOp.args with
-        | q`Laurel.optionalExtends, #[parentsArg] =>
+        | q`Laurel.extends, #[parentsArg] =>
           match parentsArg with
           | .seq _ .comma args => args.toList.mapM translateIdent
           | singleArg => do let parent ← translateIdent singleArg; pure [parent]

@@ -33,11 +33,13 @@ inductive Stmt (P : PureExpr) (Cmd : Type) : Type where
   | cmd      (cmd : Cmd)
   /-- An block containing a `List` of `Stmt`. -/
   | block    (label : String) (b : List (Stmt P Cmd)) (md : MetaData P)
-  /-- A conditional execution statement. -/
-  | ite      (cond : P.Expr)  (thenb : List (Stmt P Cmd)) (elseb : List (Stmt P Cmd)) (md : MetaData P)
+  /-- A conditional execution statement. When `cond` is `.nondet`, the branch
+  is chosen non-deterministically. -/
+  | ite      (cond : ExprOrNondet P)  (thenb : List (Stmt P Cmd)) (elseb : List (Stmt P Cmd)) (md : MetaData P)
   /-- An iterated execution statement. Includes an optional measure (for
-  termination) and invariants. -/
-  | loop     (guard : P.Expr) (measure : Option P.Expr) (invariants : List P.Expr)
+  termination) and invariants. When `guard` is `.nondet`, the loop iterates
+  a non-deterministic number of times. -/
+  | loop     (guard : ExprOrNondet P) (measure : Option P.Expr) (invariants : List P.Expr)
              (body : List (Stmt P Cmd)) (md : MetaData P)
   /-- An exit statement that transfers control out of the nearest enclosing
   block with the given label. If no label is provided, exits the nearest
@@ -68,11 +70,11 @@ def Stmt.inductionOn {P : PureExpr} {Cmd : Type}
     (block_case : ∀ (label : String) (b : List (Stmt P Cmd)) (md : MetaData P),
       (∀ s, s ∈ b → motive s) →
       motive (Stmt.block label b md))
-    (ite_case : ∀ (cond : P.Expr) (thenb elseb : List (Stmt P Cmd)) (md : MetaData P),
+    (ite_case : ∀ (cond : ExprOrNondet P) (thenb elseb : List (Stmt P Cmd)) (md : MetaData P),
       (∀ s, s ∈ thenb → motive s) →
       (∀ s, s ∈ elseb → motive s) →
       motive (Stmt.ite cond thenb elseb md))
-    (loop_case : ∀ (guard : P.Expr) (measure : Option P.Expr) (invariant : List P.Expr)
+    (loop_case : ∀ (guard : ExprOrNondet P) (measure : Option P.Expr) (invariant : List P.Expr)
       (body : List (Stmt P Cmd)) (md : MetaData P),
       (∀ s, s ∈ body → motive s) →
       motive (Stmt.loop guard measure invariant body md))
@@ -109,8 +111,8 @@ def Stmt.sizeOf (s : Imperative.Stmt P C) : Nat :=
   match s with
   | .cmd c => 1 + SizeOf.sizeOf c
   | .block _ bss _ => 1 + Block.sizeOf bss
-  | .ite c tss ess _ => 3 + sizeOf c + Block.sizeOf tss + Block.sizeOf ess
-  | .loop g _ _ bss _ => 3 + sizeOf g + Block.sizeOf bss
+  | .ite _ tss ess _ => 3 + Block.sizeOf tss + Block.sizeOf ess
+  | .loop _ _ _ bss _ => 3 + Block.sizeOf bss
   | .exit _ _ => 1
   | .funcDecl _ _ => 1
   | .typeDecl _ _ => 1
@@ -135,7 +137,7 @@ This is useful when converting to non-deterministic statements which don't have 
 
 mutual
 /-- Returns true if the statement contains no function declarations. -/
-def Stmt.noFuncDecl (s : Stmt P C) : Bool :=
+@[expose] def Stmt.noFuncDecl (s : Stmt P C) : Bool :=
   match s with
   | .cmd _ => true
   | .block _ bss _ => Block.noFuncDecl bss
@@ -147,7 +149,7 @@ def Stmt.noFuncDecl (s : Stmt P C) : Bool :=
   termination_by (Stmt.sizeOf s)
 
 /-- Returns true if the block contains no function declarations. -/
-def Block.noFuncDecl (ss : Block P C) : Bool :=
+@[expose] def Block.noFuncDecl (ss : Block P C) : Bool :=
   match ss with
   | [] => true
   | s :: srest => Stmt.noFuncDecl s && Block.noFuncDecl srest
@@ -203,8 +205,8 @@ def Stmt.getVars [HasVarsPure P P.Expr] [HasVarsPure P C] (s : Stmt P C) : List 
   match s with
   | .cmd cmd => HasVarsPure.getVars cmd
   | .block _ bss _ => Block.getVars bss
-  | .ite _ tbss ebss _ => Block.getVars tbss ++ Block.getVars ebss
-  | .loop _ _ _ bss _ => Block.getVars bss
+  | .ite cond tbss ebss _ => cond.getVars ++ Block.getVars tbss ++ Block.getVars ebss
+  | .loop guard _ _ bss _ => guard.getVars ++ Block.getVars bss
   | .exit _ _  => []
   | .funcDecl decl _ =>
     -- Get free variables from function body, excluding formal parameters
@@ -345,6 +347,109 @@ instance [ToFormat P.Ident] [ToFormat P.Expr] [ToFormat P.Ty] [ToFormat C]
 instance [ToFormat P.Ident] [ToFormat P.Expr] [ToFormat P.Ty] [ToFormat C]
         : ToFormat (List (Stmt P C)) where
   format ss := formatBlock P ss
+
+/-! ### exitsCoveredByBlocks
+
+`exitsCoveredByBlocks labels s` holds when every `exit` statement in `s` is caught
+by an enclosing `block` — either within `s` itself or with a label in
+`labels` (representing blocks that enclose `s` externally).
+
+When `s.exitsCoveredByBlocks []`, execution of `s` can never produce `.exiting`. -/
+
+@[expose] def Stmt.exitsCoveredByBlocks : List String → Stmt P CmdT → Prop
+  | _, .cmd _ => True
+  | labels, .block l ss _ => Block.exitsCoveredByBlocks (l :: labels) ss
+  | labels, .ite _ tss ess _ => Block.exitsCoveredByBlocks labels tss ∧ Block.exitsCoveredByBlocks labels ess
+  | labels, .loop _ _ _ body _ => Block.exitsCoveredByBlocks labels body
+  | labels, .exit none _ => labels.length > 0
+  | labels, .exit (some l) _ => l ∈ labels
+  | _, .funcDecl _ _ => True
+  | _, .typeDecl _ _ => True
+where
+  Block.exitsCoveredByBlocks : List String → List (Stmt P CmdT) → Prop
+    | _, [] => True
+    | labels, s :: ss => Stmt.exitsCoveredByBlocks labels s ∧ Block.exitsCoveredByBlocks labels ss
+
+theorem block_exitsCoveredByBlocks_append
+    {P : PureExpr} {CmdT : Type}
+    (labels : List String) (ss₁ ss₂ : List (Stmt P CmdT))
+    (h₁ : Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels ss₁)
+    (h₂ : Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels ss₂) :
+    Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels (ss₁ ++ ss₂) := by
+  induction ss₁ with
+  | nil => exact h₂
+  | cons s ss ih => exact ⟨h₁.1, ih h₁.2⟩
+
+/-- `exitsCoveredByBlocks` is monotone in the label list: more covering labels
+    can only help. -/
+theorem exitsCoveredByBlocks_weaken
+    {P : PureExpr} {CmdT : Type}
+    (labels₁ labels₂ : List String)
+    (hsub : ∀ l, l ∈ labels₁ → l ∈ labels₂) :
+    (∀ (s : Stmt P CmdT),
+      s.exitsCoveredByBlocks labels₁ → s.exitsCoveredByBlocks labels₂) ∧
+    (∀ (ss : List (Stmt P CmdT)),
+      Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels₁ ss →
+      Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels₂ ss) := by
+  suffices hstmt : ∀ (s : Stmt P CmdT),
+      ∀ labels₁ labels₂, (∀ l, l ∈ labels₁ → l ∈ labels₂) →
+        s.exitsCoveredByBlocks labels₁ → s.exitsCoveredByBlocks labels₂ by
+    constructor
+    · exact fun s => hstmt s labels₁ labels₂ hsub
+    · intro ss
+      induction ss with
+      | nil => intros; trivial
+      | cons s ss ih =>
+        exact fun h => ⟨hstmt s _ _ hsub h.1, ih h.2⟩
+  intro s
+  induction s using Stmt.rec (motive_2 := fun ss =>
+    ∀ labels₁ labels₂, (∀ l, l ∈ labels₁ → l ∈ labels₂) →
+      Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels₁ ss →
+      Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels₂ ss) with
+  | cmd _ => intros; trivial
+  | block l ss _ ih =>
+    intro labels₁ labels₂ hsub h
+    show Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks (l :: labels₂) ss
+    exact ih (l :: labels₁) (l :: labels₂)
+      (fun x hx => by cases hx with
+        | head => exact .head _
+        | tail _ hm => exact .tail _ (hsub x hm))
+      h
+  | ite _ tss ess _ ih_t ih_e =>
+    intro labels₁ labels₂ hsub h
+    exact ⟨ih_t labels₁ labels₂ hsub h.1, ih_e labels₁ labels₂ hsub h.2⟩
+  | loop _ _ _ body _ ih =>
+    intro labels₁ labels₂ hsub h
+    exact ih labels₁ labels₂ hsub h
+  | exit label _ =>
+    intro labels₁ labels₂ hsub h
+    cases label with
+    | none =>
+      show labels₂.length > 0
+      exact List.length_pos_iff_exists_mem.mpr
+        (let ⟨x, hx⟩ := List.length_pos_iff_exists_mem.mp h; ⟨x, hsub x hx⟩)
+    | some l => exact hsub l h
+  | funcDecl _ _ => intros; trivial
+  | typeDecl _ _ => intros; trivial
+  | nil => intros; trivial
+  | cons s ss ih_s ih_ss =>
+    rename_i labels₁ labels₂ hsub h
+    exact ⟨ih_s labels₁ labels₂ hsub h.1, ih_ss labels₁ labels₂ hsub h.2⟩
+
+/-- If every statement in a list is a `.cmd`, then `exitsCoveredByBlocks` holds
+    for any labels (since `.cmd` has no exit statements). -/
+theorem all_cmd_exitsCoveredByBlocks
+    {P : PureExpr} {CmdT : Type}
+    (labels : List String) (ss : List (Stmt P CmdT))
+    (h : ∀ s ∈ ss, ∃ c, s = Stmt.cmd c) :
+    Stmt.exitsCoveredByBlocks.Block.exitsCoveredByBlocks labels ss := by
+  induction ss with
+  | nil => trivial
+  | cons hd tl ih =>
+    constructor
+    · obtain ⟨c, hc⟩ := h hd (.head _)
+      subst hc; exact True.intro
+    · exact ih (fun s hs => h s (.tail _ hs))
 
 ---------------------------------------------------------------------
 

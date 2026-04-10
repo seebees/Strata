@@ -121,12 +121,12 @@ procedure with_kwonly(x:TInt, verbose:TBool) returns(result:TString)
 /-! ## Complex types (Any, List, Dict, bytes) -/
 
 /--
-info: procedure takes_any(x:TString) returns(result:TInt)
-procedure takes_list(items:TCore(ListStr)) returns(result:TBool)
-procedure returns_dict() returns(result:TCore(DictStrAny))
+info: procedure takes_any(x:UserDefined(Any)) returns(result:TInt)
+procedure takes_list(items:UserDefined(ListStr)) returns(result:TBool)
+procedure returns_dict() returns(result:UserDefined(DictStrAny))
 procedure returns_bytes() returns(result:TString)
-procedure typed_list() returns(result:TCore(ListStr))
-procedure typed_dict() returns(result:TCore(DictStrAny))
+procedure typed_list() returns(result:UserDefined(ListStr))
+procedure typed_dict() returns(result:UserDefined(DictStrAny))
 -/
 #guard_msgs in
 #eval runTest #[
@@ -148,7 +148,7 @@ procedure typed_dict() returns(result:TCore(DictStrAny))
 /--
 info: procedure int_literal_ret() returns(result:TInt)
 procedure str_literal_ret() returns(result:TString)
-procedure typed_dict_ret() returns(result:TCore(DictStrAny))
+procedure typed_dict_ret() returns(result:UserDefined(DictStrAny))
 procedure str_enum() returns(result:TString)
 -/
 #guard_msgs in
@@ -167,17 +167,17 @@ procedure str_enum() returns(result:TString)
 /-! ## Optional type patterns (Union[None, T]) -/
 
 /--
-info: procedure opt_str() returns(result:TCore(StrOrNone))
-procedure opt_int() returns(result:TCore(IntOrNone))
-procedure opt_bool(x:TCore(StrOrNone)) returns(result:TCore(BoolOrNone))
+info: procedure opt_str() returns(result:UserDefined(StrOrNone))
+procedure opt_int() returns(result:UserDefined(IntOrNone))
+procedure opt_bool(x:UserDefined(StrOrNone)) returns(result:UserDefined(BoolOrNone))
 procedure opt_float() returns(result:TString)
 procedure opt_list() returns(result:TString)
 procedure opt_dict() returns(result:TString)
 procedure opt_any() returns(result:TString)
 procedure opt_bytes() returns(result:TString)
-procedure opt_typed_dict() returns(result:TCore(DictStrAny))
-procedure opt_str_enum() returns(result:TCore(StrOrNone))
-procedure opt_int_enum() returns(result:TCore(IntOrNone))
+procedure opt_typed_dict() returns(result:UserDefined(DictStrAny))
+procedure opt_str_enum() returns(result:UserDefined(StrOrNone))
+procedure opt_int_enum() returns(result:UserDefined(IntOrNone))
 -/
 #guard_msgs in
 #eval runTest #[
@@ -250,7 +250,7 @@ info: Union type (None | foo.Bar) not yet supported in Laurel
 info: type MyClass
 type MyAlias
 procedure my_func(x:TInt, y:TString) returns(result:TBool)
-procedure MyClass_get_value() returns(result:TString)
+procedure MyClass@get_value() returns(result:TString)
 -/
 #guard_msgs in
 #eval runTest #[
@@ -278,8 +278,8 @@ procedure MyClass_get_value() returns(result:TString)
 /-! ## NoneType and void return -/
 
 /--
-info: procedure returns_none()
-procedure takes_none(x:TVoid)
+info: procedure returns_none() returns(result:UserDefined(Any))
+procedure takes_none(x:TVoid) returns(result:UserDefined(Any))
 -/
 #guard_msgs in
 #eval runTest #[
@@ -360,7 +360,7 @@ private def runDispatchTest (sigs : Array Signature) : IO Unit := do
 -- and a regular function.
 /--
 info: type SvcClient
-procedure SvcClient_do_thing(x:TString) returns(result:TInt)
+procedure SvcClient@do_thing(x:TString) returns(result:TInt)
 procedure helper() returns(result:TBool)
 dispatch create_client:
   "svc_a" -> mod.client.SvcClient

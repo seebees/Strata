@@ -31,8 +31,25 @@ instance : Coe String CoreIdent where
 
 def CoreIdent.toPretty (x : CoreIdent) : String := x.name
 
+/-- String used to prefix identifiers representing pre-state global values. -/
+def CoreIdent.oldStr : String := "old "
+
 /-- Create the `old g` identifier for a global variable named `name`. -/
-def CoreIdent.mkOld (name : String) : CoreIdent := ⟨"old " ++ name, ()⟩
+def CoreIdent.mkOld (name : String) : CoreIdent := ⟨CoreIdent.oldStr ++ name, ()⟩
+
+/-- `g ≠ CoreIdent.mkOld g.name` because `"old " ++ s` is strictly longer than `s`. -/
+theorem CoreIdent.ne_mkOld (g : CoreIdent) : g ≠ CoreIdent.mkOld g.name := by
+  intro h
+  have h_name := congrArg Lambda.Identifier.name h
+  simp [CoreIdent.mkOld, CoreIdent.oldStr] at h_name
+  have h1 : g.name.length < ("old " ++ g.name).length := by
+    rw [String.length_append]
+    have : (0 : Nat) < "old ".length := by decide
+    omega
+  rw [← h_name] at h1; omega
+
+/-- Check whether an identifier is already an `old`-prefixed global name. -/
+def CoreIdent.isOldIdent (ident : CoreIdent) : Bool := ident.name.startsWith CoreIdent.oldStr
 
 instance : ToFormat CoreIdent where
   format i := CoreIdent.toPretty i

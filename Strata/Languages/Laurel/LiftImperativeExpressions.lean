@@ -6,7 +6,7 @@
 module
 
 public import Strata.Languages.Laurel.Laurel
-public import Strata.Languages.Laurel.LaurelFormat
+public import Strata.Languages.Laurel.Grammar.AbstractToConcreteTreeTranslator
 public import Strata.Languages.Laurel.LaurelTypes
 public import Strata.Languages.Core.Verifier
 public import Strata.DL.Util.Map
@@ -104,8 +104,41 @@ private def freshCondVar : LiftM Identifier := do
   modify fun s => { s with condCounter := n + 1 }
   return s!"$c_{n}"
 
-private def addPrepend (stmt : StmtExprMd) : LiftM Unit :=
+private def prepend (stmt : StmtExprMd) : LiftM Unit :=
   modify fun s => { s with prependedStmts := stmt :: s.prependedStmts }
+
+private def onlyKeepSideEffectStmtsAndLast (stmts : List StmtExprMd) : LiftM (List StmtExprMd) := do
+  match stmts with
+  | [] => return []
+  | _ =>
+    let last := stmts.getLast!
+    let nonLast ← stmts.dropLast.flatMapM (fun s =>
+      match s.val with
+      | .LocalVariable .. => do
+          -- This addPrepend is a hack to work around Core not having let expressions
+          -- Otherwise we could keep them in the block
+          prepend s
+          pure []
+      | .Assert _ => do
+          -- Hack to work around Core not supporting assert expressions
+          -- Otherwise we could keep them in the block
+          prepend s
+          pure []
+      | .Assume _ => do
+          -- Hack to work around Core not supporting assume expressions
+          -- Otherwise we could keep them in the block
+          prepend s
+          pure []
+
+      /-
+      Any other impure StmtExpr, like .Assign, .Exit or .Return,
+      should already have been processed by translateExpr,
+      so we can assume this StmtExpr is pure and can be dropped.
+      TODO: currently .Exit and .Return are not processed by translateExpr, this is a bug
+      -/
+      | _ => pure []
+    )
+    return nonLast ++ [last]
 
 private def takePrepends : LiftM (List StmtExprMd) := do
   let stmts := (← get).prependedStmts
@@ -147,7 +180,7 @@ def containsAssignmentOrImperativeCall (model: SemanticModel) (expr : StmtExprMd
     all_goals ((try cases x); simp_all; try term_by_mem)
 
 /-- Check if an expression contains any nondeterministic holes (recursively). -/
-def containsNondetHole (expr : StmtExprMd) : Bool :=
+private def containsNondetHole (expr : StmtExprMd) : Bool :=
   match expr with
   | WithMetadata.mk val _ =>
   match val with
@@ -171,7 +204,7 @@ and updates substitutions. The value should already be transformed by the caller
 private def liftAssignExpr (targets : List StmtExprMd) (seqValue : StmtExprMd)
     (md : Imperative.MetaData Core.Expression) : LiftM Unit := do
   -- Prepend the assignment itself
-  addPrepend (⟨.Assign targets seqValue, md⟩)
+  prepend (⟨.Assign targets seqValue, md⟩)
   -- Create a before-snapshot for each target and update substitutions
   for target in targets do
     match target.val with
@@ -179,7 +212,7 @@ private def liftAssignExpr (targets : List StmtExprMd) (seqValue : StmtExprMd)
         let snapshotName ← freshTempFor varName
         let varType ← computeType target
         -- Snapshot goes before the assignment (cons pushes to front)
-        addPrepend (⟨.LocalVariable snapshotName varType (some (⟨.Identifier varName, md⟩)), md⟩)
+        prepend (⟨.LocalVariable snapshotName varType (some (⟨.Identifier varName, md⟩)), md⟩)
         setSubst varName snapshotName
     | _ => pure ()
 
@@ -189,10 +222,6 @@ Process an expression in expression context, traversing arguments right to left.
 Assignments are lifted to prependedStmts and replaced with snapshot variable references.
 -/
 def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
-  -- Short-circuit: if no assignments, imperative calls, or nondet holes, return unchanged
-  let model := (← get).model
-  if !containsAssignmentOrImperativeCall model expr && !containsNondetHole expr then
-    return expr
   match expr with
   | WithMetadata.mk val md =>
   match val with
@@ -204,7 +233,7 @@ def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
   | .Hole false (some holeType) =>
       -- Nondeterministic typed hole: lift to a fresh variable with no initializer (havoc)
       let holeVar ← freshCondVar
-      addPrepend (bare (.LocalVariable holeVar holeType none))
+      prepend (bare (.LocalVariable holeVar holeType none))
       return bare (.Identifier holeVar)
 
   | .Assign targets value =>
@@ -239,12 +268,13 @@ def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
       return seqCall
     else
       -- Imperative call in expression position: lift it like an assignment
-      -- Order matters: assign must be prepended first (it's newest-first),
-      -- so that when reversed the var declaration comes before the call.
       let callResultVar ← freshCondVar
       let callResultType ← computeType expr
-      addPrepend (⟨.Assign [bare (.Identifier callResultVar)] seqCall, md⟩)
-      addPrepend (bare (.LocalVariable callResultVar callResultType none))
+      let liftedCall := [
+        ⟨ (.LocalVariable callResultVar callResultType none), md ⟩,
+        ⟨.Assign [bare (.Identifier callResultVar)] seqCall, md⟩
+      ]
+      modify fun s => { s with prependedStmts := s.prependedStmts ++ liftedCall}
       return bare (.Identifier callResultVar)
 
   | .IfThenElse cond thenBranch elseBranch =>
@@ -281,8 +311,8 @@ def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
         let condType ← computeType thenBranch
         -- IfThenElse added first (cons puts it deeper), then declaration (cons puts it on top)
         -- Output order: declaration, then if-then-else
-        addPrepend (⟨.IfThenElse seqCond thenBlock seqElse, md⟩)
-        addPrepend (bare (.LocalVariable condVar condType none))
+        prepend (⟨.IfThenElse seqCond thenBlock seqElse, md⟩)
+        prepend (bare (.LocalVariable condVar condType none))
         return bare (.Identifier condVar)
       else
         -- No assignments in branches — recurse normally
@@ -293,21 +323,9 @@ def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
           | none => pure none
         return ⟨.IfThenElse seqCond seqThen seqElse, md⟩
 
-  | .Block stmts metadata =>
-      -- Block in expression position: lift all but last to prepends
-      match h_last : stmts.getLast? with
-      | none => return bare (.Block [] metadata)
-      | some last => do
-          have := List.mem_of_getLast? h_last
-
-          -- Process all-but-last as statements and prepend them in order
-          let mut blockStmts : List StmtExprMd := []
-          for nonLastStatement in stmts.dropLast.attach do
-            have := List.dropLast_subset stmts nonLastStatement.property
-            blockStmts := blockStmts ++ (← transformStmt nonLastStatement)
-          for s in blockStmts.reverse do addPrepend s
-          -- Last element is the expression value
-          transformExpr last
+  | .Block stmts labelOption =>
+      let newStmts := (← stmts.reverse.mapM transformExpr).reverse
+      return ⟨ .Block (← onlyKeepSideEffectStmtsAndLast newStmts) labelOption, md ⟩
 
   | .LocalVariable name ty initializer =>
       -- If the substitution map has an entry for this variable, it was
@@ -318,9 +336,9 @@ def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
         match initializer with
         | some initExpr =>
             let seqInit ← transformExpr initExpr
-            addPrepend (⟨.LocalVariable name ty (some seqInit), expr.md⟩)
+            prepend (⟨.LocalVariable name ty (some seqInit), expr.md⟩)
         | none =>
-            addPrepend (⟨.LocalVariable name ty none, expr.md⟩)
+            prepend (⟨.LocalVariable name ty none, expr.md⟩)
         return ⟨.Identifier (← getSubst name), expr.md⟩
       else
         return expr
@@ -335,10 +353,6 @@ Process a statement, handling any assignments in its sub-expressions.
 Returns a list of statements (the original may expand into multiple).
 -/
 def transformStmt (stmt : StmtExprMd) : LiftM (List StmtExprMd) := do
-  -- Short-circuit: if no assignments, imperative calls, or nondet holes, return unchanged
-  let model := (← get).model
-  if !containsAssignmentOrImperativeCall model stmt && !containsNondetHole stmt then
-    return [stmt]
   match stmt with
   | WithMetadata.mk val md =>
   match val with
@@ -476,9 +490,9 @@ def transformProcedureBody (body : StmtExprMd) : LiftM StmtExprMd := do
 def transformProcedure (proc : Procedure) : LiftM Procedure := do
   modify fun s => { s with subst := [], prependedStmts := [], varCounters := [] }
   match proc.body with
-  | .Transparent bodyExpr =>
+  | .Transparent bodyExpr posts =>
       let seqBody ← transformProcedureBody bodyExpr
-      pure { proc with body := .Transparent seqBody }
+      pure { proc with body := .Transparent seqBody posts }
   | .Opaque postconds impl modif =>
       let impl' ← impl.mapM transformProcedureBody
       pure { proc with body := .Opaque postconds impl' modif }
@@ -496,82 +510,4 @@ def liftExpressionAssignments (model: SemanticModel) (program : Program) : Progr
   { program with staticProcedures := seqProcedures }
 
 end -- public section
-
-/-! ## No-op proof -/
-
-/-- `liftExpressionAssignments` is identity when no expression contains
-    assignments or imperative calls.
-
-    NOTE: This theorem is likely FALSE as stated because `transformStmt`
-    wraps IfThenElse/While branches in `Block` with `emptyMd` and
-    reconstructs Block statements with `bare` (losing outer metadata).
-    The correct theorem would be about semantic equivalence of the Core
-    output, not syntactic equality of the Laurel AST.
-
-    For programs from the Java translator, the metadata differences
-    don't affect the final Core translation (all 135 differential tests pass). -/
-private theorem transformStmt_id (stmt : StmtExprMd) (s : LiftState)
-    (hNoAssign : containsAssignmentOrImperativeCall s.model stmt = false)
-    (hNoHole : containsNondetHole stmt = false) :
-    transformStmt stmt s = ([stmt], s) := by
-  conv => lhs; unfold transformStmt
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
-    pure, StateT.pure, Functor.map, StateT.map, hNoAssign, hNoHole, Bool.not_true,
-    Bool.false_and, Bool.not_false, Bool.true_and, ite_false, ite_true, decide_true]
-
-private theorem transformProcedure_id (proc : Procedure) (s : LiftState)
-    (hBody : match proc.body with
-      | .Transparent b => containsAssignmentOrImperativeCall s.model b = false ∧ containsNondetHole b = false
-      | .Opaque _ (some impl) _ => containsAssignmentOrImperativeCall s.model impl = false ∧ containsNondetHole impl = false
-      | _ => True) :
-    ∃ s', transformProcedure proc s = (proc, s') ∧ s'.model = s.model := by
-  unfold transformProcedure
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
-  cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
-  simp only [] at hBody ⊢
-  cases hb : body with
-  | Transparent b =>
-    simp only [hb] at hBody; obtain ⟨ha, hh⟩ := hBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
-    unfold transformProcedureBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
-    have hs : containsAssignmentOrImperativeCall ({ s with subst := [], prependedStmts := [], varCounters := [] }).model b = false := by simp [ha]
-    rw [transformStmt_id b _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; refine ⟨_, rfl, ?_⟩; rfl
-  | Opaque posts impl mods =>
-    simp only [hb] at hBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]
-    cases impl with
-    | some i =>
-      obtain ⟨ha, hh⟩ := hBody; simp only [Option.mapM, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
-      unfold transformProcedureBody; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
-      have hs : containsAssignmentOrImperativeCall ({ s with subst := [], prependedStmts := [], varCounters := [] }).model i = false := by simp [ha]
-      rw [transformStmt_id i _ hs hh]; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; refine ⟨_, rfl, ?_⟩; rfl
-    | none => simp only [Option.mapM, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]; refine ⟨_, rfl, ?_⟩; rfl
-  | Abstract _ => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; refine ⟨_, rfl, ?_⟩; rfl
-  | External => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet, MonadStateOf.modifyGet]; refine ⟨_, rfl, ?_⟩; rfl
-
-public theorem liftExpressionAssignments_noop (model : SemanticModel) (program : Program)
-    (hPure : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
-      containsAssignmentOrImperativeCall model expr = false)
-    (hNoHole : ∀ proc ∈ program.staticProcedures, ∀ expr : StmtExprMd,
-      containsNondetHole expr = false) :
-    liftExpressionAssignments model program = program := by
-  unfold liftExpressionAssignments
-  have hAll : ∀ p ∈ program.staticProcedures, match p.body with
-      | .Transparent b => containsAssignmentOrImperativeCall model b = false ∧ containsNondetHole b = false
-      | .Opaque _ (some impl) _ => containsAssignmentOrImperativeCall model impl = false ∧ containsNondetHole impl = false
-      | _ => True := fun p hp => by split <;> (first | exact ⟨hPure p hp _, hNoHole p hp _⟩ | exact True.intro)
-  obtain ⟨s', hs⟩ := go program.staticProcedures {model} hAll
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, StateT.run, hs]
-where
-  go (procs : List Procedure) (s : LiftState)
-      (hAll : ∀ p ∈ procs, match p.body with
-        | .Transparent b => containsAssignmentOrImperativeCall s.model b = false ∧ containsNondetHole b = false
-        | .Opaque _ (some impl) _ => containsAssignmentOrImperativeCall s.model impl = false ∧ containsNondetHole impl = false
-        | _ => True) :
-      ∃ s', (procs.mapM transformProcedure) s = (procs, s') := by
-    induction procs generalizing s with
-    | nil => exact ⟨s, rfl⟩
-    | cons x xs ih =>
-      obtain ⟨s1, h1, hModel⟩ := transformProcedure_id x s (hAll x (.head xs))
-      obtain ⟨s2, h2⟩ := ih s1 (by rw [hModel]; exact fun p hp => hAll p (.tail x hp))
-      exact ⟨s2, by simp [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, h1, h2]⟩
-
 end Laurel

@@ -183,14 +183,17 @@ structure Procedure : Type where
   outputs : List Parameter
   /-- The preconditions that callers must satisfy. -/
   preconditions : List (WithMetadata StmtExpr)
-  /-- Whether the procedure is deterministic or nondeterministic. -/
-  determinism : Determinism
+  -- TODO: add back determinism together with an implementation
   /-- Optional termination measure for recursive procedures. -/
   decreases : Option (WithMetadata StmtExpr) -- optionally prove termination
   /-- If true, the body may only have functional constructs, so no destructive assignments or loops. -/
   isFunctional : Bool
   /-- The procedure body: transparent, opaque, or abstract. -/
   body : Body
+  /-- Optional trigger for auto-invocation. When present, the translator also emits an axiom
+      whose body is the ensures clause universally quantified over the procedure's inputs,
+      with this expression as the SMT trigger. -/
+  invokeOn : Option (WithMetadata StmtExpr) := none
   /-- Source-level metadata (locations, annotations). -/
   md : MetaData
 
@@ -204,25 +207,14 @@ structure Parameter where
   type : WithMetadata HighType
 
 /--
-Specifies whether a procedure is deterministic or nondeterministic.
-
-For deterministic procedures with a non-empty reads clause, the result can be
-assumed unchanged if the read references are the same.
--/
-inductive Determinism where
-  /-- A deterministic procedure. The optional reads clause lists the heap locations the procedure may read. -/
-  | deterministic (reads : Option (WithMetadata StmtExpr))
-  /-- A nondeterministic procedure. They can read from the heap but there is no benefit from specifying a reads clause. -/
-  | nondeterministic
-
-/--
 The body of a procedure. A body can be transparent (with a visible
 implementation), opaque (with a postcondition and optional implementation),
 or abstract (requiring overriding in extending types).
 -/
 inductive Body where
-  /-- A transparent body whose implementation is visible to callers. -/
-  | Transparent (body : WithMetadata StmtExpr)
+  /-- A transparent body whose implementation is visible to callers.
+      Postconditions, if present, are checked against the body but do not hide it from callers. -/
+  | Transparent (body : WithMetadata StmtExpr) (postconditions : List (WithMetadata StmtExpr))
   /-- An opaque body with a postcondition, optional implementation, and modifies clause. Without an implementation the postcondition is assumed. -/
   | Opaque
       (postconditions : List (WithMetadata StmtExpr))
@@ -395,6 +387,10 @@ def HighType.isBool : HighType → Bool
   | .External => true
   | _ => false
 
+def Body.isTransparent : Body → Bool
+  | .Transparent _ _ => true
+  | _ => false
+
 def HighTypeMd.isBool (t : HighTypeMd) : Bool := t.val.isBool
 
 /--
@@ -461,6 +457,19 @@ structure DatatypeDefinition where
   name : Identifier
   typeArgs : List Identifier
   constructors : List DatatypeConstructor
+
+/-- Canonical resolution name for the tester of constructor `ctor` in this datatype.
+    Matches the override name used by `Resolution.resolveTypeDefinition`. -/
+def DatatypeDefinition.testerName (dt : DatatypeDefinition) (ctor : DatatypeConstructor) : String :=
+  s!"{dt.name}..is{ctor.name}"
+
+/-- Canonical resolution name for the destructor of field `field` in this datatype. -/
+def DatatypeDefinition.destructorName (dt : DatatypeDefinition) (field : Parameter) : String :=
+  s!"{dt.name.text}..{field.name.text}"
+
+/-- Canonical resolution name for the unsafe (bang) destructor of field `field`. -/
+def DatatypeDefinition.unsafeDestructorName (dt : DatatypeDefinition) (field : Parameter) : String :=
+  s!"{dt.name.text}..{field.name.text}!"
 
 /--
 A user-defined type, either a composite type, a constrained type, or an algebraic datatype.

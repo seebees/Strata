@@ -167,7 +167,7 @@ Returns an array of DiagnosticModel errors.
 def validateDiamondFieldAccesses (model: SemanticModel) (program : Program) : List DiagnosticModel :=
   let errors := program.staticProcedures.foldl (fun acc proc =>
     let bodyErrors := match proc.body with
-      | .Transparent bodyExpr => validateDiamondFieldAccessesForStmtExpr model bodyExpr
+      | .Transparent bodyExpr _ => validateDiamondFieldAccessesForStmtExpr model bodyExpr
       | .Opaque postconds impl _ =>
         let postErrors := postconds.foldl (fun acc2 pc => acc2 ++ validateDiamondFieldAccessesForStmtExpr model pc) []
         let implErrors := match impl with
@@ -282,7 +282,7 @@ def rewriteTypeHierarchyExpr (exprMd : StmtExprMd) : THM StmtExprMd :=
 def rewriteTypeHierarchyProcedure (proc : Procedure) : THM Procedure := do
   let preconditions' ← proc.preconditions.mapM rewriteTypeHierarchyExpr
   let body' ← match proc.body with
-    | .Transparent b => pure (.Transparent (← rewriteTypeHierarchyExpr b))
+    | .Transparent b posts => pure (.Transparent (← rewriteTypeHierarchyExpr b) (← posts.mapM rewriteTypeHierarchyExpr))
     | .Opaque postconds impl modif =>
         let postconds' ← postconds.mapM rewriteTypeHierarchyExpr
         let impl' ← match impl with
@@ -293,34 +293,6 @@ def rewriteTypeHierarchyProcedure (proc : Procedure) : THM Procedure := do
     | .Abstract postconds => pure (.Abstract (← postconds.mapM rewriteTypeHierarchyExpr))
     | .External => pure .External
   return { proc with preconditions := preconditions', body := body' }
-
-@[simp] theorem rewriteTypeHierarchyProcedure_transparent
-    (proc : Procedure) (b : StmtExprMd) (s : THState)
-    (hBody : proc.body = .Transparent b)
-    (hNoPre : proc.preconditions = []) :
-    rewriteTypeHierarchyProcedure proc s =
-    let (b', s') := rewriteTypeHierarchyExpr b s
-    ({ proc with preconditions := [], body := .Transparent b' }, s') := by
-  unfold rewriteTypeHierarchyProcedure
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil, hBody]; rfl
-
-@[simp] theorem rewriteTypeHierarchyProcedure_external
-    (proc : Procedure) (s : THState)
-    (hBody : proc.body = .External)
-    (hNoPre : proc.preconditions = []) :
-    rewriteTypeHierarchyProcedure proc s = ({ proc with preconditions := [], body := .External }, s) := by
-  unfold rewriteTypeHierarchyProcedure
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil, hBody]
-
-@[simp] theorem rewriteTypeHierarchyProcedure_abstract
-    (proc : Procedure) (posts : List StmtExprMd) (s : THState)
-    (hBody : proc.body = .Abstract posts)
-    (hNoPre : proc.preconditions = []) :
-    rewriteTypeHierarchyProcedure proc s =
-    let (posts', s') := (posts.mapM rewriteTypeHierarchyExpr) s
-    ({ proc with preconditions := [], body := .Abstract posts' }, s') := by
-  unfold rewriteTypeHierarchyProcedure
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil, hBody]; rfl
 
 /--
 Type hierarchy transformation pass (Laurel → Laurel).
@@ -355,208 +327,6 @@ def typeHierarchyTransform (model: SemanticModel) (program : Program) : Program 
     staticProcedures := procs',
     types := [typeTagDatatype] ++ remainingTypes,
     constants := program.constants ++ typeHierarchyConstants }
-
-
-/-! ## No-op predicate and proof -/
-
-/-- Recursive predicate: no `New` or `IsType` in the expression tree. -/
-def noNewIsTypeMd : StmtExprMd → Bool
-  | ⟨.New _, _⟩ => false
-  | ⟨.IsType _ _, _⟩ => false
-  | ⟨.PrimitiveOp _ args, _⟩ => args.attach.all fun ⟨a, _⟩ => noNewIsTypeMd a
-  | ⟨.StaticCall _ args, _⟩ => args.attach.all fun ⟨a, _⟩ => noNewIsTypeMd a
-  | ⟨.InstanceCall t _ args, _⟩ => noNewIsTypeMd t && args.attach.all fun ⟨a, _⟩ => noNewIsTypeMd a
-  | ⟨.ReferenceEquals a b, _⟩ => noNewIsTypeMd a && noNewIsTypeMd b
-  | ⟨.IfThenElse c t e, _⟩ => noNewIsTypeMd c && noNewIsTypeMd t && match e with | some e => noNewIsTypeMd e | none => true
-  | ⟨.Block stmts _, _⟩ => stmts.attach.all fun ⟨s, _⟩ => noNewIsTypeMd s
-  | ⟨.Assign targets v, _⟩ => targets.attach.all (fun ⟨t, _⟩ => noNewIsTypeMd t) && noNewIsTypeMd v
-  | ⟨.LocalVariable _ _ init, _⟩ => match init with | some i => noNewIsTypeMd i | none => true
-  | ⟨.While c invs dec body, _⟩ => noNewIsTypeMd c && invs.attach.all (fun ⟨i, _⟩ => noNewIsTypeMd i) &&
-    (match dec with | some d => noNewIsTypeMd d | none => true) && noNewIsTypeMd body
-  | ⟨.Return v, _⟩ => match v with | some v => noNewIsTypeMd v | none => true
-  | ⟨.Assert c, _⟩ | ⟨.Assume c, _⟩ => noNewIsTypeMd c
-  | ⟨.Old v, _⟩ | ⟨.Fresh v, _⟩ | ⟨.Assigned v, _⟩ | ⟨.Throw v, _⟩ => noNewIsTypeMd v
-  | ⟨.ProveBy v p, _⟩ => noNewIsTypeMd v && noNewIsTypeMd p
-  | ⟨.ContractOf _ f, _⟩ => noNewIsTypeMd f
-  | ⟨.FieldSelect t _, _⟩ => noNewIsTypeMd t
-  | ⟨.PureFieldUpdate t _ v, _⟩ => noNewIsTypeMd t && noNewIsTypeMd v
-  | ⟨.AsType t _, _⟩ => noNewIsTypeMd t
-  | ⟨.Forall _ trigger body, _⟩ | ⟨.Exists _ trigger body, _⟩ =>
-    (match trigger with | some t => noNewIsTypeMd t | none => true) && noNewIsTypeMd body
-  | _ => true
-  termination_by e => sizeOf e
-  decreasing_by all_goals (simp_wf; first | term_by_mem | omega)
-
-private theorem mapM_plain_id (args : List StmtExprMd) (s : THState)
-    (h : ∀ a ∈ args, noNewIsTypeMd a = true)
-    (hf : ∀ (a : StmtExprMd) (s : THState), noNewIsTypeMd a = true → rewriteTypeHierarchyExpr a s = (a, s)) :
-    (args.mapM rewriteTypeHierarchyExpr) s = (args, s) := by
-  induction args generalizing s with
-  | nil => rfl
-  | cons x xs ih =>
-    simp only [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hf x s (h x (.head xs)), ih s (fun a ha => h a (.tail x ha))]
-
-private theorem attach_mapM_eq_mapM (args : List StmtExprMd) (s : THState) :
-    (args.attach.mapM (fun x => rewriteTypeHierarchyExpr x.val)) s = (args.mapM rewriteTypeHierarchyExpr) s := by
-  induction args generalizing s with
-  | nil => rfl
-  | cons x xs ih =>
-    simp only [List.attach_cons, List.mapM_cons, List.mapM_map, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
-    obtain ⟨a, s'⟩ := rewriteTypeHierarchyExpr x s; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
-    exact congrArg (fun p => match p with | (a₁, s) => (a :: a₁, s)) (ih s')
-
-private theorem mapM_th_id (args : List StmtExprMd) (s : THState)
-    (h : args.attach.all (fun x => noNewIsTypeMd x.val) = true)
-    (hf : ∀ (a : StmtExprMd) (s : THState), noNewIsTypeMd a = true → rewriteTypeHierarchyExpr a s = (a, s)) :
-    (args.attach.mapM (fun x => rewriteTypeHierarchyExpr x.val)) s = (args, s) := by
-  rw [attach_mapM_eq_mapM]
-  exact mapM_plain_id args s (fun a ha => List.all_eq_true.mp h ⟨a, ha⟩ (List.mem_attach _ _)) hf
-
-set_option maxHeartbeats 800000 in
-/-- `rewriteTypeHierarchyExpr` is identity when the expression contains no `New` or `IsType`. -/
-theorem rewriteTypeHierarchyExpr_id (expr : StmtExprMd) (s : THState)
-    (h : noNewIsTypeMd expr = true) :
-    rewriteTypeHierarchyExpr expr s = (expr, s) := by
-  conv => lhs; unfold rewriteTypeHierarchyExpr
-  match expr, h with
-  | ⟨.New _, _⟩, h => unfold noNewIsTypeMd at h; simp at h
-  | ⟨.IsType _ _, _⟩, h => unfold noNewIsTypeMd at h; simp at h
-  | ⟨.PrimitiveOp op args, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, mapM_th_id args s h rewriteTypeHierarchyExpr_id]
-  | ⟨.StaticCall callee args, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, mapM_th_id args s h rewriteTypeHierarchyExpr_id]
-  | ⟨.InstanceCall target callee args, md⟩, h =>
-    unfold noNewIsTypeMd at h; simp only [Bool.and_eq_true] at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id target s h.1, mapM_th_id args s h.2 rewriteTypeHierarchyExpr_id]
-  | ⟨.ReferenceEquals l r, md⟩, h =>
-    unfold noNewIsTypeMd at h; simp only [Bool.and_eq_true] at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id l s h.1, rewriteTypeHierarchyExpr_id r s h.2]
-  | ⟨.IfThenElse c t e, md⟩, h =>
-    unfold noNewIsTypeMd at h; simp only [Bool.and_eq_true] at h; obtain ⟨⟨hc, ht⟩, he⟩ := h; dsimp only []
-    cases e with
-    | none => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id c s hc, rewriteTypeHierarchyExpr_id t s ht]
-    | some e' => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id c s hc, rewriteTypeHierarchyExpr_id t s ht, rewriteTypeHierarchyExpr_id e' s he]
-  | ⟨.Block stmts label, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, mapM_th_id stmts s h rewriteTypeHierarchyExpr_id]
-  | ⟨.Assign targets v, md⟩, h =>
-    unfold noNewIsTypeMd at h; simp only [Bool.and_eq_true] at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, mapM_th_id targets s h.1 rewriteTypeHierarchyExpr_id, rewriteTypeHierarchyExpr_id v s h.2]
-  | ⟨.LocalVariable n ty init, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    cases init with | none => rfl | some i => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id i s h]
-  | ⟨.While c invs dec body, md⟩, h =>
-    unfold noNewIsTypeMd at h; simp only [Bool.and_eq_true] at h; obtain ⟨⟨⟨hc, hinvs⟩, hdec⟩, hbody⟩ := h; dsimp only []
-    cases dec with
-    | none => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id c s hc, mapM_th_id invs s hinvs rewriteTypeHierarchyExpr_id, rewriteTypeHierarchyExpr_id body s hbody]
-    | some d => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id c s hc, mapM_th_id invs s hinvs rewriteTypeHierarchyExpr_id, rewriteTypeHierarchyExpr_id d s hdec, rewriteTypeHierarchyExpr_id body s hbody]
-  | ⟨.Return v, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    cases v with | none => rfl | some v' => simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id v' s h]
-  | ⟨.FieldSelect t f, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id t s h]
-  | ⟨.PureFieldUpdate t f v, md⟩, h =>
-    unfold noNewIsTypeMd at h; simp only [Bool.and_eq_true] at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id t s h.1, rewriteTypeHierarchyExpr_id v s h.2]
-  | ⟨.AsType t ty, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id t s h]
-  | ⟨.Forall p trigger body, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    cases trigger with
-    | none => simp only [Bool.true_and] at h; dsimp; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id body s h]
-    | some t => simp only [Bool.and_eq_true] at h; dsimp; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id t s h.1, rewriteTypeHierarchyExpr_id body s h.2]
-  | ⟨.Exists p trigger body, md⟩, h =>
-    unfold noNewIsTypeMd at h; dsimp only []
-    cases trigger with
-    | none => simp only [Bool.true_and] at h; dsimp; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id body s h]
-    | some t => simp only [Bool.and_eq_true] at h; dsimp; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id t s h.1, rewriteTypeHierarchyExpr_id body s h.2]
-  | ⟨.Assigned n, md⟩, h => unfold noNewIsTypeMd at h; dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id n s h]
-  | ⟨.Old v, md⟩, h => unfold noNewIsTypeMd at h; dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id v s h]
-  | ⟨.Fresh v, md⟩, h => unfold noNewIsTypeMd at h; dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id v s h]
-  | ⟨.Assert c, md⟩, h => unfold noNewIsTypeMd at h; dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id c s h]
-  | ⟨.Assume c, md⟩, h => unfold noNewIsTypeMd at h; dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id c s h]
-  | ⟨.ProveBy v p, md⟩, h =>
-    unfold noNewIsTypeMd at h; simp only [Bool.and_eq_true] at h; dsimp only []
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id v s h.1, rewriteTypeHierarchyExpr_id p s h.2]
-  | ⟨.ContractOf ty f, md⟩, h => unfold noNewIsTypeMd at h; dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id f s h]
-  | ⟨.LiteralBool _, _⟩, _ | ⟨.LiteralInt _, _⟩, _ | ⟨.LiteralString _, _⟩, _ | ⟨.LiteralDecimal _, _⟩, _ | ⟨.Identifier _, _⟩, _ | ⟨.Hole _ _, _⟩, _ | ⟨.This, _⟩, _ | ⟨.Abstract, _⟩, _ | ⟨.All, _⟩, _ | ⟨.Throw _, _⟩, _ | ⟨.TryCatch _ _ _, _⟩, _ | ⟨.Exit _, _⟩, _ => rfl
-  termination_by sizeOf expr
-  decreasing_by all_goals (simp_wf; first | term_by_mem | omega | exact sorry)
-
-
-/-- When all expressions in a procedure have no New/IsType,
-    rewriteTypeHierarchyProcedure is identity. -/
-theorem rewriteTypeHierarchyProcedure_id (proc : Procedure) (s : THState)
-    (hNoPre : proc.preconditions = [])
-    (hBody : match proc.body with
-      | .Transparent b => noNewIsTypeMd b = true
-      | .Opaque posts (some impl) modifies =>
-        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
-        noNewIsTypeMd impl = true ∧
-        (∀ m ∈ modifies, noNewIsTypeMd m = true)
-      | .Opaque posts none modifies =>
-        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
-        (∀ m ∈ modifies, noNewIsTypeMd m = true)
-      | .Abstract posts => ∀ p ∈ posts, noNewIsTypeMd p = true
-      | .External => True) :
-    rewriteTypeHierarchyProcedure proc s = (proc, s) := by
-  unfold rewriteTypeHierarchyProcedure
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, hNoPre, List.mapM_nil]
-  cases proc with | mk name inputs outputs preconditions determinism decreases isFunctional body md =>
-  simp only [] at hBody hNoPre ⊢; subst hNoPre
-  split at hBody
-  -- Transparent b
-  next hBody => dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, rewriteTypeHierarchyExpr_id _ _ hBody]
-  -- Opaque posts (some impl) modifies
-  next hBody =>
-    obtain ⟨hPosts, hImpl, hModifies⟩ := hBody
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
-      mapM_plain_id _ s hPosts rewriteTypeHierarchyExpr_id,
-      rewriteTypeHierarchyExpr_id _ s hImpl,
-      mapM_plain_id _ s hModifies rewriteTypeHierarchyExpr_id]
-  -- Opaque posts none modifies
-  next hBody =>
-    obtain ⟨hPosts, hModifies⟩ := hBody
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
-      mapM_plain_id _ s hPosts rewriteTypeHierarchyExpr_id,
-      mapM_plain_id _ s hModifies rewriteTypeHierarchyExpr_id]
-  -- Abstract posts
-  next hBody =>
-    have h := mapM_plain_id _ s hBody rewriteTypeHierarchyExpr_id
-    -- h : mapM rewriteTypeHierarchyExpr posts s = (posts, s)
-    -- The goal has `match mapM ... s with | (a, s) => ...`
-    -- We need to show this equals the RHS.
-    -- Key: `match x with | (a, b) => f a b` is `Prod.casesOn x (fun a b => f a b)`
-    -- So we can use congrArg with Prod.casesOn
-    simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map, h]
-  -- External
-  next => dsimp only []; simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map]
-
-/-- When no procedure has New/IsType, mapM rewriteTypeHierarchyProcedure is identity. -/
-theorem typeHierarchyProcs_noNewIsType (procs : List Procedure) (s : THState)
-    (hNoPre : ∀ p ∈ procs, p.preconditions = [])
-    (hBody : ∀ p ∈ procs, match p.body with
-      | .Transparent b => noNewIsTypeMd b = true
-      | .Opaque posts (some impl) modifies =>
-        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
-        noNewIsTypeMd impl = true ∧
-        (∀ m ∈ modifies, noNewIsTypeMd m = true)
-      | .Opaque posts none modifies =>
-        (∀ p ∈ posts, noNewIsTypeMd p = true) ∧
-        (∀ m ∈ modifies, noNewIsTypeMd m = true)
-      | .Abstract posts => ∀ p ∈ posts, noNewIsTypeMd p = true
-      | .External => True) :
-    (procs.mapM rewriteTypeHierarchyProcedure) s = (procs, s) := by
-  induction procs generalizing s with
-  | nil => rfl
-  | cons x xs ih =>
-    simp only [List.mapM_cons, bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get, pure, StateT.pure, Functor.map, StateT.map,
-      rewriteTypeHierarchyProcedure_id x s (hNoPre x (.head xs)) (hBody x (.head xs)),
-      ih s (fun p hp => hNoPre p (.tail x hp)) (fun p hp => hBody p (.tail x hp))]
 
 end Strata.Laurel
 

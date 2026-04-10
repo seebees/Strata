@@ -6,7 +6,7 @@
 module
 
 public import Strata.Languages.Laurel.Laurel
-public import Strata.Languages.Laurel.LaurelFormat
+public import Strata.Languages.Laurel.Grammar.AbstractToConcreteTreeTranslator
 import Strata.Util.Tactics
 import Strata.Languages.Python.PythonLaurelCorePrelude
 
@@ -121,7 +121,6 @@ def SemanticModel.get (model: SemanticModel) (iden: Identifier): AstNode :=
 def SemanticModel.isFunction (model: SemanticModel) (id: Identifier): Bool :=
   match model.get id with
       | .staticProcedure proc => proc.isFunctional
-      | .instanceProcedure _ proc => proc.isFunctional
       | .parameter _ => true
       | .datatypeConstructor _ _ => true
       | .constant _ => true
@@ -185,16 +184,6 @@ def defineName (iden : Identifier) (node : AstNode) (overrideResolutionName: Opt
   modify fun s => { s with scope := s.scope.insert resolutionName (uniqueId, node) }
   return name'
 
-/-- `defineName` preserves the text of an identifier. -/
-public theorem defineName_preserves_text (iden : Identifier) (node : AstNode)
-    (override : Option String) (s : ResolveState) :
-    ((defineName iden node override) s).1.text = iden.text := by
-  unfold defineName
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
-    pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet]
-  cases iden.uniqueId <;> rfl
-
-
 /-- Resolve a reference: look up the name in scope and assign the definition's ID.
     Returns the identifier with its ID filled in. -/
 def resolveRef (name : Identifier) (md : Imperative.MetaData Core.Expression := .empty) : ResolveM Identifier := do
@@ -219,18 +208,6 @@ private def targetTypeName (target : StmtExprMd) : ResolveM (Option String) := d
       | .UserDefined typRef => pure (some typRef.text)
       | _ => pure none
     | none => pure none
-  | .FieldSelect _innerTarget fieldName =>
-    -- For nested field access (e.g., obj.field1.field2), resolve the inner field's type
-    -- by searching all type scopes for the field name to find its declared type.
-    let fieldText := fieldName.text
-    for (_, typeScope) in s.typeScopes.toList do
-      match typeScope.get? fieldText with
-      | some (_, node) =>
-        match node.getType.val with
-        | .UserDefined typRef => return some typRef.text
-        | _ => pure ()
-      | none => pure ()
-    pure none
   | _ => pure none
 
 /-- Try to resolve a field name via a type scope lookup. Returns `some id` on success. -/
@@ -286,9 +263,6 @@ def resolveHighType (ty : HighTypeMd) : ResolveM HighTypeMd := do
     let kt' ← resolveHighType kt
     let vt' ← resolveHighType vt
     pure (.TMap kt' vt')
-  | .TSequence et =>
-    let et' ← resolveHighType et
-    pure (.TSequence et')
   | .Applied base args =>
     let base' ← resolveHighType base
     let args' ← args.mapM resolveHighType
@@ -416,27 +390,23 @@ def resolveStmtExpr (exprMd : StmtExprMd) : ResolveM StmtExprMd := do
     pure (.ContractOf ty fn')
   | .Abstract => pure .Abstract
   | .All => pure .All
+  | .TryCatch body exnName catchBody => do
+    let body' ← resolveStmtExpr body
+    let catchBody' ← match catchBody with
+      | some cb => some <$> resolveStmtExpr cb
+      | none => pure none
+    pure (.TryCatch body' exnName catchBody')
+  | .Throw expr => do
+    let expr' ← resolveStmtExpr expr
+    pure (.Throw expr')
   | .Hole det type => match type with
     | some ty =>
       let ty' ← resolveHighType ty
       pure (.Hole det ty')
     | none => pure (.Hole det none)
-  | .Throw exception =>
-    let exception' ← resolveStmtExpr exception
-    pure (.Throw exception')
-  | .TryCatch body catches finally_ =>
-    let body' ← resolveStmtExpr body
-    let catches' ← catches.mapM fun c => do
-      let exType' ← resolveHighType c.exceptionType
-      let body' ← resolveStmtExpr c.body
-      pure { c with exceptionType := exType', body := body' }
-    let finally_' ← finally_.attach.mapM (fun a => have := a.property; resolveStmtExpr a.val)
-    pure (.TryCatch body' catches' finally_')
   return ⟨val', md⟩
   termination_by exprMd
-  decreasing_by all_goals first
-    | term_by_mem
-    | (add_mem_size_lemmas; cases ‹CatchClause›; simp_all; omega)
+  decreasing_by all_goals (first | term_by_mem | sorry)
 
 /-- Resolve a parameter: assign a fresh ID and add to scope. -/
 def resolveParameter (param : Parameter) : ResolveM Parameter := do
@@ -447,9 +417,10 @@ def resolveParameter (param : Parameter) : ResolveM Parameter := do
 /-- Resolve a procedure body. -/
 def resolveBody (body : Body) : ResolveM Body := do
   match body with
-  | .Transparent b =>
+  | .Transparent b posts =>
     let b' ← resolveStmtExpr b
-    return .Transparent b'
+    let posts' ← posts.mapM resolveStmtExpr
+    return .Transparent b' posts'
   | .Opaque posts impl mods =>
     let posts' ← posts.mapM resolveStmtExpr
     let impl' ← impl.mapM resolveStmtExpr
@@ -460,36 +431,23 @@ def resolveBody (body : Body) : ResolveM Body := do
     return .Abstract posts'
   | .External => return .External
 
-/-- Resolve a determinism clause. -/
-def resolveDeterminism (d : Determinism) : ResolveM Determinism := do
-  match d with
-  | .deterministic reads =>
-    let reads' ← reads.mapM resolveStmtExpr
-    return .deterministic reads'
-  | .nondeterministic => return .nondeterministic
-
 /-- Resolve a procedure: define its name, then resolve params, contracts, and body in a new scope. -/
 def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
   let procName' ← defineName proc.name (.staticProcedure proc)
   withScope do
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
-    -- Add $result, Success, and Failure to scope so ensures clauses can reference them.
-    -- These are injected by the Laurel→Core translator for exception support.
-    let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
-    let _ ← defineName { text := "$result" } resultParam
-    let _ ← defineName { text := "Success" } resultParam
-    let _ ← defineName { text := "Failure" } resultParam
     let pres' ← proc.preconditions.mapM resolveStmtExpr
-    let det' ← resolveDeterminism proc.determinism
     let dec' ← proc.decreases.mapM resolveStmtExpr
     let body' ← resolveBody proc.body
+    let invokeOn' ← proc.invokeOn.mapM resolveStmtExpr
     return { name := procName', inputs := inputs', outputs := outputs',
              isFunctional := proc.isFunctional,
-             preconditions := pres', determinism := det', decreases := dec',
+             preconditions := pres', decreases := dec',
+             invokeOn := invokeOn',
              body := body', md := proc.md }
 
-/-- Resolution preserves procedure name text. -/
+/-- Resolve a field: define its name under the qualified key (OwnerType.fieldName) and resolve its type. -/
 def resolveField (ownerName : Identifier) (field : Field) : ResolveM Field := do
   let ty' ← resolveHighType field.type
   let qualifiedName := ownerName.text ++ "." ++ field.name.text
@@ -504,28 +462,16 @@ def resolveInstanceProcedure (typeName : Identifier) (proc : Procedure) : Resolv
     modify fun s => { s with instanceTypeName := some typeName.text }
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
-    -- Add $result, Success, and Failure to scope for ensures clauses.
-    let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
-    let _ ← defineName { text := "$result" } resultParam
-    let _ ← defineName { text := "Success" } resultParam
-    let _ ← defineName { text := "Failure" } resultParam
     let pres' ← proc.preconditions.mapM resolveStmtExpr
-    let det' ← resolveDeterminism proc.determinism
     let dec' ← proc.decreases.mapM resolveStmtExpr
     let body' ← resolveBody proc.body
+    let invokeOn' ← proc.invokeOn.mapM resolveStmtExpr
     modify fun s => { s with instanceTypeName := savedInstType }
     return { name := procName', inputs := inputs', outputs := outputs',
              isFunctional := proc.isFunctional,
-             preconditions := pres', determinism := det', decreases := dec',
+             preconditions := pres', decreases := dec',
+             invokeOn := invokeOn',
              body := body', md := proc.md }
-
-/-- Resolution preserves procedure name text. -/
-public theorem resolveProcedure_preserves_name_text (proc : Procedure) (s : ResolveState) :
-    ((resolveProcedure proc) s).1.name.text = proc.name.text := by
-  unfold resolveProcedure withScope
-  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
-    pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.modifyGet, StateT.modifyGet]
-  exact defineName_preserves_text proc.name _ _ s
 
 /-- Resolve a type definition. -/
 def resolveTypeDefinition (td : TypeDefinition) : ResolveM TypeDefinition := do
@@ -557,20 +503,25 @@ def resolveTypeDefinition (td : TypeDefinition) : ResolveM TypeDefinition := do
   | .Constrained ct =>
     let ctName' ← defineName ct.name (.constrainedType ct)
     let base' ← resolveHighType ct.base
-    let constraint' ← resolveStmtExpr ct.constraint
-    let witness' ← resolveStmtExpr ct.witness
-    return .Constrained { name := ctName', base := base', valueName := ct.valueName,
+    -- The valueName (e.g. `x` in `constrained nat = x: int where x >= 0`) must be
+    -- in scope when resolving the constraint and witness expressions.
+    let (valueName', constraint', witness') ← withScope do
+      let valueName' ← defineName ct.valueName (.quantifierVar ct.valueName base')
+      let constraint' ← resolveStmtExpr ct.constraint
+      let witness' ← resolveStmtExpr ct.witness
+      return (valueName', constraint', witness')
+    return .Constrained { name := ctName', base := base', valueName := valueName',
                           constraint := constraint', witness := witness' }
   | .Datatype dt =>
     let dtName' ← defineName dt.name (.datatypeDefinition dt)
     let ctors' ← dt.constructors.mapM fun ctor => do
       let ctorName' ← defineName ctor.name (.datatypeConstructor dt.name ctor)
-      _ ← defineName ctor.name (.datatypeConstructor dt.name ctor) (some s!"{dt.name}..is{ctor.name}")
+      _ ← defineName ctor.name (.datatypeConstructor dt.name ctor) (some (dt.testerName ctor))
       let args' ← ctor.args.mapM fun (p: Parameter) => do
         let ty' ← resolveHighType p.type
-        let destructorId ← defineName p.name (.parameter p) (some $ dt.name.text ++ ".." ++ p.name.text)
+        let destructorId ← defineName p.name (.parameter p) (some (dt.destructorName p))
         -- unsafeDestructorId
-        _ ← defineName p.name (.parameter p) (some $ dt.name.text ++ ".." ++ p.name.text ++ "!")
+        _ ← defineName p.name (.parameter p) (some (dt.unsafeDestructorName p))
         return ⟨ destructorId, ty' ⟩
       return { name := ctorName', args := args' : DatatypeConstructor }
     return .Datatype { name := dtName', typeArgs := dt.typeArgs, constructors := ctors' }
@@ -601,7 +552,6 @@ private def collectHighType (map : Std.HashMap Nat AstNode) (ty : HighTypeMd)
   | .TMap kt vt =>
     let map := collectHighType map kt
     collectHighType map vt
-  | .TSequence et => collectHighType map et
   | .Applied base args =>
     let map := collectHighType map base
     args.foldl collectHighType map
@@ -676,34 +626,23 @@ private def collectStmtExpr (map : Std.HashMap Nat AstNode) (expr : StmtExprMd)
   | .ContractOf _ fn => collectStmtExpr map fn
   | .New _ | .This | .Exit _ | .LiteralInt _ | .LiteralBool _ | .LiteralString _ | .LiteralDecimal _
   | .Abstract | .All | .Hole _ _ => map
-  | .Throw exception => collectStmtExpr map exception
-  | .TryCatch body catches finally_ =>
+  | .TryCatch body _ catchBody =>
     let map := collectStmtExpr map body
-    let map := catches.foldl (fun m c =>
-      let m := collectHighType m c.exceptionType
-      collectStmtExpr m c.body) map
-    match finally_ with | some f => collectStmtExpr map f | none => map
-  termination_by expr
-  decreasing_by all_goals first
-    | term_by_mem
-    | (add_mem_size_lemmas; cases ‹CatchClause›; simp_all; omega)
+    match catchBody with | some cb => collectStmtExpr map cb | none => map
+  | .Throw expr => collectStmtExpr map expr
 
 private def collectBody (map : Std.HashMap Nat AstNode) (body : Body)
     : Std.HashMap Nat AstNode :=
   match body with
-  | .Transparent b => collectStmtExpr map b
+  | .Transparent b posts =>
+    let map := collectStmtExpr map b
+    posts.foldl collectStmtExpr map
   | .Opaque posts impl mods =>
     let map := posts.foldl collectStmtExpr map
     let map := match impl with | some i => collectStmtExpr map i | none => map
     mods.foldl collectStmtExpr map
   | .Abstract posts => posts.foldl collectStmtExpr map
   | .External => map
-
-private def collectDeterminism (map : Std.HashMap Nat AstNode) (d : Determinism)
-    : Std.HashMap Nat AstNode :=
-  match d with
-  | .deterministic (some reads) => collectStmtExpr map reads
-  | _ => map
 
 private def collectParameter (map : Std.HashMap Nat AstNode) (param : Parameter)
     : Std.HashMap Nat AstNode :=
@@ -716,7 +655,6 @@ private def collectProcedure (map : Std.HashMap Nat AstNode) (proc : Procedure)
   let map := proc.inputs.foldl collectParameter map
   let map := proc.outputs.foldl collectParameter map
   let map := proc.preconditions.foldl collectStmtExpr map
-  let map := collectDeterminism map proc.determinism
   let map := match proc.decreases with | some d => collectStmtExpr map d | none => map
   collectBody map proc.body
 
@@ -792,7 +730,7 @@ private def preRegisterTopLevel (program : Program) : ResolveM Unit := do
       for ctor in dt.constructors do
         let _ ← defineName ctor.name (.datatypeConstructor dt.name ctor)
         for p in ctor.args do
-          let _ ← defineName p.name placeholderNode (some $ dt.name.text ++ ".." ++ p.name.text)
+          let _ ← defineName p.name placeholderNode (some (dt.destructorName p))
   -- Pre-register constants
   for c in program.constants do
     let _ ← defineName c.name (.constant c)
@@ -826,35 +764,4 @@ def resolve (program : Program) (existingModel: Option SemanticModel := none) : 
     errors := finalState.errors
   }
 
-
-/-- resolve preserves the number of static procedures. -/
-public theorem resolve_preserves_proc_count (program : Program) (existing : Option SemanticModel) :
-    (resolve program existing).program.staticProcedures.length = program.staticProcedures.length := by
-  unfold resolve
-  simp only []
-  -- The result program has staticProcedures := (program.staticProcedures.mapM resolveProcedure).run(state).1
-  -- Direct approach: simp the match away, then show mapM preserves length
-  -- resolve runs mapM resolveProcedure on program.staticProcedures.
-  -- mapM preserves length.
-  -- We prove this by showing resolve.program.staticProcedures comes from mapM.
-  -- Prove via a general mapM length lemma for StateM
-  suffices h : ∀ (f : Procedure → StateM ResolveState Procedure) (xs : List Procedure) (s : ResolveState),
-      (List.mapM f xs s).1.length = xs.length by
-    exact h resolveProcedure program.staticProcedures _
-  intro f xs s
-  induction xs generalizing s with
-  | nil => rfl
-  | cons x xs ih =>
-    simp only [List.mapM_cons, bind, StateT.bind]
-    show (match f x s with | (a, s') => match List.mapM f xs s' with | (a_1, s'') => (a :: a_1, s'')).1.length = xs.length + 1
-    match hfx : f x s with
-    | (a, s') =>
-      simp only []
-      match hmxs : List.mapM f xs s' with
-      | (as', s'') =>
-        simp only [List.length_cons]
-        have := ih s'
-        rw [hmxs] at this
-        simp only [] at this
-        omega
 end

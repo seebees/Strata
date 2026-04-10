@@ -45,6 +45,9 @@ structure SMT.Context where
   datatypeFuns : Map String (Op.DatatypeFuncs × LConstr CoreLParams.IDMeta) := Map.empty
   /-- Global counter for generating unique bound variable names across all terms. -/
   bvCounter : Nat := 0
+  /-- When true, always use `$__bv{N}` names for bound variables instead of
+      human-readable names derived from user-provided names. -/
+  uniqueBoundNames : Bool := false
 deriving Repr, Inhabited
 
 def SMT.Context.default : SMT.Context := {}
@@ -275,7 +278,7 @@ partial def toSMTTerm (E : Env) (bvs : BoundVars) (e : LExpr CoreLParams.mono) (
     -- The `$__` prefix is reserved for internal use and cannot appear in user
     -- identifiers (see `Strata.DL.Lambda.LState.EvalConfig.varPrefix`).
     let (baseName, startSuffix) :=
-      if name.isEmpty then
+      if ctx.uniqueBoundNames || name.isEmpty then
         (s!"$__bv{ctx.bvCounter}", 1)
       else
         Encoder.breakDisambiguatedName name
@@ -385,7 +388,7 @@ partial def toSMTOp (E : Env) (fn : CoreIdent) (fnty : LMonoTy) (ctx : SMT.Conte
     .ok (adtApp, smt_outty, ctx)
   | none =>
     -- Not a constructor, tester, or destructor
-    match E.factory.getFactoryLFunc fn.name with
+    match E.factory[fn.name]? with
     | none => .error f!"Cannot find function {fn} in Strata Core's Factory!"
     | some func =>
       match func.name.name with
@@ -761,16 +764,19 @@ def SMT.Context.getConstructorNames (ctx : SMT.Context) : Std.HashSet String :=
     if kind == .constructor then acc.insert name else acc
 
 /--
-Convert a counterexample map from `SMT.Term` values to `LExpr` values,
+Convert a model map from `SMT.Term` values to `LExpr` values,
 so that model values can be displayed using Core's expression formatter.
 
 `constructorNames` allows zero-argument constructors (which the SMT solver
 returns as plain variables) to be distinguished from ordinary variables (.fvar)
 -/
-def convertCounterEx (cex : Imperative.SMT.CounterEx Expression.Ident)
+def convertModel (model : Imperative.SMT.Model Expression.Ident)
     (constructorNames : Std.HashSet String := {})
     : List (Expression.Ident × LExpr CoreLParams.mono) :=
-  cex.map fun (id, t) => (id, smtTermToLExpr t constructorNames)
+  model.map fun (id, t) => (id, smtTermToLExpr t constructorNames)
+
+/-- Backward-compatible alias. -/
+@[deprecated convertModel (since := "2026-04-03")] abbrev convertCounterEx := @convertModel
 
 end -- public section
 

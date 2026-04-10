@@ -100,6 +100,10 @@ private def renameAllLocalNames (c:Procedure)
   let label_map := label_map_id.map (fun (id1,id2) => (id1.name, id2.name))
 
   -- Do substitution
+  -- Iterated substitution is safe here: each replacement is a fresh `.fvar` generated
+  -- by genOldToFreshIdMappings (counter-based), so a fresh new_id cannot collide with
+  -- a later old_id. The iteration is intentionally sequential because each step also
+  -- renames LHS variables and labels.
   let new_body := List.map (fun (s0:Statement) =>
     var_map.foldl (fun (s:Statement) (old_id,new_id) =>
         let s := Statement.substFvar s old_id (.fvar () new_id .none)
@@ -152,6 +156,35 @@ def updateCallGraph (cg:CallGraph) (f: String) (g: String):
   let cg_final ← cg_new.decrementEdge f g
   return cg_final
 
+/-! ### Update assertion metadata with call site information -/
+
+-- Update assertions and assumes in inlined body to carry the call site metadata
+-- as the primary file range, moving the original assertion's file range to
+-- relatedFileRange.
+mutual
+def Block.setCallSiteMetadata (b : Block) (callMd : Imperative.MetaData Expression)
+    : Block :=
+  b.map (fun s => Statement.setCallSiteMetadata s callMd)
+
+def Statement.setCallSiteMetadata (s : Statement) (callMd : Imperative.MetaData Expression)
+    : Statement :=
+  match s with
+  | .cmd (.cmd (.assert lbl e md)) =>
+    .assert lbl e (md.setCallSiteFileRange callMd)
+  | .cmd (.cmd (.assume lbl e md)) =>
+    .assume lbl e (md.setCallSiteFileRange callMd)
+  | .cmd (.cmd (.cover lbl e md)) =>
+    .cover lbl e (md.setCallSiteFileRange callMd)
+  | .block lbl b md =>
+    .block lbl (Block.setCallSiteMetadata b callMd) md
+  | .ite cond thenb elseb md =>
+    .ite cond (Block.setCallSiteMetadata thenb callMd)
+              (Block.setCallSiteMetadata elseb callMd) md
+  | .loop g measure inv body md =>
+    .loop g measure inv (Block.setCallSiteMetadata body callMd) md
+  | _ => s
+end
+
 /-
 Procedure Inlining.
 
@@ -193,21 +226,20 @@ def inlineCallCmd
         -- Insert
         --   init in1 : ty := v1     --- inputInit
         --   init in2 : ty := v2
-        --   init out1 : ty := <placeholder> --- outputInit
-        --   init out2 : ty := <placeholder>
+        --   init out1 : ty := nondet --- outputInit
+        --   init out2 : ty := nondet
         --   ... (f body)
         --   set x1 := out1    --- outputSetStmts
         --   set x2 := out2
         -- `init outN` is not necessary because calls are only allowed to use
         -- already declared variables (per Core.typeCheck)
 
-        -- Create a fresh var statement for each LHS
+        -- Declare each renamed output parameter with a nondet init.
+        -- No havoc is needed since nondet already gives an
+        -- unconstrained value.
         let outputTrips ← genOutExprIdentsTrip sigOutputs sigOutputs.unzip.fst
-        let outputInits := createInitVars
-          (outputTrips.map (fun ((tmpvar,ty),orgvar) => ((orgvar,ty),tmpvar)))
-          md
-        let outputHavocs := outputTrips.map (fun
-          (_,orgvar) => Statement.havoc orgvar md)
+        let outputInits := outputTrips.map (fun ((_, ty), orgvar) =>
+          Statement.init orgvar ty .nondet md)
         -- Create a var statement for each procedure input arguments.
         -- The input parameter expression is assigned to these new vars.
         --let inputTrips ← genArgExprIdentsTrip sigInputs args
@@ -226,8 +258,9 @@ def inlineCallCmd
             outs_lhs_and_sig
 
         let stmts:List (Imperative.Stmt Core.Expression Core.Command)
-          := inputInits ++ outputInits ++ outputHavocs ++ proc.body ++
-             outputSetStmts
+          := inputInits ++ outputInits
+             ++ Block.setCallSiteMetadata proc.body md
+             ++ outputSetStmts
 
         -- Update CallGraph if available
         let σ ← get
@@ -249,3 +282,7 @@ end -- public section
 
 end ProcedureInlining
 end Core
+
+-- NB: workaround for the fact that Core is both a module and a dialect.
+public abbrev coreInlineCallCmd (doInline : String → Core.Transform.CachedAnalyses → Bool := fun _ _ => true) :=
+  Core.ProcedureInlining.inlineCallCmd (doInline := doInline)

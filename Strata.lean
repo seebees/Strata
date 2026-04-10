@@ -29,7 +29,10 @@ import Strata.Languages.Laurel.InstanceMethodProperties
 
 /- Code Transforms -/
 import Strata.Transform.CallElimCorrect
-import Strata.Transform.DetToNondetCorrect
+import Strata.Transform.CoreSpecification
+import Strata.Transform.DetToKleeneCorrect
+import Strata.Transform.ProcBodyVerifyCorrect
+import Strata.Transform.Specification
 
 /- Backends -/
 import Strata.Backends.CBMC.CProver

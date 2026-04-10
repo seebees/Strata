@@ -6,7 +6,7 @@
 module
 
 public import Strata.Languages.Laurel.Laurel
-public import Strata.Languages.Laurel.LaurelFormat
+public import Strata.Languages.Laurel.Grammar.AbstractToConcreteTreeTranslator
 public import Strata.Languages.Laurel.LaurelTypes
 public import Strata.Languages.Laurel.HeapParameterizationConstants
 public import Strata.Util.Tactics
@@ -99,7 +99,7 @@ end
 
 def analyzeProc (proc : Procedure) : AnalysisResult :=
   let bodyResult := match proc.body with
-    | .Transparent b => (collectExprMd b).run {} |>.2
+    | .Transparent b _ => (collectExprMd b).run {} |>.2
     | .Opaque postconds impl modif =>
         -- A non-empty modifies clause implies the procedure reads and writes the heap;
         -- no need to inspect the body further in that case.
@@ -522,11 +522,11 @@ def heapTransformProcedure (model: SemanticModel) (proc : Procedure) : Transform
 
     let bodyValueIsUsed := !proc.outputs.isEmpty
     let body' ← match proc.body with
-      | .Transparent bodyExpr =>
-          -- First assign $heap_in to $heap, then transform body using $heap
+      | .Transparent bodyExpr posts =>
+           -- First assign $heap_in to $heap, then transform body using $heap
           let assignHeap := mkMd (.Assign [mkMd (.Identifier heapName)] (mkMd (.Identifier heapInName)))
           let bodyExpr' ← heapTransformExpr heapName model bodyExpr bodyValueIsUsed
-          pure (.Transparent (mkMd (.Block [assignHeap, bodyExpr'] none)))
+          pure (.Transparent (mkMd (.Block [assignHeap, bodyExpr'] none)) posts)
       | .Opaque postconds impl modif =>
           -- Postconditions use $heap (the output state)
           let postconds' ← postconds.mapM (heapTransformExpr heapName model ·)
@@ -557,9 +557,9 @@ def heapTransformProcedure (model: SemanticModel) (proc : Procedure) : Transform
     let preconditions' ← proc.preconditions.mapM (heapTransformExpr heapName model)
 
     let body' ← match proc.body with
-      | .Transparent bodyExpr =>
+      | .Transparent bodyExpr posts =>
           let bodyExpr' ← heapTransformExpr heapName model bodyExpr
-          pure (.Transparent bodyExpr')
+          pure (.Transparent bodyExpr' posts)
       | .Opaque postconds impl modif =>
           let postconds' ← postconds.mapM (heapTransformExpr heapName model ·)
           let impl' ← impl.mapM (heapTransformExpr heapName model ·)
@@ -583,7 +583,6 @@ def heapParameterization (model: SemanticModel) (program : Program) : Program :=
   let program := { program with
     types := program.types
     staticProcedures := program.staticProcedures }
-  -- Collect instance procedures from composite types for heap analysis
   let instanceProcs := program.types.foldl (fun acc td =>
     match td with
     | .Composite ct => acc ++ ct.instanceProcedures
@@ -636,7 +635,7 @@ theorem heapTransformProcedure_writesHeap_inputs (model : SemanticModel) (proc :
   -- Use generalize to name the intermediate pair results.
   generalize List.mapM (fun expr => heapTransformExpr ("$heap_in" : Identifier) model expr) proc.preconditions s = precResult
   match proc.body with
-  | .Transparent bodyExpr =>
+  | .Transparent bodyExpr _ =>
     obtain ⟨precs, s1⟩ := precResult
     generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr (!proc.outputs.isEmpty) s1 = bodyResult
     obtain ⟨body', s2⟩ := bodyResult
@@ -670,7 +669,7 @@ theorem heapTransformProcedure_writesHeap_outputs (model : SemanticModel) (proc 
     Functor.map, StateT.map, Id.run]
   generalize List.mapM (fun expr => heapTransformExpr ("$heap_in" : Identifier) model expr) proc.preconditions s = precResult
   match proc.body with
-  | .Transparent bodyExpr =>
+  | .Transparent bodyExpr _ =>
     obtain ⟨precs, s1⟩ := precResult
     generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr (!proc.outputs.isEmpty) s1 = bodyResult
     obtain ⟨body', s2⟩ := bodyResult; rfl
@@ -705,7 +704,7 @@ theorem heapTransformProcedure_readsHeap_inputs (model : SemanticModel) (proc : 
     Functor.map, StateT.map, Id.run]
   generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) proc.preconditions s = precResult
   match proc.body with
-  | .Transparent bodyExpr =>
+  | .Transparent bodyExpr _ =>
     obtain ⟨precs, s1⟩ := precResult
     generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr true s1 = r
     obtain ⟨_, _⟩ := r; rfl
@@ -738,7 +737,7 @@ theorem heapTransformProcedure_readsHeap_outputs (model : SemanticModel) (proc :
     Functor.map, StateT.map, Id.run]
   generalize List.mapM (fun expr => heapTransformExpr ("$heap" : Identifier) model expr) proc.preconditions s = precResult
   match proc.body with
-  | .Transparent bodyExpr =>
+  | .Transparent bodyExpr _ =>
     obtain ⟨precs, s1⟩ := precResult
     generalize heapTransformExpr ("$heap" : Identifier) model bodyExpr true s1 = r
     obtain ⟨_, _⟩ := r; rfl

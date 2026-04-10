@@ -1,6 +1,6 @@
 # Translator Pipeline Proofs: Design
 
-**Date:** 2026-04-09
+**Date:** 2026-04-10
 **Status:** Proposed
 
 ## Overview
@@ -37,15 +37,19 @@ The translate pipeline has ~10 passes. When a new language feature is
 added (e.g., TryCatch, instance methods, sequence types), each pass
 must handle it. In practice, features have been added incompletely:
 
-- Heap parameterization didn't track `InstanceCall` callees (bug #7, #21, #27, #32)
-- Name qualification missed instance calls in nested expressions (bug #20, #23, #28, #31)
-- Modifies clauses didn't iterate instance procedures (instance-methods Q5)
-- Opaque procedures had 3 separate bugs (#8, #29, #35)
+- Heap parameterization didn't track `InstanceCall` callees
+- Name qualification missed instance calls in nested expressions
+- Modifies clauses didn't iterate instance procedures
+- Opaque procedures had multiple discrepancies
+- Function postcondition axioms were never generated (real pipeline bug)
 
-The translator model found 35 bugs through differential testing. But
-testing is not exhaustive — it covers specific inputs, not all inputs.
-Per-pass properties with exhaustive pattern matching cover all inputs
-for the properties stated.
+Differential testing between the translator model and the pipeline
+surfaced many discrepancies. Most were model bugs (the model didn't
+match the pipeline's correct behavior), but the process revealed
+real architectural gaps — areas where the pipeline silently dropped
+information. Testing is not exhaustive — it covers specific inputs,
+not all inputs. Per-pass properties with exhaustive pattern matching
+cover all inputs for the properties stated.
 
 The key mechanism: when a property's proof pattern-matches on `StmtExpr`,
 adding a new constructor to `StmtExpr` creates a new proof obligation.
@@ -65,6 +69,7 @@ Each pipeline pass gets a property file in the same directory:
 | `ConstrainedTypeElim.lean` | `ConstrainedTypeElimProperties.lean` |
 | `Resolution.lean` | `ResolutionProperties.lean` |
 | `ModifiesClauses.lean` | `ModifiesClausesProperties.lean` |
+| `FunctionPostcondCheck.lean` | `TranslatorProperties.lean` (P-Spec-2f) |
 
 Property files import the pass but do not modify it. They are new
 files — zero risk to the existing pipeline.
@@ -131,7 +136,7 @@ Target the feature areas where bugs cluster.
 **P-Heap-1: Heap parameter injection.** If a procedure has field
 access, instance calls, or opaque modifies, it gets `$heap` as
 input. If it writes heap, it gets `$heap` as output. Catches the
-heap detection bug cluster (5 bugs).
+heap detection discrepancy cluster.
 
 **P-Heap-2: Field read translation.** Field reads for constrained
 types use the correct Factory read function (`readInt32` for `int32`
@@ -140,7 +145,7 @@ constrained-types-in-heap architecture.
 
 **P-Name-1: Instance call qualification.** Instance calls translate
 to Core calls with qualified names (`TypeName..callee`). Catches
-the name qualification bug cluster (7 bugs).
+the name qualification discrepancy cluster.
 
 **P-Name-2: Field name qualification.** In instance procedures,
 field accesses use the declaring type's prefix. Inherited fields
@@ -185,31 +190,51 @@ architecture end-to-end.
 
 ### Tier 4: Specification Preservation
 
-Target the class of bugs that prevent using JVerify to verify
+Target the class of issues that prevent using JVerify to verify
 JVerify — specifically, ensures clauses not being available where
-they should be. These bugs blocked the self-verification work
+they should be. These issues blocked the self-verification work
 (Position.compareTo, Range.compareTo) and affect any user who
-writes specifications involving instance methods or opaque
-procedures. Motivated by 5 of the 35 bugs found by differential
-testing (#8, #27, #28, #29, #35) plus the "composite with instance
-methods breaks field reasoning" Strata bug.
+writes specifications involving instance methods, opaque
+procedures, or functions with postconditions. Also motivated by
+the "composite with instance methods breaks field reasoning"
+Strata bug.
+
+The function postcondition axiom gap (motivating P-Spec-2f) was
+found when verifying Position.compareTo with `Long.compare`. The
+`feat/function-postconditions` merge added `FunctionPostcondCheck`
+(checking direction: does the body satisfy postconditions?) but
+not the axiom generation (availability direction: can callers
+assume postconditions?). The translator's `translateProcedureToFunction`
+silently dropped postconditions because `Core.Function.axioms`
+was never populated.
 
 **P-Spec-1: Ensures clause preservation.** When a procedure has
 `ensures P`, the Core output contains `P` as a postcondition.
-Catches the "postcondition silently dropped" class (bugs #28,
-#30, #35).
+Catches the "postcondition silently dropped" class.
 
 **P-Spec-2: Opaque procedure postcondition availability.** When
 a procedure is opaque (has `ensures` but the body is hidden), the
 Core output has the postcondition as an axiom that callers can
-use. Catches bugs #8, #27, #29 (opaque procedures losing
-information).
+use. This covers the `translateProcedure` → `Core.Decl.proc` path
+where postconditions go into `spec.postconditions`.
+
+**P-Spec-2f: Function postcondition axiom generation.** When a
+function (`isFunctional = true`) has `ensures` clauses, the
+translated `Core.Function` has `axioms` whose count equals the
+postcondition count, and each axiom is a universally quantified
+formula with `result` replaced by `f(params...)`. This covers
+the `translateProcedureToFunction` → `Core.Decl.func` path
+where postconditions must go into `func.axioms`. The translator
+has two separate code paths for postcondition availability:
+procedures use `spec.postconditions`, functions use
+`func.axioms`. P-Spec-2 and P-Spec-2f together ensure both
+paths preserve postconditions. See D18 in decisions.
 
 **P-Spec-3: Instance method postconditions are qualified.** When
 an instance method has `ensures self#count == old(self#count) + 1`,
 the Core postcondition uses the qualified field name
-`TypeName..count`. Catches bugs #28, #34 (postconditions and
-preconditions not qualified for instance procs).
+`TypeName..count`. Catches postconditions and preconditions not
+being qualified for instance procs.
 
 **P-Spec-4: Cross-method ensures propagation.** When procedure A
 calls procedure B with `ensures P`, the call site in A's Core
@@ -225,27 +250,34 @@ method on a composite breaks field reasoning" Strata bug.
 
 ## Bug Mapping
 
-The 35 bugs found by differential testing map to proof tiers:
+## Discrepancy Categories
 
-| Bug Category | Count | Bugs | Proof Coverage |
-|-------------|-------|------|---------------|
-| Name qualification | 7 | #20,23,24,28,31,34 | P-Name-1 ✅, P-Name-2 needed |
-| Heap detection | 5 | #7,21,27,32,33 | P-Heap-1 ✅, P-Heap-3 needed |
-| Instance calls | 4 | #12,13,14,18,19 | P-Name-1 ✅, IM1 ✅ |
-| Constrained types | 4 | #3,4,5,6 | Infra ✅, P-Constrained-1 needed |
-| Opaque procs | 3 | #8,29,35 | P-Spec-1/2 needed |
-| Labels | 2 | #9,30 | Not yet targeted |
-| Operators | 2 | #15,16 | P-Struct-1 partial |
-| Statement translation | 2 | #18,19 | P-Exception-1 ✅ |
-| Other | 6 | #1,2,10,11,22,25,26 | Mixed |
+Differential testing between the translator model and the pipeline
+surfaced discrepancies in these categories. Most were model bugs
+(the model didn't match the pipeline's correct behavior), not
+pipeline bugs. The categories are useful for understanding where
+the pipeline is complex and where proofs add the most value:
 
-The proofs have NOT directly found bugs — the 35 bugs were found
-by differential testing. The proofs serve a different purpose:
-they confirm fixes are structurally correct and prevent regressions.
+| Category | Proof Coverage |
+|----------|---------------|
+| Name qualification | P-Name-1 ✅, P-Name-2 needed |
+| Heap detection | P-Heap-1 ✅, P-Heap-3 needed |
+| Instance calls | P-Name-1 ✅, IM1 ✅ |
+| Constrained types | Infra ✅, P-Constrained-1 needed |
+| Opaque procs | P-Spec-1/2 needed |
+| Function postconditions | P-Spec-2f needed |
+| Labels | Not yet targeted |
+| Operators | P-Struct-1 partial |
+| Statement translation | P-Exception-1 ✅ |
+
+The one confirmed real pipeline bug — function postcondition axioms
+not being generated — was found during self-verification work, not
+by differential testing. The proofs serve a different purpose than
+testing: they confirm structural correctness and prevent regressions.
 When someone changes the Throw translation, the equation lemma
 stops compiling. When someone changes instance call argument order,
-P-Name-1 breaks. The differential tests catch bugs on specific
-inputs; the proofs catch them on ALL inputs.
+P-Name-1 breaks. The differential tests find discrepancies on
+specific inputs; the proofs guarantee properties on ALL inputs.
 
 ## Relationship to Existing Work
 
@@ -254,7 +286,7 @@ inputs; the proofs catch them on ALL inputs.
 The model (`TranslatorModel.lean`) and equivalence proofs
 (`TranslatorEquivalence.lean`) are superseded by this approach.
 The differential tests (`TranslatorModelTest.lean`) are kept as
-bug-finding tools. See D1, D2 in decisions.
+discrepancy-finding tools. See D1, D2 in decisions.
 
 ### TranslatorModelProperties.lean (migrating)
 
@@ -287,7 +319,7 @@ designed to compose with them. See D7 in decisions.
 
 ### Phase 1: Foundation ✅ COMPLETE
 
-1. Created `TranslatorProperties.lean` with 35 Tier 1 properties:
+1. Created `TranslatorProperties.lean` with 49 Tier 1/2 properties:
    P-Struct-1 (expression/statement translation succeeds for 21
    constructors), P-Struct-1c (state preservation for 4 literals),
    P-Struct-1d (5 statement properties), P-Struct-2 (5 procedure
@@ -300,11 +332,11 @@ designed to compose with them. See D7 in decisions.
 
 ### Phase 1b: Heap properties ✅ COMPLETE
 
-4. Created `HeapParameterizationProperties.lean` with 10 P-Heap-1
+4. Created `HeapParameterizationProperties.lean` with 19 P-Heap-1
    properties: heap writer input/output injection (4), heap reader
    input injection + output preservation (2), non-heap identity (3),
-   naming consistency (1).
-5. Infrastructure lemmas in `ConstrainedTypeElim.lean` (8 lemmas,
+   naming consistency (1), plus additional heap threading properties.
+5. Infrastructure lemmas in `ConstrainedTypeElim.lean` (6 lemmas,
    zero sorry): isFunctional/isExternal preservation for
    mkConstraintFunc, mkWitnessProc, elimProc.
 
@@ -336,17 +368,32 @@ designed to compose with them. See D7 in decisions.
 16. Prove Tier 3 compositional properties as needed.
 17. Migrate remaining model properties, deprecate model files.
 
-### Current status (2026-04-09)
+### Phase 5: Function postcondition axioms (see D18)
+
+18. Add equation lemma for `translateProcedureToFunction` axiom
+    generation in `LaurelToCoreTranslator.lean`.
+19. Add P-Spec-2f (function postcondition axiom count preservation)
+    to `TranslatorProperties.lean`.
+20. Add exhaustive `Body` variant match property (D18 Option C)
+    to ensure new body variants get axiom handling.
+
+### Current status (2026-04-10)
 
 | File | Theorems | Sorry |
 |------|----------|-------|
-| `TranslatorProperties.lean` | 35 | 0 |
-| `HeapParameterizationProperties.lean` | 10 | 0 |
-| `ConstrainedTypeElim.lean` (infra) | 8 | 0 |
+| `TranslatorProperties.lean` | 49 | 0 |
+| `HeapParameterizationProperties.lean` | 19 | 0 |
+| `ConstrainedTypeElim.lean` (infra) | 6 | 0 |
 | `InstanceMethodProperties.lean` (pre-existing) | 1 | 0 |
-| **Total** | **54** | **0** |
+| `FunctionPostcondCheck.lean` | 0 | 0 |
+| **Total** | **75** | **0** |
 
-### Test coverage analysis (2026-04-09)
+Note: `FunctionPostcondCheck.lean` has the pass implementation
+but no properties yet. P-Spec-2f properties will go in a new
+`FunctionPostcondProperties.lean` or in `TranslatorProperties.lean`
+(see D18 in decisions).
+
+### Test coverage analysis (2026-04-10)
 
 | Test area | Tests | Proof coverage |
 |-----------|-------|---------------|
@@ -360,6 +407,7 @@ designed to compose with them. See D7 in decisions.
 | Constrained types | T10_Constrained | ❌ No P-Constrained-1 |
 | Inheritance | T5_inheritance | ❌ No properties |
 | Quantifiers | T14 | ❌ No properties |
+| Function postconditions | Position.compareTo | ❌ No P-Spec-2f |
 
 ### Success criteria
 

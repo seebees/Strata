@@ -1,6 +1,6 @@
 # Translator Pipeline Proofs: Decisions
 
-**Date:** 2026-04-09
+**Date:** 2026-04-10
 **Status:** Proposed
 
 ## D1: Proof approach — model equivalence vs direct pipeline properties
@@ -22,13 +22,14 @@ proof.
 
 - Pro: Once proven, you get ALL properties of the model for free.
   The model serves as both spec and reference implementation.
-- Con: The model itself had 35+ bugs (D6 in translator-model
+- Con: The model itself had many discrepancies (D6 in translator-model
   decisions). The equivalence proof is enormous — 7 categories,
   most still `sorry`. The model must track every pipeline change,
   creating a maintenance burden that scales with feature velocity.
   Adding a feature means changing both the pipeline AND the model,
   then re-proving equivalence. The first week of proof work found
-  zero bugs; the first day of differential testing found 11.
+  zero discrepancies; the first day of differential testing found 11
+  discrepancies.
 
 ### Option B: Direct properties on the pipeline
 
@@ -63,12 +64,13 @@ inputs.
 
 ### Decision: Option B (direct properties on the pipeline)
 
-The model served its purpose — it found 35 bugs through
-differential testing and established the 7-category decomposition
-that clarified the pipeline's structure. But the equivalence proof
-is not the right investment. The model is a liability: every
-pipeline change requires a corresponding model change, and the
-model itself is a source of bugs (35 found, 9 gaps remaining).
+The model served its purpose — differential testing between the
+model and the pipeline surfaced many discrepancies and established
+the 7-category decomposition that clarified the pipeline's
+structure. But the equivalence proof is not the right investment.
+The model is a liability: every pipeline change requires a
+corresponding model change, and the model itself is a source of
+discrepancies (most were model bugs, not pipeline bugs).
 
 Direct properties give us the specific guarantee we need: when a
 feature is added to the pipeline, the proofs enforce that it's
@@ -77,7 +79,7 @@ that motivated this work. Lean's exhaustiveness checker is the
 mechanism — a new `StmtExpr` constructor creates a new proof
 obligation in every property that matches on statements.
 
-The differential tests remain as the primary bug-finding tool.
+The differential tests remain as the primary discrepancy-finding tool.
 The properties are the regression guarantee.
 
 ---
@@ -105,7 +107,7 @@ Deprecate `TranslatorModel.lean`, `TranslatorEquivalence.lean`,
 `TranslatorModelProof.lean`. Mark them as deprecated with a
 comment pointing to the new property files.
 
-- Pro: Tests continue finding bugs. No model maintenance.
+- Pro: Tests continue finding discrepancies. No model maintenance.
   Clear signal that the property approach is the path forward.
 - Con: Differential tests depend on the model (they compare
   pipeline output to model output). Deprecating the model
@@ -127,14 +129,14 @@ proofs, and differential test infrastructure.
 
 ### Decision: Option B now, Option C eventually
 
-Keep the differential tests — they're the best bug-finding tool
+Keep the differential tests — they're the best discrepancy-finding tool
 we have. Deprecate the model and equivalence proofs. As the
 pipeline property coverage grows and the model falls behind,
 transition to Option C: extract the interesting test programs
 into standalone pipeline tests and remove the model entirely.
 
 The trigger for the transition: when maintaining the model for
-differential tests costs more than the bugs it finds.
+differential tests costs more than the discrepancies it finds.
 
 ---
 
@@ -489,9 +491,9 @@ control flow, loops, basic statements, procedure signatures, and
 heap parameter injection. A gap analysis against the test suite
 reveals which features have test coverage but zero proof coverage.
 
-The bug history (35 bugs found by differential testing) clusters
-around: instance methods (7 bugs), heap detection (5 bugs), opaque
-procedures (4 bugs), name qualification (7 bugs).
+The discrepancy history from differential testing clusters
+around: instance methods, heap detection, opaque procedures,
+name qualification, and function postconditions.
 
 ### Option A: Cover breadth first — one property per StmtExpr constructor
 
@@ -501,52 +503,54 @@ adding a new constructor breaks the most proofs.
 
 - Pro: Maximum coverage breadth. Every constructor has at least
   one proof obligation.
-- Con: Shallow properties don't catch semantic bugs. "Succeeds"
-  doesn't mean "produces the right output." The bug clusters are
+- Con: Shallow properties don't catch semantic issues. "Succeeds"
+  doesn't mean "produces the right output." The discrepancy clusters are
   in specific features, not in missing constructors.
 
-### Option B: Cover depth first — full properties for bug-cluster features
+### Option B: Cover depth first — full properties for high-risk features
 
 Prove deep properties (correct output structure, correct naming,
-correct heap threading) for the features where bugs cluster:
+correct heap threading) for the features where discrepancies cluster:
 instance methods, exceptions, field access, constrained types.
 
-- Pro: Targets the actual bug sources. Each property catches a
-  class of bugs, not just one. Composes with semantic proofs for
+- Pro: Targets the actual risk areas. Each property catches a
+  class of issues, not just one. Composes with semantic proofs for
   end-to-end guarantees.
 - Con: Leaves some constructors with zero coverage. A new
   constructor in an uncovered area won't trigger a proof failure.
 
-### Option C: Prioritized hybrid — depth for bug clusters, breadth for the rest
+### Option C: Prioritized hybrid — depth for high-risk areas, breadth for the rest
 
-Prove deep properties for the 5 highest-risk features (instance
-calls, exceptions, field access, preconditions, constrained types).
-Add shallow "succeeds" properties for remaining constructors as
-time permits.
+Prove deep properties for the 6 highest-risk features (instance
+calls, exceptions, field access, preconditions, constrained types,
+function postconditions). Add shallow "succeeds" properties for
+remaining constructors as time permits.
 
 ### Decision: Option C (prioritized hybrid)
 
-The bug data tells us where to invest. The 5 priority features
-below account for 23 of 35 historical bugs. Deep properties for
-these features give us the most regression protection per proof.
+The discrepancy data tells us where to invest. The 6 priority features
+below are the highest-risk areas based on discrepancy history and
+self-verification experience. Deep properties for these features
+give us the most regression protection per proof.
 Shallow breadth properties are added opportunistically.
 
-Priority order (see D9–D13 for each):
+Priority order (see D9–D13, D18 for each):
 
-1. **Instance calls** (P-Name-1) — 7 bugs, 3 test files, zero proofs
-2. **Exceptions** (P-Exception-1, P-Exception-2) — 4 bugs, 1 test file, zero proofs
-3. **Field access** (P-Heap-2) — 5 bugs (heap cluster), 2 test files, zero proofs
-4. **Preconditions/postconditions** (P-Struct-2 generalization) — 4 bugs, 3 test files, partial proofs
-5. **Constrained types** (P-Constrained-1) — 3 bugs, 1 test file, infrastructure only
+1. **Instance calls** (P-Name-1) — 3 test files, zero proofs
+2. **Exceptions** (P-Exception-1, P-Exception-2) — 1 test file, zero proofs
+3. **Field access** (P-Heap-2) — 2 test files, zero proofs
+4. **Preconditions/postconditions** (P-Struct-2 generalization) — 3 test files, partial proofs
+5. **Constrained types** (P-Constrained-1) — 1 test file, infrastructure only
+6. **Function postconditions** (P-Spec-2f) — Position.compareTo, zero proofs
 
 ---
 
 ## D9: Instance call translation (P-Name-1)
 
 **Context:** Instance calls (`target~>callee(args)`) are the most
-bug-prone feature in the pipeline. The test suite has 3 dedicated
+complex feature in the pipeline. The test suite has 3 dedicated
 files (T7_InstanceProcedures, T9_InstanceCall, T10_InstanceCallCases).
-The bug history shows 7 bugs in name qualification alone. The
+Differential testing surfaced many name qualification discrepancies. The
 existing `IM1` theorem proves naming consistency between call sites
 and definition sites, but no property proves the translation output
 is correct.
@@ -809,8 +813,8 @@ isFunctional`) show the pattern for reasoning about `elimProc`.
 ## D14: Opaque procedure equation lemma
 
 **Context:** Opaque procedures (procedures with `ensures` but hidden
-bodies) are where postconditions live. 5 of 35 bugs (#8, #27, #28,
-#29, #35) were in opaque procedure handling. The current P-Struct-2
+bodies) are where postconditions live. Multiple discrepancies were
+found in opaque procedure handling. The current P-Struct-2
 properties only cover transparent procedures with no preconditions
 (`translateProcedure_eq_transparent`). To prove P-Spec-1 and P-Spec-2,
 we need an equation lemma for opaque procedures.
@@ -851,13 +855,19 @@ and implementations).
 
 ---
 
-## D15: Postcondition preservation (P-Spec-1)
+## D15: Postcondition preservation (P-Spec-1, procedure path)
 
 **Context:** The self-verification work was blocked by postconditions
-being silently dropped or incorrectly translated. Bug #35 (function
-with `ensures` missing body) and bug #30 (single postcondition label
-wrong) are examples. We want to prove that postconditions survive
-the translation pipeline.
+being silently dropped or incorrectly translated. We want to prove
+that postconditions survive the translation pipeline.
+
+**Important:** This decision covers the **procedure path** only
+(`translateProcedure` → `Core.Decl.proc` → `spec.postconditions`).
+The **function path** (`translateProcedureToFunction` →
+`Core.Decl.func` → `func.axioms`) is covered by D18. The function
+postcondition axiom gap showed that these are genuinely separate
+code paths with independent failure modes — the procedure path
+can be correct while the function path silently drops postconditions.
 
 ### Option A: Count preservation
 
@@ -901,7 +911,7 @@ postconditions with field access) follows as P-Spec-3.
 
 ## D16: Field name qualification in specifications (P-Spec-3, P-Name-2)
 
-**Context:** Bugs #23, #24, #28, #34 are all about field names not
+**Context:** Multiple discrepancies were found around field names not
 being qualified correctly in postconditions and preconditions. When
 an instance method has `ensures self#count == old(self#count) + 1`,
 the Core output must use `TypeName..count`, not just `count`. The
@@ -991,3 +1001,115 @@ validates the fix. Option C is achievable now. Option A
 (monotonicity) is the right long-term property but requires
 significant fixpoint reasoning infrastructure that doesn't
 exist yet.
+
+---
+
+## D18: Function postcondition axiom generation (P-Spec-2f)
+
+**Context:** The function postcondition axiom gap revealed that the
+translator has two separate code paths for postcondition availability:
+
+1. **Procedure path:** `translateProcedure` → `Core.Decl.proc` →
+   postconditions go into `spec.postconditions`. Covered by D15.
+2. **Function path:** `translateProcedureToFunction` →
+   `Core.Decl.func` → postconditions must go into `func.axioms`.
+   NOT covered by D15.
+
+The `feat/function-postconditions` merge added `FunctionPostcondCheck`
+(generates `$check` procedures to verify function bodies satisfy
+postconditions) but did not add axiom generation in the translator.
+`translateProcedureToFunction` created `Core.Function` with
+`axioms := []` (default), silently dropping all postconditions.
+The fix populates `func.axioms` by translating each postcondition
+to a universally quantified Core expression with `result` replaced
+by `f(params...)`.
+
+The precondition chain for function postconditions:
+
+```
+FunctionPostcondCheck postcondition:
+    "postconditions preserved on function (not stripped)"
+    ↓
+translateProcedureToFunction precondition:
+    "function has postconditions in its Body"
+    ↓
+P-Spec-2f postcondition:
+    "Core.Function.axioms.length = postconditions.length"
+    ↓
+SMTEncoder precondition:
+    "func.axioms added to SMT context when function encountered"
+```
+
+### Option A: Count preservation on `translateProcedureToFunction`
+
+Prove: "a function with N postconditions produces a `Core.Function`
+with N axioms." Matches the D15 Option A pattern for procedures.
+
+- Pro: Simple. Catches the "axioms silently dropped" class (the
+  function postcondition axiom gap). Requires only an equation lemma for
+  `translateProcedureToFunction` that exposes the axiom count.
+- Con: Doesn't prove axiom content is correct. The axioms could
+  have wrong structure (e.g., missing `result` substitution,
+  wrong quantifier nesting).
+
+### Option B: Structural preservation
+
+Prove: "each axiom is `∀ params :: {f(params)} postcond[result :=
+f(params)]`." This catches both dropped and malformed axioms.
+
+- Pro: Stronger guarantee. Validates the substitution and
+  quantifier wrapping.
+- Con: Harder to prove. Requires reasoning about `substFvar`,
+  `buildQuants`, and the function application construction.
+  The axiom structure involves de Bruijn indices, which are
+  notoriously tricky to reason about.
+
+### Option C: Exhaustive pattern match on Body variants
+
+Prove a property that pattern-matches on all `Body` variants
+in `translateProcedureToFunction`. For each variant with
+postconditions (`.Transparent _ posts`, `.Opaque posts _ _`,
+`.Abstract posts`), prove axioms are generated. For variants
+without (`.External`, empty postconds), prove axioms are empty.
+
+- Pro: Lean's exhaustiveness checker enforces that new `Body`
+  variants get handled. This is the core mechanism from the
+  design doc — adding a new body variant breaks the proof.
+- Con: More cases to prove. But each case is simple.
+
+### Decision: Option A first, then Option C
+
+Count preservation (Option A) catches the exact bug class that
+motivated this decision. It's the 80/20 — one theorem, maximum
+value. The equation lemma for `translateProcedureToFunction`
+needs to expose:
+
+```lean
+theorem translateProcedureToFunction_axiom_count
+    (proc : Procedure) (hFunc : proc.isFunctional)
+    (hPosts : getPostconds proc.body = posts)
+    (hNonEmpty : posts ≠ []) :
+    (translateProcedureToFunction {} false proc).axioms.length =
+    posts.length
+```
+
+Option C (exhaustive Body match) follows as the regression
+guarantee: when a new `Body` variant is added, the proof
+breaks until the new case is handled.
+
+Option B (structural preservation) is a stretch goal. The de
+Bruijn index reasoning is complex and the count property already
+catches the practical failure mode.
+
+**Implementation notes:**
+
+- The equation lemma goes in `LaurelToCoreTranslator.lean`
+  (following D4: equation lemma strategy).
+- The property goes in `TranslatorProperties.lean` alongside
+  the existing P-Spec properties.
+- Precondition: `FunctionPostcondCheck` has run (postconditions
+  are on the function, not stripped). This is an explicit
+  hypothesis, following D5.
+- The property file for `FunctionPostcondCheck.lean` itself
+  (proving postconditions are preserved, not stripped) is
+  future work. For now, the hypothesis documents the assumption.

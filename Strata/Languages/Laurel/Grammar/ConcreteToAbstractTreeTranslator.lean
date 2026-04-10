@@ -256,7 +256,8 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
       let name ← translateIdent arg0
       let varType ← match typeArg with
         | .option _ (some (.op typeOp)) => match typeOp.name, typeOp.args with
-          | q`Laurel.typeAnnotation, #[typeArg0] => translateHighType typeArg0
+          | q`Laurel.typeAnnotation, #[typeArg0]
+          | q`Laurel.optionalType, #[typeArg0] => translateHighType typeArg0
           | _, _ => TransM.error s!"Variable {name} requires explicit type"
         | _ => TransM.error s!"Variable {name} requires explicit type"
       let value ← match assignArg with
@@ -309,7 +310,8 @@ partial def translateStmtExpr (arg : Arg) : TransM StmtExprMd := do
       let thenBranch ← translateStmtExpr arg1
       let elseBranch ← match elseArg with
         | .option _ (some (.op elseOp)) => match elseOp.name, elseOp.args with
-          | q`Laurel.elseBranch, #[elseArg0] => translateStmtExpr elseArg0 >>= (pure ∘ some)
+          | q`Laurel.elseBranch, #[elseArg0]
+          | q`Laurel.optionalElse, #[elseArg0] => translateStmtExpr elseArg0 >>= (pure ∘ some)
           | _, _ => pure none
         | _ => pure none
       return mkStmtExprMd (.IfThenElse cond thenBranch elseBranch) md
@@ -465,11 +467,28 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
 
   let isFunction := op.name == q`Laurel.function
   -- Extract opaque modifier for functions (first arg); strip it so both have the same arg shape
+  -- Only strip if the first arg is an option (the opaque modifier from the grammar).
+  -- Java emitters may not include the opaque modifier at all.
   let (isOpaque, args) := if isFunction then
     match op.args[0]? with
     | some (.option _ (some _)) => (true, op.args.extract 1 op.args.size)
-    | _ => (false, op.args.extract 1 op.args.size)
+    | some (.option _ none) => (false, op.args.extract 1 op.args.size)
+    | _ => (false, op.args)
   else (false, op.args)
+  -- Normalize to 9-arg form:
+  -- 7-arg (old Java, no returnParameters/invokeOn):
+  --   [name, params, retType, requires, ensures, modifies, body]
+  --   → insert retParams after retType (pos 3), invokeOn after requires (pos 5)
+  -- 8-arg (Java with returnParameters, no invokeOn):
+  --   [name, params, retType, retParams, requires, ensures, modifies, body]
+  --   → insert invokeOn after requires (pos 5)
+  let args := if args.size == 7 then
+    let a := args.extract 0 3 ++ #[.option default none] ++ args.extract 3 7
+    -- now 8 args: [name, params, retType, retParams, requires, ensures, modifies, body]
+    a.extract 0 5 ++ #[.option default none] ++ a.extract 5 8
+  else if args.size == 8 then
+    args.extract 0 5 ++ #[.option default none] ++ args.extract 5 8
+  else args
   match args with
   | #[nameArg, paramArg, returnTypeArg, returnParamsArg,
       requiresArg, invokeOnArg, ensuresArg, modifiesArg, bodyArg] =>
@@ -480,7 +499,8 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
     -- If returnTypeArg is set, create a single "result" parameter
     let returnParameters ← match returnTypeArg with
       | .option _ (some (.op returnTypeOp)) => match returnTypeOp.name, returnTypeOp.args with
-        | q`Laurel.returnType, #[typeArg] =>
+        | q`Laurel.returnType, #[typeArg]
+        | q`Laurel.optionalReturnType, #[typeArg] =>
           let retType ← translateHighType typeArg
           pure [{ name := "result", type := retType : Parameter }]
         | _, _ => TransM.error s!"Expected returnType operation, got {repr returnTypeOp.name}"
@@ -515,7 +535,8 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
       | _ => pure false
     let body ← match bodyArg with
       | .option _ (some (.op bodyOp)) => match bodyOp.name, bodyOp.args with
-        | q`Laurel.body, #[exprArg] => translateCommand exprArg >>= (pure ∘ some)
+        | q`Laurel.body, #[exprArg]
+        | q`Laurel.optionalBody, #[exprArg] => translateCommand exprArg >>= (pure ∘ some)
         | q`Laurel.externalBody, #[] => pure none
         | _, _ => TransM.error s!"Expected body or externalBody operation, got {repr bodyOp.name}"
       | .option _ none => pure none

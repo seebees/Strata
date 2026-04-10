@@ -658,6 +658,45 @@ def translateProcedureToFunction (options: LaurelTranslateOptions) (isRecursive:
       -- via axioms, checked by $check procedure
       pure none
     | _ => pure none
+
+  -- Generate axioms from function postconditions.
+  -- For each postcondition like `x < y → result < 0`, produce an axiom:
+  --   ∀ x : int, ∀ y : int, x < y → compare(x, y) < 0
+  let postconds := match proc.body with
+    | .Transparent _ posts => posts
+    | .Opaque posts _ _ => posts
+    | .Abstract posts => posts
+    | .External => []
+  let axioms ← if postconds.isEmpty then pure []
+  else do
+    -- Translate postconditions with input params as bound vars; `result` becomes fvar
+    let boundVars := proc.inputs.reverse.map (·.name)
+    let postcondExprs ← postconds.mapM (fun pc => translateExpr pc boundVars (isPureContext := true))
+    let n := proc.inputs.length
+    let inputTypes ← proc.inputs.mapM (fun p => translateType p.type)
+    -- Build the arrow type for the function: T1 → T2 → ... → Tn → ReturnType
+    let funcTy := match inputTypes with
+      | [] => outputTy
+      | ity :: irest => Lambda.LMonoTy.mkArrow ity (irest ++ [outputTy])
+    -- Build function application: f(bvar(n-1), ..., bvar(0))
+    let mkFuncApp := List.range n |>.foldl (fun acc i =>
+      LExpr.app () acc (.bvar () (n - 1 - i))) (LExpr.op () ⟨proc.name.text, ()⟩ (some funcTy))
+    -- Substitute fvar("result") with the function application in each postcondition
+    let resultId : Core.Expression.Ident := ⟨"result", ()⟩
+    let substituted := postcondExprs.map (fun (e : Core.Expression.Expr) =>
+      LExpr.substFvar (T := Core.CoreLParams) e resultId mkFuncApp)
+    -- Build individual axioms, each wrapped in ∀ quantifiers with trigger
+    substituted.mapM fun postExpr => do
+      let trigger := mkFuncApp
+      let pairs := proc.inputs.zip inputTypes
+      let rec buildQuants : List (Laurel.Parameter × LMonoTy) → TranslateM Core.Expression.Expr
+        | [] => pure postExpr
+        | [(_, ty)] => pure (LExpr.allTr () "" (some ty) trigger postExpr)
+        | (_, ty) :: rest => do
+          let inner ← buildQuants rest
+          pure (LExpr.all () "" (some ty) inner)
+      buildQuants pairs
+
   let f : Core.Function := {
     name := ⟨proc.name.text, ()⟩
     typeArgs := []
@@ -667,6 +706,7 @@ def translateProcedureToFunction (options: LaurelTranslateOptions) (isRecursive:
     preconditions := preconditions
     isRecursive := isRecursive
     attr := attr
+    axioms := axioms
   }
   return .func f proc.md
 
@@ -706,6 +746,7 @@ Translate Laurel Program to Core Program, also returning the lowered Laurel prog
 def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): TranslateResultWithLaurel :=
   let program := { program with
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
+    types := coreDefinitionsForLaurel.types ++ program.types
   }
 
   -- dbg_trace "=== Initial Laurel program ==="

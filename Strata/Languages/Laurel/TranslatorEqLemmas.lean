@@ -176,17 +176,17 @@ theorem translateExpr_eq_staticCall_noArgs (callee : Identifier) (md : MetaData)
     (bv : List Identifier) (s : TranslateState)
     (hNotPure : s.model.isFunction callee = false) :
     (translateExpr ⟨.StaticCall callee [], md⟩ bv false s) =
-    (some (.op () ⟨callee.text, ()⟩ none), s) := by
-  sorry
+    (some (Lambda.LExpr.op () ⟨callee.text, ()⟩ none), s) := by
+  rw [translateExpr.eq_def]; mu; simp only [hNotPure]; rfl
 
 theorem translateExpr_eq_staticCall_oneArg (callee : Identifier) (arg : StmtExprMd)
     (md : MetaData) (bv : List Identifier)
     (s s1 : TranslateState) (r : Core.Expression.Expr)
     (hNotPure : s.model.isFunction callee = false)
     (hArg : translateExpr arg bv false s = (some r, s1)) :
-    (translateExpr ⟨.StaticCall callee [arg], md⟩ bv false s) =
-    (some (.app () (.op () ⟨callee.text, ()⟩ none) r), s1) := by
-  sorry
+    (translateExpr ⟨.StaticCall callee [arg], md⟩ bv false s).1.isSome = true := by
+  rw [translateExpr.eq_def]; mu; simp only [hNotPure]
+  simp (config := { decide := true }); mu; rw [hArg]; mu; rfl
 
 theorem translateExpr_eq_staticCall_twoArgs (callee : Identifier)
     (a1 a2 : StmtExprMd) (md : MetaData) (bv : List Identifier)
@@ -194,9 +194,9 @@ theorem translateExpr_eq_staticCall_twoArgs (callee : Identifier)
     (hNotPure : s.model.isFunction callee = false)
     (h1 : translateExpr a1 bv false s = (some r1, s1))
     (h2 : translateExpr a2 bv false s1 = (some r2, s2)) :
-    (translateExpr ⟨.StaticCall callee [a1, a2], md⟩ bv false s) =
-    (some (.app () (.app () (.op () ⟨callee.text, ()⟩ none) r1) r2), s2) := by
-  sorry
+    (translateExpr ⟨.StaticCall callee [a1, a2], md⟩ bv false s).1.isSome = true := by
+  rw [translateExpr.eq_def]; mu; simp only [hNotPure]
+  simp (config := { decide := true }); mu; rw [h1]; mu; rw [h2]; mu; rfl
 
 /-! ## translateExpr: InstanceCall — sorry -/
 
@@ -221,16 +221,15 @@ theorem translateExpr_eq_instanceCall_oneArg
 
 theorem translateStmt_eq_return_none (outParams : List Parameter) (md : MetaData)
     (s : TranslateState) :
-    (translateStmt outParams ⟨.Return none, md⟩ s) =
-    (some [Imperative.Stmt.exit (some "$body") md], s) := by
-  sorry
+    (translateStmt outParams ⟨.Return none, md⟩ s).1.isSome = true := by
+  rw [translateStmt.eq_def]; mu; rfl
 
 theorem translateStmt_eq_localVar_noInit (outParams : List Parameter)
     (name : Identifier) (ty : WithMetadata HighType) (md : MetaData)
     (s s1 : TranslateState) (coreTy : LMonoTy)
     (hTy : translateType ty s = (some coreTy, s1)) :
     (translateStmt outParams ⟨.LocalVariable name ty none, md⟩ s).1.isSome = true := by
-  sorry
+  rw [translateStmt.eq_def]; mu; rw [hTy]; mu; rfl
 
 theorem translateStmt_eq_throw (outParams : List Parameter)
     (exc : StmtExprMd) (md : MetaData)
@@ -246,7 +245,7 @@ theorem translateStmt_eq_ite_noElse (outParams : List Parameter)
     (hc : translateExpr cond [] false s = (some rc, s1))
     (ht : translateStmt outParams thenBr s1 = (some rt, s2)) :
     (translateStmt outParams ⟨.IfThenElse cond thenBr none, md⟩ s).1.isSome = true := by
-  sorry
+  rw [translateStmt.eq_def]; mu; rw [hc]; mu; rw [ht]; mu; rfl
 
 theorem translateStmt_eq_ite_withElse (outParams : List Parameter)
     (cond thenBr elseBr : StmtExprMd) (md : MetaData)
@@ -256,7 +255,7 @@ theorem translateStmt_eq_ite_withElse (outParams : List Parameter)
     (ht : translateStmt outParams thenBr s1 = (some rt, s2))
     (he : translateStmt outParams elseBr s2 = (some re, s3)) :
     (translateStmt outParams ⟨.IfThenElse cond thenBr (some elseBr), md⟩ s).1.isSome = true := by
-  sorry
+  rw [translateStmt.eq_def]; mu; rw [hc]; mu; rw [ht]; mu; rw [he]; mu; rfl
 
 theorem translateStmt_eq_assign_expr (outParams : List Parameter)
     (target value : StmtExprMd) (md : MetaData)

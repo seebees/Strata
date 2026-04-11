@@ -610,4 +610,34 @@ theorem translateProcedureToFunction_axiom_count
     f.axioms.length = (getPostconds proc.body).length :=
   translateProcedureToFunction_axioms_length options isRecursive proc s s' f fmd hSucc
 
+/-! ## P-Exception-1: Throw Translation
+
+Arrow 2 structural guarantee: translateStmt on .Throw produces exactly
+[$result := Failure(), exit <exceptionTarget>], with state unchanged.
+
+Arrow 3 composition (ExceptionProperties.throw_produces_exit) is blocked
+until the semantic proofs are updated from big-step (EvalStmt/EvalBlock)
+to the current small-step (StepStmt/Config) semantics. The structural
+properties below are independently valuable — they catch regressions in
+the Throw translation and document the exact output structure. -/
+
+/-- P-Exception-1 (Arrow 2): translateStmt on .Throw produces exactly
+    [$result := Failure(), exit <exceptionTarget>], with state unchanged. -/
+theorem throw_translation_structure (outParams : List Parameter)
+    (exception : WithMetadata StmtExpr) (md : MetaData)
+    (s : TranslateState) :
+    (translateStmt outParams ⟨.Throw exception, md⟩ s).1 =
+      some [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Failure", ()⟩ none) md,
+            Imperative.Stmt.exit (some s.exceptionTarget) md] := by
+  have h := translateStmt_throw outParams exception md s
+  rw [h]
+
+/-- P-Exception-1 (state preservation): Throw does not modify translator state. -/
+theorem throw_translation_state_unchanged (outParams : List Parameter)
+    (exception : WithMetadata StmtExpr) (md : MetaData)
+    (s : TranslateState) :
+    (translateStmt outParams ⟨.Throw exception, md⟩ s).2 = s := by
+  have h := translateStmt_throw outParams exception md s
+  rw [h]
+
 end Strata.Laurel

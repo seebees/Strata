@@ -280,6 +280,18 @@ theorem translateStmt_eq_while (outParams : List Parameter)
     (translateStmt outParams ⟨.While cond invs decr body, md⟩ s).1.isSome = true := by
   rw [translateStmt.eq_def]; mu; rw [hc]; mu; rw [hi]; mu; rw [hd]; mu; rw [hb]; mu; rfl
 
+/-! ## translateStmt: Throw -/
+
+/-- Equation lemma for translateStmt on .Throw: produces exactly
+    [$result := Failure(), exit <exceptionTarget>]. -/
+theorem translateStmt_throw (outParams : List Parameter)
+    (exception : WithMetadata StmtExpr) (md : MetaData)
+    (s : TranslateState) :
+    (translateStmt outParams ⟨.Throw exception, md⟩ s) =
+      (some [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Failure", ()⟩ none) md,
+             Imperative.Stmt.exit (some s.exceptionTarget) md], s) := by
+  rw [translateStmt.eq_def]; mu
+
 /-! ## translateProcedure -/
 
 -- The `module` system creates a local copy of `mdWithUnknownLoc` when

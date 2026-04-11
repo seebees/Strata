@@ -341,6 +341,169 @@ theorem translateProcedure_preserves_input_count
     coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
     hBody hState coreProc hSucc).2.1
 
+/-- The output procedure has the same outputs as the source (transparent). -/
+theorem translateProcedure_preserves_output_count
+    (proc : Procedure) (bodyExpr : StmtExprMd)
+    (s sI sO sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hTransparent : proc.body = Body.Transparent bodyExpr [])
+    (hNoPre : proc.preconditions = [])
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.outputs = coreOutputs :=
+  (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
+    coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
+    hBody hState coreProc hSucc).2.2.1
+
+/-- translateParameterToCore preserves list length: coreInputs.length = proc.inputs.length. -/
+theorem translateParameterToCore_preserves_input_length
+    (proc : Procedure) (s sI : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI)) :
+    coreInputs.length = proc.inputs.length :=
+  List.length_mapM_optionT_stateM translateParameterToCore proc.inputs s coreInputs sI hInputs
+
+/-- translateParameterToCore preserves list length: coreOutputs.length = proc.outputs.length. -/
+theorem translateParameterToCore_preserves_output_length
+    (proc : Procedure) (s sO : TranslateState)
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore s) = (some coreOutputs, sO)) :
+    coreOutputs.length = proc.outputs.length :=
+  List.length_mapM_optionT_stateM translateParameterToCore proc.outputs s coreOutputs sO hOutputs
+
+/-! ### P-Struct-2b: Signature preservation for opaque procedures -/
+
+/-- An opaque procedure with implementation preserves its name. -/
+theorem translateProcedure_opaque_withImpl_preserves_name
+    (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
+    (modif : List StmtExprMd)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.name = ⟨proc.name.text, ()⟩ :=
+  (translateProcedure_opaque_withImpl_get proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
+    hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).1
+
+/-- An opaque procedure with implementation preserves its inputs. -/
+theorem translateProcedure_opaque_withImpl_preserves_inputs
+    (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
+    (modif : List StmtExprMd)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.inputs = coreInputs :=
+  (translateProcedure_opaque_withImpl_get proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
+    hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).2.1
+
+/-- An opaque procedure with implementation preserves its outputs. -/
+theorem translateProcedure_opaque_withImpl_preserves_outputs
+    (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
+    (modif : List StmtExprMd)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.outputs = coreOutputs :=
+  (translateProcedure_opaque_withImpl_get proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
+    hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).2.2.1
+
+/-- An opaque procedure without implementation preserves its name. -/
+theorem translateProcedure_opaque_noImpl_preserves_name
+    (proc : Procedure) (postconds : List StmtExprMd) (modif : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds none modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.name = ⟨proc.name.text, ()⟩ :=
+  (translateProcedure_opaque_noImpl_get proc postconds modif
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hOpaque hInputs hOutputs hPre hPost coreProc hSucc).1
+
+/-- An opaque procedure without implementation preserves its inputs. -/
+theorem translateProcedure_opaque_noImpl_preserves_inputs
+    (proc : Procedure) (postconds : List StmtExprMd) (modif : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds none modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.inputs = coreInputs :=
+  (translateProcedure_opaque_noImpl_get proc postconds modif
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.1
+
+/-- An opaque procedure without implementation preserves its outputs. -/
+theorem translateProcedure_opaque_noImpl_preserves_outputs
+    (proc : Procedure) (postconds : List StmtExprMd) (modif : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds none modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.outputs = coreOutputs :=
+  (translateProcedure_opaque_noImpl_get proc postconds modif
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.2.1
+
 /-! ### P-Spec-1: Postcondition preservation for opaque procedures -/
 
 /-- An opaque procedure with implementation preserves its postconditions. -/
@@ -426,28 +589,6 @@ theorem translateProcedure_opaque_noImpl_preserves_preconditions
   (translateProcedure_opaque_noImpl_get proc postconds modif
     s sI sO sPre sPost coreInputs coreOutputs corePre corePost
     hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.2.2.1
-
-/-- An opaque procedure (with impl) preserves its name. -/
-theorem translateProcedure_opaque_withImpl_preserves_name
-    (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
-    (modif : List StmtExprMd)
-    (s sI sO sPre sPost sBody : TranslateState)
-    (coreInputs : List (Core.CoreIdent × LMonoTy))
-    (coreOutputs : List (Core.CoreIdent × LMonoTy))
-    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
-    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
-    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
-    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
-    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
-    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
-    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
-    (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.name = ⟨proc.name.text, ()⟩ :=
-  (translateProcedure_opaque_withImpl_get proc postconds impl modif
-    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
-    hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).1
 
 /-! ### P-Spec-2f: Function postcondition axiom count preservation
 

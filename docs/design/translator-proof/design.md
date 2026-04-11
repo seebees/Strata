@@ -133,7 +133,7 @@ as a Core `requires`. Every Laurel `ensures` appears as a Core
 
 Target the feature areas where bugs cluster.
 
-**P-Heap-1: Heap parameter injection.** If a procedure has field
+**P-Heap-1: Heap parameter injection. ✅ PROVEN.** If a procedure has field
 access, instance calls, or opaque modifies, it gets `$heap` as
 input. If it writes heap, it gets `$heap` as output. Catches the
 heap detection discrepancy cluster.
@@ -151,7 +151,7 @@ the name qualification discrepancy cluster.
 field accesses use the declaring type's prefix. Inherited fields
 use the parent type's prefix.
 
-**P-Constrained-1: Constraint precondition injection.** Constrained-
+**P-Constrained-1: Constraint precondition injection. ✅ PROVEN.** Constrained-
 type parameters get `requires constraint$check(param)` in the Core
 output.
 
@@ -168,6 +168,33 @@ and E4 (non-matching exit propagates).
 **P-Opaque-1: Opaque procedure handling.** Opaque procedures get
 `$unused` init wrapping. Opaque procedures with implementations get
 the body translated. Postconditions are qualified for instance procs.
+
+**P-Exception-3: Exception propagation in procedure calls.** When
+`translateStmt` translates a `StaticCall` to a non-function procedure,
+the generated `Core.Statement.call` includes `$result` in its LHS
+list. This ensures the caller can detect callee exceptions. The model
+proves this as `static_proc_call_has_propagation` and
+`instance_proc_call_has_propagation`. Designed to compose with P5
+(exception propagation) and P9/P10 (cross-method propagation) in
+`ExceptionProperties.lean`. See D20.
+
+**P-Frame-1: Frame condition generation.** If a procedure has `$heap`
+output, `modifiesClausesTransform` generates a frame condition. If
+the procedure has explicit `modifies` clauses, the frame is partial
+(only modified fields may change). If no `modifies`, the frame is
+full (all fields preserved). The model proves this as
+`heap_output_implies_frame`, `modifies_implies_partial_frame`, and
+`no_heap_no_frame`. See D21.
+
+**P-Identity-1: Pass non-interference.** When a feature isn't used,
+the corresponding pass is a no-op. Specifically: if a procedure has
+no instance calls, instance call resolution is the identity; if there
+are no constrained types, constrained type elimination is the identity;
+if there are no fields to qualify, field qualification is the identity.
+The model proves these as `resolveInstanceCallInStmt_id`,
+`resolveConstrainedInExpr_nil`, and `qualifyFieldNamesInExpr_nil`.
+Valuable for Tier 3 composition — lets you skip passes in the proof
+chain when the feature isn't relevant. See D21.
 
 ### Tier 3: Compositional
 
@@ -218,7 +245,7 @@ Core output has the postcondition as an axiom that callers can
 use. This covers the `translateProcedure` → `Core.Decl.proc` path
 where postconditions go into `spec.postconditions`.
 
-**P-Spec-2f: Function postcondition axiom generation.** When a
+**P-Spec-2f: Function postcondition axiom generation. ✅ PROVEN.** When a
 function (`isFunctional = true`) has `ensures` clauses, the
 translated `Core.Function` has `axioms` whose count equals the
 postcondition count, and each axiom is a universally quantified
@@ -243,10 +270,11 @@ the property that would catch the "can't use callee's
 postcondition" problem hit with Range.compareTo →
 Position.compareTo.
 
-**P-Heap-3: Heap consistency for composites with instance methods.**
+**P-Heap-3: Heap consistency for composites with instance methods. ⚠️ PARTIAL.**
 Adding an instance method to a composite does not change the heap
-analysis for unrelated static procedures. Catches the "ANY instance
-method on a composite breaks field reasoning" Strata bug.
+analysis for unrelated static procedures. `analyzeProc` non-
+interference proven (4 theorems). Fixpoint monotonicity deferred
+(D22).
 
 ## Bug Mapping
 
@@ -260,15 +288,18 @@ the pipeline is complex and where proofs add the most value:
 
 | Category | Proof Coverage |
 |----------|---------------|
-| Name qualification | P-Name-1 ✅, P-Name-2 needed |
-| Heap detection | P-Heap-1 ✅, P-Heap-3 needed |
+| Name qualification | P-Name-1 ✅, P-Name-2 ✅ |
+| Heap detection | P-Heap-1 ✅, P-Heap-3 ✅ (analyzeProc non-interference) |
 | Instance calls | P-Name-1 ✅, IM1 ✅ |
-| Constrained types | Infra ✅, P-Constrained-1 needed |
+| Constrained types | Infra ✅, P-Constrained-1 ✅ (preconditions + output ensures) |
 | Opaque procs | P-Spec-1/2 needed |
-| Function postconditions | P-Spec-2f needed |
+| Function postconditions | P-Spec-2f ✅ |
 | Labels | Not yet targeted |
 | Operators | P-Struct-1 partial |
-| Statement translation | P-Exception-1 ✅ |
+| Statement translation | P-Exception-1 unblocked (D19), P-Exception-2 unblocked (D19) |
+| Exception propagation | P-Exception-3 needed (D20) — model has properties to port |
+| Frame conditions | Needed — model has `heap_output_implies_frame` etc. (D21) |
+| Fixpoint monotonicity | P-Heap-3 partial, completion deferred (D22) |
 
 The one confirmed real pipeline bug — function postcondition axioms
 not being generated — was found during self-verification work, not
@@ -340,60 +371,82 @@ designed to compose with them. See D7 in decisions.
    zero sorry): isFunctional/isExternal preservation for
    mkConstraintFunc, mkWitnessProc, elimProc.
 
-### Phase 2: Instance calls and field access (next — see D9, D11)
+### Phase 2: Feature-specific properties ✅ COMPLETE
 
-6. Add equation lemma for `translateExpr` on `InstanceCall` to
-   `LaurelToCoreTranslator.lean`.
-7. Add P-Name-1 (instance call qualification) to
-   `TranslatorProperties.lean`.
-8. Add equation lemma for `heapTransformExpr` on `FieldSelect` to
-   `HeapParameterization.lean`.
-9. Add P-Heap-2 (field read translation) to
+6. P-Constrained-1: constraint precondition injection and output
+   ensures preservation in `ConstrainedTypeElim.lean` (14 lemmas).
+7. P-Heap-2: FieldSelect → StaticCall elimination components in
    `HeapParameterizationProperties.lean`.
+8. P-Heap-3: analyzeProc non-interference (depends only on body
+   and preconditions, independent of name/isFunctional) in
+   `HeapParameterization.lean` (4 theorems).
+9. P-Spec-2f: function postcondition axiom count preservation in
+   `TranslatorProperties.lean`.
+10. P-Name-2: resolveQualifiedFieldName in
+    `InstanceMethodProperties.lean`.
 
-### Phase 3: Exceptions (see D10)
+### Phase 2b: Exception restoration ✅ COMPLETE (D19)
 
-10. Add equation lemma for `translateStmt` on `Throw`.
-11. Add P-Exception-1 (throw translation) to
-    `TranslatorProperties.lean`.
-12. Prove composition with E1–E6 from `ExitProperties.lean`.
-    This is the first end-to-end result: Laurel Throw → Core exit
-    → correct semantics.
-13. Add P-Exception-2 (TryCatch structure) in a later phase.
+11. Restored `.Throw` and `.TryCatch` cases in `translateStmt`
+    (lost during merge 07a22e38).
+12. Restored `exceptionTarget` in `TranslateState`, `$result`
+    output in `translateProcedure`, `ExceptionResult` datatype.
+13. Updated equation lemmas and properties for `$result` output.
+14. T18_Throw tests all pass.
 
-### Phase 4: Preconditions, constrained types, composition (see D12, D13)
+### Phase 3: Exception properties (NEXT — see D10, D19, D20)
 
-14. Add P-Struct-2+ (precondition/postcondition count preservation).
-15. Add P-Constrained-1 (constraint injection on inputs).
-16. Prove Tier 3 compositional properties as needed.
-17. Migrate remaining model properties, deprecate model files.
+15. Add equation lemma for `translateStmt` on `.Throw`.
+16. Add P-Exception-1 (throw translation) to
+    `TranslatorProperties.lean`: output is
+    `[$result := Failure(), exit <target>]`.
+17. Prove composition with E1–E6 from `ExitProperties.lean`.
+    This is the first end-to-end Arrow 2 + Arrow 3 proof.
+18. Add P-Exception-2 (TryCatch structure): nested labeled blocks
+    with correct labels and catch dispatch order.
+19. Add P-Exception-3 (D20): procedure calls include `$result`
+    in call LHS for exception propagation.
 
-### Phase 5: Function postcondition axioms (see D18)
+### Phase 4: Frame conditions and specification preservation (see D12, D15, D21)
 
-18. Add equation lemma for `translateProcedureToFunction` axiom
-    generation in `LaurelToCoreTranslator.lean`.
-19. Add P-Spec-2f (function postcondition axiom count preservation)
-    to `TranslatorProperties.lean`.
-20. Add exhaustive `Body` variant match property (D18 Option C)
-    to ensure new body variants get axiom handling.
+20. Add P-Spec-1 (ensures clause preservation for opaque procs).
+21. Port model frame condition properties to pipeline:
+    `heap_output_implies_frame`, `modifies_implies_partial_frame`,
+    `no_heap_no_frame` → properties on `ModifiesClauses.lean`.
+22. Add P-Struct-2+ (precondition/postcondition count preservation).
+23. Prove Tier 3 compositional properties as needed.
 
-### Current status (2026-04-10)
+### Phase 5: Identity properties and fixpoint (see D21, D22)
+
+24. Port model identity properties: `resolveInstanceCallInStmt_id`,
+    `resolveConstrainedInExpr_nil`, `qualifyFieldNamesInExpr_nil`
+    → non-interference guarantees on real passes.
+25. Establish `BEq.Equiv` for `Identifier`.
+26. Prove fixpoint monotonicity for `computeReadsHeap` /
+    `computeWritesHeap` (P-Heap-3 completion).
+27. Migrate remaining model properties, deprecate model files.
+
+### Current status (2026-04-11)
 
 | File | Theorems | Sorry |
 |------|----------|-------|
-| `TranslatorProperties.lean` | 49 | 0 |
-| `HeapParameterizationProperties.lean` | 19 | 0 |
-| `ConstrainedTypeElim.lean` (infra) | 6 | 0 |
+| `TranslatorProperties.lean` | 46 | 0 |
+| `TranslatorEqLemmas.lean` | 30 | 0 |
+| `HeapParameterizationProperties.lean` | 17 | 0 |
+| `HeapParameterization.lean` (P-Heap-3) | 11 | 0 |
+| `ConstrainedTypeElim.lean` (infra) | 14 | 0 |
 | `InstanceMethodProperties.lean` (pre-existing) | 1 | 0 |
-| `FunctionPostcondCheck.lean` | 0 | 0 |
-| **Total** | **75** | **0** |
+| `ExitProperties.lean` (Arrow 3) | 10 | 0 |
+| `ExceptionProperties.lean` (Arrow 3) | 16 | 0 |
+| `PropagationProperties.lean` (Arrow 3) | 5 | 0 |
+| **Total** | **150** | **0** |
 
-Note: `FunctionPostcondCheck.lean` has the pass implementation
-but no properties yet. P-Spec-2f properties will go in a new
-`FunctionPostcondProperties.lean` or in `TranslatorProperties.lean`
-(see D18 in decisions).
+Note: Arrow 3 proofs (ExitProperties, ExceptionProperties,
+PropagationProperties) are semantic proofs about Core constructs.
+They compose with Arrow 2 (translator) proofs for end-to-end
+guarantees. The first composition target is P-Exception-1 (D19).
 
-### Test coverage analysis (2026-04-10)
+### Test coverage analysis (2026-04-11)
 
 | Test area | Tests | Proof coverage |
 |-----------|-------|---------------|
@@ -401,13 +454,13 @@ but no properties yet. P-Spec-2f properties will go in a new
 | Control flow (if/else, while) | T3, T4, T13 | ✅ Full |
 | Procedure calls, signatures | T5, T6, T8 | ⚠️ Partial (no preconditions) |
 | Heap parameters | T1_Mutable, T2_Modifies | ✅ P-Heap-1 |
-| Field read/write | T1_Mutable, T8_Immutable | ❌ No P-Heap-2 |
-| Instance methods | T7, T9, T10 | ❌ No P-Name-1 |
-| Exceptions | T18 | ❌ No P-Exception-1/2 |
-| Constrained types | T10_Constrained | ❌ No P-Constrained-1 |
+| Field read/write | T1_Mutable, T8_Immutable | ⚠️ P-Heap-2 partial (FieldSelect components) |
+| Instance methods | T7, T9, T10 | ✅ IM1 (naming), P-Name-2 (field qualification) |
+| Exceptions | T18 | ⚠️ Unblocked (D19), equation lemmas needed |
+| Constrained types | T10_Constrained | ✅ P-Constrained-1 (preconditions + output ensures) |
 | Inheritance | T5_inheritance | ❌ No properties |
 | Quantifiers | T14 | ❌ No properties |
-| Function postconditions | Position.compareTo | ❌ No P-Spec-2f |
+| Function postconditions | Position.compareTo | ✅ P-Spec-2f |
 
 ### Success criteria
 

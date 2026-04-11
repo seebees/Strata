@@ -1113,3 +1113,312 @@ catches the practical failure mode.
 - The property file for `FunctionPostcondCheck.lean` itself
   (proving postconditions are preserved, not stripped) is
   future work. For now, the hypothesis documents the assumption.
+
+---
+
+## D19: Exception restoration and P-Exception-1/P-Exception-2 (unblocked)
+
+**Context:** The merge of `feat/function-postconditions` (commit
+`07a22e38`) silently dropped the `.Throw` and `.TryCatch` cases
+from `translateStmt`, the `exceptionTarget` field from
+`TranslateState`, the `$result : ExceptionResult` output parameter
+from `translateProcedure`, and the `ExceptionResult` datatype
+declaration from the Core program. This was a merge conflict
+resolution error — the function-postconditions branch rewrote
+`translateStmt` significantly and the merge took that branch's
+version, which had no exception support.
+
+The exception support was restored from commit `bba38de8` (the
+last known-good version), adapted to the current pipeline:
+
+- `TranslateState.exceptionTarget : String := "$body"`
+- `translateProcedure` adds `$result : ExceptionResult` output
+- `translateProcedure` sets `$result := Success()` before body
+- `.Throw` → `$result := Failure(); exit <exceptionTarget>`
+- `.TryCatch` → nested `$try_end`/`$handlers` blocks with catch
+  dispatch via `isFailure` check
+- `ExceptionResult` datatype emitted as first Core declaration
+- T18_Throw tests all pass (throwUnreachable, normalSkipsHandlers,
+  assertInTryBody, finallyExecutes, multipleCatches)
+
+The existing equation lemmas and properties in
+`TranslatorEqLemmas.lean` and `TranslatorProperties.lean` were
+updated to reflect the `$result` output parameter (outputs are
+now `coreOutputs ++ [($result, ExceptionResult)]`).
+
+**Impact on P-Exception-1 and P-Exception-2:** Both properties
+are now unblocked. The pipeline has the code; we can write
+equation lemmas and prove properties against it.
+
+### Decision
+
+P-Exception-1 (Throw translation) is the next proof target.
+It requires:
+
+1. An equation lemma for `translateStmt` on `.Throw` in
+   `LaurelToCoreTranslator.lean`
+2. A property in `TranslatorProperties.lean` proving the output
+   is `[$result := Failure(), exit <target>]`
+3. Composition with E1 (exit preserves store) and E2 (exit skips
+   remaining) from `ExitProperties.lean`
+
+This is the first end-to-end Arrow 2 + Arrow 3 proof: Laurel
+`Throw` → pipeline `translateStmt` → Core `exit`/`block` →
+`ExitProperties` → correct semantics.
+
+P-Exception-2 (TryCatch structure) follows. The equation lemma
+is more complex (labeled blocks, catch dispatch, finally) but
+the pattern is the same.
+
+---
+
+## D20: Exception propagation in procedure calls (P-Exception-3)
+
+**Context:** The translator model proves several properties about
+exception propagation at call sites:
+
+- `static_proc_call_has_propagation`: static procedure calls
+  produce `callWithPropagation` which includes `$result` in the
+  output list
+- `instance_proc_call_has_propagation`: same for instance calls
+- `assign_static_proc_call_pattern`: assignment from a procedure
+  call includes `$result` in the call's LHS
+- `return_static_proc_call_pattern`: return with a procedure call
+  includes `$result`
+
+These model properties capture a critical invariant: every
+procedure call site must propagate `$result` so that exceptions
+flow correctly through the call chain. If a call site forgets
+`$result`, the caller can't detect that the callee threw.
+
+The pipeline equivalent: when `translateStmt` translates a
+`StaticCall` to a non-function procedure, the generated
+`Core.Statement.call` must include `$result` in its LHS list.
+Similarly for `Assign` with a procedure call RHS, and `Return`
+with a procedure call value.
+
+This property composes with the semantic proofs:
+- P5 (exception propagation) in `ExceptionProperties.lean`
+  proves that if `$result` is `Failure` after a call, the exit
+  propagates correctly
+- P9/P10 (cross-method propagation) prove the try/catch and
+  procedure-level behavior
+
+### Option A: Prove $result appears in call LHS
+
+Prove: "when `translateStmt` translates `StaticCall callee args`
+where `callee` is not a function, the output contains a
+`Core.Statement.call lhs callee.text coreArgs` where
+`⟨"$result", ()⟩ ∈ lhs`."
+
+- Pro: Directly catches the "forgot $result" bug class. Simple
+  statement. Composes with P5/P9/P10.
+- Con: Doesn't prove the propagation check (the `if isFailure`
+  guard after the call). That's a separate property.
+
+### Option B: Prove full propagation pattern
+
+Prove: "when `translateStmt` translates a procedure call, the
+output is `[init, call [..., $result], if isFailure($result)
+then exit <target>]`." This is the full pattern from the model's
+`callWithPropagation`.
+
+- Pro: Complete propagation guarantee. Catches both missing
+  `$result` and missing propagation check.
+- Con: The propagation check (`if isFailure`) is only inserted
+  for calls inside try bodies (the `exceptionTarget` determines
+  the exit label). Outside try bodies, the propagation happens
+  at the procedure boundary via the `$body` block. The property
+  needs to distinguish these cases.
+
+### Decision: Option A first
+
+The `$result` in the call LHS is the critical invariant. Without
+it, no propagation is possible. The propagation check pattern
+(Option B) is a follow-up that depends on `exceptionTarget`
+context, which is more complex to reason about.
+
+The equation lemma for `translateStmt` on `StaticCall` (non-
+function case) already exists in `TranslatorEqLemmas.lean`. It
+needs to be extended to expose the `$result` in the LHS.
+
+---
+
+## D21: Model property migration strategy
+
+**Context:** The translator model (`TranslatorModel.lean`) has 64
+theorems. With the shift to direct pipeline properties (D1), these
+model theorems fall into three categories:
+
+**Category 1: Already covered by pipeline proofs (redundant)**
+
+- `translateExpr_literalBool/Int/String/identifier` — covered by
+  P-Struct-1 equation lemmas in `TranslatorEqLemmas.lean`
+- `procReadsHeapDirectly_*`, `procWritesHeapDirectly_*` — covered
+  by `HeapParameterization.lean` analyzeProc theorems
+- `coreTypeName_*` — trivial identity lemmas
+
+These can be left in the model (they don't hurt) or removed when
+the model is deprecated.
+
+**Category 2: Directly portable to the pipeline (high value)**
+
+These prove properties about model functions that have direct
+pipeline equivalents. Porting means restating the property against
+the real pipeline function and proving it.
+
+| Model property | Pipeline equivalent | Priority |
+|---------------|-------------------|----------|
+| `static_proc_call_has_propagation` | `translateStmt` on `StaticCall` includes `$result` | High (D20) |
+| `instance_proc_call_has_propagation` | `translateStmt` on `InstanceCall` includes `$result` | High (D20) |
+| `heap_output_implies_frame` | `modifiesClausesTransform` adds frame for heap procs | Medium |
+| `modifies_implies_partial_frame` | `modifiesClausesTransform` partial frame for modifies | Medium |
+| `no_heap_no_frame` | `modifiesClausesTransform` no frame for non-heap | Medium |
+| `resolveInstanceCallInStmt_id` | Resolution is identity for procs with no instance calls | Low |
+| `resolveConstrainedInExpr_nil` | ConstrainedTypeElim is identity when no constrained types | Low |
+| `qualifyFieldNamesInExpr_nil` | Field qualification is identity when no fields | Low |
+| `fixpointStep_preserves_mem` | `computeReadsHeap` fixpoint monotonicity | Medium (D22) |
+| `transitiveClose_contains_initial` | Direct members stay in fixpoint result | Medium (D22) |
+
+**Category 3: Model-specific (not portable)**
+
+These prove properties about model-specific data structures
+(`TranslationPattern`, `TypeEnv`, `predictPattern`) that don't
+exist in the pipeline:
+
+- `block_foldl_eq_flatMap`, `translateStmtModel_typeEnv_congr`
+- `referencedNames_*`, `predictPattern_*`
+- `exprIsReal_congr`, `fixRealOps_congr`
+
+These stay in the model and are deprecated with it.
+
+### Option A: Migrate all Category 2 properties now
+
+Port all 10 Category 2 properties to pipeline equivalents in
+one batch.
+
+- Pro: Complete migration. Model can be deprecated sooner.
+- Con: Large batch of work. Some properties (frame conditions,
+  identity properties) are lower priority than exceptions.
+
+### Option B: Migrate on-demand as properties are needed
+
+When a proof needs a property that exists in the model, port
+it. Don't port properties that aren't needed yet.
+
+- Pro: Minimal work. Each migration is motivated by a concrete
+  need.
+- Con: Model stays around longer. Risk of forgetting to migrate
+  important properties.
+
+### Option C: Prioritized migration aligned with proof phases
+
+Migrate Category 2 properties in the same order as the proof
+phases in the design doc:
+
+1. Exception propagation properties (D20) — Phase 3
+2. Frame condition properties — Phase 4
+3. Identity/non-interference properties — Phase 5
+4. Fixpoint properties (D22) — Phase 5
+
+### Decision: Option C (prioritized migration)
+
+Align migration with the proof phases. Each phase migrates the
+model properties it needs. This ensures every migration is
+motivated and tested. The model properties serve as a roadmap
+— they tell us what's worth proving about the pipeline.
+
+The frame condition properties (`heap_output_implies_frame`,
+`modifies_implies_partial_frame`, `no_heap_no_frame`) are
+particularly interesting because they bridge heap analysis
+(P-Heap-1) and modifies clauses — an area with no proof
+coverage today. These would be the first properties on
+`ModifiesClauses.lean`.
+
+The identity properties (`resolveInstanceCallInStmt_id`,
+`resolveConstrainedInExpr_nil`) are non-interference guarantees:
+"if a feature isn't used, the pass is a no-op." These are
+valuable for composition (Tier 3) — they let you skip passes
+in the proof chain when the feature isn't relevant.
+
+---
+
+## D22: Fixpoint monotonicity for heap analysis (P-Heap-3 completion)
+
+**Context:** The heap analysis uses a fixpoint computation
+(`computeReadsHeap`, `computeWritesHeap`) to transitively close
+the set of procedures that read/write the heap. The model proves
+several properties about this fixpoint:
+
+- `fixpointStep_preserves_mem`: if `n ∈ current`, then
+  `n ∈ fixpointStep(current)`
+- `direct_subset_transitive`: direct heap accessors are in the
+  transitive closure
+- `transitiveClose_converged`: when the fixpoint converges,
+  `next = current`
+- `transitiveClose_contains_initial`: the initial set is
+  preserved through the fixpoint
+
+We proved `analyzeProc` non-interference properties (P-Heap-3a–d)
+directly on the pipeline: `analyzeProc` depends only on the
+procedure's body and preconditions, not on external context. This
+proves the per-procedure analysis is independent.
+
+The gap is the transitive closure: proving that
+`computeReadsHeap`/`computeWritesHeap` are monotone (adding
+procedures can only add to the heap sets, never remove). An
+initial attempt at `computeReadsHeap_direct` (a procedure that
+directly reads heap is in the result) was blocked by `BEq`
+transitivity for `Identifier` — the fixpoint uses `List.contains`
+which uses `BEq`, and proving membership propagation requires
+`BEq` to be an equivalence relation.
+
+### Option A: Prove BEq is an equivalence for Identifier, then prove fixpoint monotonicity
+
+Establish `BEq.Equiv` for `Identifier` (reflexive, symmetric,
+transitive). Then prove `fixpointStep_preserves_mem` and
+`computeReadsHeap_direct` using the equivalence.
+
+- Pro: Clean, general solution. Unblocks all fixpoint properties.
+- Con: `Identifier` is a DDM-generated type. Its `BEq` instance
+  may be derived and the equivalence proof may require reasoning
+  about the underlying representation.
+
+### Option B: Reformulate using Prop-level equality
+
+Restate the fixpoint properties using `∈` (Prop-level membership)
+instead of `List.contains` (Bool-level). This avoids the `BEq`
+issue entirely.
+
+- Pro: Cleaner proofs. `∈` has better Lean support than
+  `List.contains`.
+- Con: The fixpoint function uses `List.contains` internally.
+  Bridging between `∈` and `List.contains` still requires
+  reasoning about `BEq`.
+
+### Option C: Prove specific instances instead of general monotonicity
+
+Instead of general fixpoint monotonicity, prove specific
+properties: "if procedure P directly reads heap and P ∈ procs,
+then P.name ∈ computeReadsHeap(procs)." Use `native_decide` or
+concrete examples.
+
+- Pro: Avoids the general fixpoint reasoning entirely.
+- Con: Only covers specific cases. Doesn't prevent regressions
+  for new fixpoint configurations.
+
+### Decision: Option A, deferred to Phase 5
+
+The `BEq` equivalence for `Identifier` is the right foundation.
+It unblocks not just fixpoint properties but any property that
+reasons about identifier equality (which is pervasive in the
+pipeline). However, it's not blocking any current proof phase.
+
+Defer to Phase 5 (identity/non-interference properties). By
+then, the `BEq` equivalence may be needed for other properties
+too, amortizing the investment.
+
+In the meantime, the `analyzeProc` non-interference properties
+(P-Heap-3a–d) provide the core guarantee: per-procedure analysis
+is independent of external context. The fixpoint monotonicity
+strengthens this to: the transitive closure is also stable.

@@ -884,4 +884,38 @@ theorem result_is_last_output
       (⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" []) := by
   subst h; simp [List.getLast_append]
 
+/-! ## P-Identity-1: Pass Non-Interference (Identity Properties)
+
+Each pipeline pass is identity (returns input unchanged) when its
+preconditions are not met. This ensures passes don't interfere with
+each other — a pass that has "nothing to do" leaves the program alone.
+
+### Proven identity properties (across multiple files):
+
+**ConstrainedTypeElim** (in ConstrainedTypeElim.lean):
+- `constrainedTypeElim_noop`: when no constrained types in program, pass returns program unchanged
+- `constraintCallFor_empty`: with empty type map, no constraint calls generated
+- `elimProc_empty_preserves_name`: name preserved with empty map
+
+**HeapParameterization** (in HeapParameterizationProperties.lean):
+- `noHeap_procedure_unchanged`: when proc doesn't read/write heap, pass returns proc unchanged
+- `noHeap_inputs_unchanged`: inputs preserved for non-heap procs
+- `noHeap_outputs_unchanged`: outputs preserved for non-heap procs
+
+**ModifiesClauses** (in ModifiesClausesProperties.lean):
+- `transformModifiesClauses_external`: identity for External body
+- `transformModifiesClauses_transparent`: identity for Transparent body
+- `transformModifiesClauses_abstract`: identity for Abstract body
+- `transformModifiesClauses_opaque_noHeap`: identity for Opaque without $heap
+
+**Translator** (in TranslatorProperties.lean):
+- `translateProcedure_transparent_postconditions_empty`: transparent procs have no postconditions
+
+### Not yet proven:
+- Resolution identity (resolveStmtExpr is identity when no names to resolve) —
+  blocked by Resolution being a complex monadic pass with HashMap state
+- `resolveBaseType` identity with empty map — blocked by `partial def`
+  (the end-to-end `constrainedTypeElim_noop` covers this case)
+-/
+
 end Strata.Laurel

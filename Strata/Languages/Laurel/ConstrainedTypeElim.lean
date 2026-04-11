@@ -384,4 +384,21 @@ public theorem constrainedTypeElim_proc_partition (model : SemanticModel) (progr
     -- the non-functional non-external original procs (transformed) ++ witness procs
     True := trivial
 
+/-! ## P-Identity-1: Granular identity properties for constrained type elimination -/
+
+/-- constraintCallFor with empty map always returns none. -/
+theorem constraintCallFor_empty (ty : HighType) (varName : Identifier)
+    (md : Imperative.MetaData Core.Expression) :
+    constraintCallFor ∅ ty varName md = none := by
+  unfold constraintCallFor
+  cases ty with
+  | UserDefined name => simp
+  | _ => rfl
+
+/-- elimProc with empty ptMap preserves procedure name.
+    (Name is not affected by type resolution.) -/
+theorem elimProc_empty_preserves_name (proc : Procedure) :
+    (elimProc ∅ proc).name = proc.name := by
+  unfold elimProc; rfl
+
 end Strata.Laurel

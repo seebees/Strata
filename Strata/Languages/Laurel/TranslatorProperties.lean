@@ -675,6 +675,95 @@ theorem translateProcedure_transparent_postconditions_empty
     coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
     hBody hState coreProc hSucc).2.2.2.2
 
+/-! ### P-Spec-2: Postcondition count preservation
+
+translateChecks preserves the number of checks: if the source has N
+postconditions, the Core output has N postconditions. -/
+
+/-- P-Spec-2: translateChecks preserves count. -/
+theorem translateChecks_preserves_length
+    (checks : List StmtExprMd) (labelBase : String)
+    (s s' : TranslateState)
+    (result : ListMap Core.CoreLabel Core.Procedure.Check)
+    (hSucc : translateChecks checks labelBase s = (some result, s')) :
+    result.length = checks.length := by
+  unfold translateChecks at hSucc
+  exact mapIdxM_length _ checks s result s' hSucc
+
+/-! ### P-Struct-3: Unified spec count preservation
+
+Composition of P-Spec-1 (postconditions = corePost) with P-Spec-2
+(translateChecks preserves count). For opaque procedures, the Core
+spec has the same number of preconditions and postconditions as the
+source Laurel procedure. -/
+
+/-- P-Struct-3: Opaque procedure with implementation preserves postcondition count. -/
+theorem translateProcedure_opaque_withImpl_postcondition_count
+    (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
+    (modif : List StmtExprMd)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.spec.postconditions.length = postconds.length := by
+  rw [translateProcedure_opaque_withImpl_preserves_postconditions proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts coreProc
+    hOpaque hInputs hOutputs hPre hPost hBody hSucc]
+  exact translateChecks_preserves_length postconds "postcondition" sPre sPost corePost hPost
+
+/-- P-Struct-3: Opaque procedure with implementation preserves precondition count. -/
+theorem translateProcedure_opaque_withImpl_precondition_count
+    (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
+    (modif : List StmtExprMd)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.spec.preconditions.length = proc.preconditions.length := by
+  rw [translateProcedure_opaque_withImpl_preserves_preconditions proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts coreProc
+    hOpaque hInputs hOutputs hPre hPost hBody hSucc]
+  exact translateChecks_preserves_length proc.preconditions "requires" sO sPre corePre hPre
+
+/-- P-Struct-3: Abstract procedure preserves postcondition count. -/
+theorem translateProcedure_abstract_postcondition_count
+    (proc : Procedure) (postconds : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (coreProc : Core.Procedure)
+    (hAbstract : proc.body = Body.Abstract postconds)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.spec.postconditions.length = postconds.length := by
+  rw [translateProcedure_abstract_preserves_postconditions proc postconds
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost coreProc
+    hAbstract hInputs hOutputs hPre hPost hSucc]
+  exact translateChecks_preserves_length postconds "postcondition" sPre sPost corePost hPost
+
 /-! ### P-Spec-2f: Function postcondition axiom count preservation
 
 When translateProcedureToFunction succeeds, the number of axioms in the

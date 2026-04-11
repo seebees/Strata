@@ -675,4 +675,44 @@ to `generateFunctionAxioms_length` for each case. -/
 -- getPostconds and translateProcedureToFunction_axioms_length are exported
 -- from LaurelToCoreTranslator.lean. No additional lemmas needed here.
 
+/-! ## mapIdxM length preservation for OptionT/StateM -/
+
+set_option linter.unusedSimpArgs false in
+/-- mapIdxM.go through OptionT (StateM σ) preserves length:
+    result.length = acc.size + l.length. -/
+theorem mapIdxM_go_length {α β σ : Type}
+    (f : Nat → α → OptionT (StateM σ) β)
+    (l : List α) (acc : Array β) (s : σ)
+    (result : List β) (s' : σ)
+    (h : List.mapIdxM.go f l acc s = (some result, s')) :
+    result.length = acc.size + l.length := by
+  induction l generalizing acc s result s' with
+  | nil =>
+    simp [List.mapIdxM.go, pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+    have := Option.some.inj (Prod.mk.inj h).1; subst this; simp
+  | cons x xs ih =>
+    simp only [List.mapIdxM.go, bind, OptionT.bind, OptionT.mk, OptionT.lift,
+      StateT.bind, StateT.get, StateT.pure,
+      liftM, monadLift, MonadLift.monadLift] at h
+    generalize hpair : f acc.size x s = p at h
+    obtain ⟨optB, s1⟩ := p
+    cases optB with
+    | some b =>
+      simp only [pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+      have hLen := ih (acc.push b) s1 result s' h
+      rw [Array.size_push] at hLen; simp only [List.length_cons]; omega
+    | none =>
+      simp only [pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+      cases h
+
+/-- mapIdxM through OptionT (StateM σ) preserves list length when it succeeds. -/
+theorem mapIdxM_length {α β σ : Type}
+    (f : Nat → α → OptionT (StateM σ) β)
+    (l : List α) (s : σ) (result : List β) (s' : σ)
+    (h : l.mapIdxM f s = (some result, s')) :
+    result.length = l.length := by
+  simp [List.mapIdxM] at h
+  have := mapIdxM_go_length f l #[] s result s' h
+  simp at this; exact this
+
 end Strata.Laurel

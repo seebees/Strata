@@ -759,4 +759,46 @@ theorem trycatch_handlers_consumes_throw
       (.terminal ρ₁) :=
   Imperative.matching_block_consumes handlersLabel ρ₁
 
+/-! ## P-Exception-3: $result in Procedure Header Outputs
+
+Every Core procedure produced by translateProcedure has `$result` of type
+`ExceptionResult` as its last output parameter. This is unconditional —
+it holds for Transparent, Opaque (with/without impl), and Abstract bodies.
+
+The body-type-specific proofs are in:
+- `translateProcedure_preserves_output_count` (Transparent)
+- `translateProcedure_opaque_withImpl_preserves_outputs` (Opaque + impl)
+- `translateProcedure_opaque_noImpl_preserves_outputs` (Opaque, no impl)
+
+The properties below provide the consequence: `$result` is always present
+in the outputs, enabling exception propagation through call chains. -/
+
+/-- P-Exception-3 (list property): If outputs = xs ++ [(id, ty)], then
+    (id, ty) is a member of outputs. -/
+theorem result_in_outputs_of_append
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (outputs : List (Core.CoreIdent × LMonoTy))
+    (h : outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])]) :
+    (⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" []) ∈ outputs := by
+  rw [h]; exact List.mem_append_right _ (List.Mem.head _)
+
+/-- P-Exception-3 (list property): If outputs = xs ++ [(id, ty)], then
+    outputs is nonempty. -/
+theorem outputs_nonempty_of_append
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (outputs : List (Core.CoreIdent × LMonoTy))
+    (h : outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])]) :
+    outputs ≠ [] := by
+  rw [h]; exact List.append_ne_nil_of_right_ne_nil _ (List.cons_ne_nil _ _)
+
+/-- P-Exception-3 (list property): If outputs = xs ++ [(id, ty)], then
+    the last element is ($result, ExceptionResult). -/
+theorem result_is_last_output
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (outputs : List (Core.CoreIdent × LMonoTy))
+    (h : outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])]) :
+    outputs.getLast (outputs_nonempty_of_append coreOutputs outputs h) =
+      (⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" []) := by
+  subst h; simp [List.getLast_append]
+
 end Strata.Laurel

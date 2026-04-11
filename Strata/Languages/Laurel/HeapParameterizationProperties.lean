@@ -204,4 +204,40 @@ theorem boxDestructorName_real (model : SemanticModel) :
     (boxDestructorName model .TReal).text = "Box..realVal!" := by
   unfold boxDestructorName; rfl
 
+/-! ## P-Spec-3: Postcondition count preservation through heap parameterization -/
+
+set_option linter.unusedSimpArgs false in
+/-- mapM.loop through StateM preserves length: result.length = acc.length + l.length. -/
+private theorem List.length_mapM_loop_stateM {α β σ : Type}
+    (f : α → StateM σ β) (l : List α) (acc : List β) (s : σ) :
+    ((List.mapM.loop f l acc s).1).length = acc.length + l.length := by
+  induction l generalizing acc s with
+  | nil => simp [List.mapM.loop, pure, StateT.pure, List.length_reverse]
+  | cons x xs ih =>
+    simp only [List.mapM.loop, bind, StateT.bind]
+    generalize f x s = p; obtain ⟨b, s1⟩ := p
+    simp only; rw [ih]; simp [List.length_cons]; omega
+
+/-- mapM through StateM preserves list length. -/
+theorem List.length_mapM_stateM {α β σ : Type}
+    (f : α → StateM σ β) (l : List α) (s : σ) :
+    ((l.mapM f s).1).length = l.length := by
+  simp [List.mapM]
+  have := List.length_mapM_loop_stateM f l [] s
+  simp at this; exact this
+
+/-- P-Spec-3: heapTransformExpr mapped over postconditions preserves count. -/
+theorem heapTransform_postconditions_count
+    (heapVar : Identifier) (model : SemanticModel)
+    (postconds : List StmtExprMd) (st : TransformState) :
+    ((postconds.mapM (heapTransformExpr heapVar model ·) st).1).length = postconds.length :=
+  List.length_mapM_stateM _ postconds st
+
+/-- P-Spec-3: heapTransformExpr mapped over preconditions preserves count. -/
+theorem heapTransform_preconditions_count
+    (heapVar : Identifier) (model : SemanticModel)
+    (preconditions : List StmtExprMd) (st : TransformState) :
+    ((preconditions.mapM (heapTransformExpr heapVar model) st).1).length = preconditions.length :=
+  List.length_mapM_stateM _ preconditions st
+
 end Strata.Laurel

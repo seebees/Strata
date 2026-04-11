@@ -62,6 +62,10 @@ structure TranslateState where
   model : SemanticModel
   /-- Do not process the produces Core program, since it has superfluous errors -/
   coreProgramHasSuperfluousErrors: Bool := false
+  /-- The label that exception propagation should exit to.
+      At procedure level this is "$body". Inside a try body, it's the
+      try block's handlers label so the catch dispatch can run. -/
+  exceptionTarget : String := "$body"
 
 /-- The translation monad: state over Except, allowing both accumulated diagnostics and hard failures -/
 @[expose] abbrev TranslateM := OptionT (StateM TranslateState)
@@ -508,14 +512,58 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       return [Imperative.Stmt.loop (.det condExpr) decreasingExprCore invExprs bodyStmts md]
   | .Exit target =>
       return [Imperative.Stmt.exit (some target) md]
+  | .Throw _exception =>
+      -- Throw translates to: $result := Failure(); exit <exceptionTarget>
+      let target := (← get).exceptionTarget
+      let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+      let failureCtor : Core.Expression.Expr := .op () ⟨"Failure", ()⟩ none
+      let setResult := Core.Statement.set resultIdent failureCtor md
+      let exitTarget := Imperative.Stmt.exit (some target) md
+      return [setResult, exitTarget]
+  | .TryCatch body catches finally_ =>
+      let id ← freshId
+      let tryLabel := s!"$try_end_{id}"
+      let handlersLabel := s!"$handlers_{id}"
+      let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+      let isFailureCheck : Core.Expression.Expr :=
+        .app () (.op () ⟨"ExceptionResult..isFailure", ()⟩ none) (.fvar () resultIdent none)
+      let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
+      -- Translate try body with exception target set to handlers label
+      let savedTarget := (← get).exceptionTarget
+      modify fun s => { s with exceptionTarget := handlersLabel }
+      let bodyStmts ← translateStmt outputParams body
+      modify fun s => { s with exceptionTarget := savedTarget }
+      let exitTry := Imperative.Stmt.exit (some tryLabel) md
+      let handlersBlock := Imperative.Stmt.block handlersLabel (bodyStmts ++ [exitTry]) md
+      -- Catch dispatch
+      let catchStmts ← catches.attach.flatMapM fun ⟨c, _hc⟩ => do
+        have : sizeOf c.body < sizeOf stmt := by
+          have := WithMetadata.sizeOf_val_lt stmt
+          have : sizeOf c < sizeOf catches := List.sizeOf_lt_of_mem _hc
+          cases c; cases stmt; simp_all; omega
+        let handlerBody ← translateStmt outputParams c.body
+        let resetResult := Core.Statement.set resultIdent successCtor md
+        let catchBlock := Imperative.Stmt.ite
+          (.det isFailureCheck)
+          (resetResult :: handlerBody ++ [Imperative.Stmt.exit (some tryLabel) md])
+          []
+          md
+        pure [catchBlock]
+      let tryBlock := Imperative.Stmt.block tryLabel ([handlersBlock] ++ catchStmts) md
+      let finallyStmts ← match finally_ with
+        | some f => translateStmt outputParams f
+        | none => pure []
+      return [tryBlock] ++ finallyStmts
   | _ =>
       -- Expression in statement position: preserve as an unused variable init
       exprAsUnusedInit stmt md
   termination_by sizeOf stmt
   decreasing_by
-    all_goals
-      have hlt := WithMetadata.sizeOf_val_lt stmt
-      cases stmt; term_by_mem
+    all_goals first
+      | (have hlt := WithMetadata.sizeOf_val_lt stmt; cases stmt; term_by_mem)
+      | (have := WithMetadata.sizeOf_val_lt stmt
+         have : sizeOf ‹CatchClause› < sizeOf catches := List.sizeOf_lt_of_mem ‹_ ∈ catches›
+         cases ‹CatchClause›; cases stmt; simp_all; omega)
 
 /--
 Translate a list of checks (preconditions or postconditions) to Core checks.
@@ -546,11 +594,14 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   let inputPairs ← proc.inputs.mapM translateParameterToCore
   let inputs := inputPairs
   let outputs ← proc.outputs.mapM translateParameterToCore
+  -- Add $result output for exception propagation (every procedure can throw)
+  let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+  let resultMonoTy : LMonoTy := .tcons "ExceptionResult" []
   let header : Core.Procedure.Header := {
     name := proc.name.text
     typeArgs := []
     inputs := inputs
-    outputs := outputs
+    outputs := outputs ++ [(resultIdent, resultMonoTy)]
   }
   -- Translate preconditions
   let preconditions ← translateChecks proc.preconditions "requires"
@@ -573,7 +624,10 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
       pure (postconditions.map fun (label, check) =>
         Core.Statement.assume label check.expr mdWithUnknownLoc)
   -- Wrap body in a labeled block so early returns (exit) work correctly.
-  let body : List Core.Statement := [.block "$body" bodyStmts mdWithUnknownLoc]
+  -- Set $result to Success before the body (default: no exception).
+  let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
+  let setResult := Core.Statement.set resultIdent successCtor mdWithUnknownLoc
+  let body : List Core.Statement := [setResult, .block "$body" bodyStmts mdWithUnknownLoc]
   let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions }
   return { header, spec, body }
 
@@ -1048,8 +1102,18 @@ def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): T
 
     -- Translate Laurel datatype definitions to Core declarations.
     let groupedDatatypeDecls ← translateTypes program
+    -- ExceptionResult datatype for exception propagation
+    let exceptionResultDecl : Core.Decl := Core.Decl.type (.data [{
+      name := "ExceptionResult"
+      typeArgs := []
+      constrs := [
+        { name := ⟨"Success", ()⟩, args := [], testerName := "ExceptionResult..isSuccess" },
+        { name := ⟨"Failure", ()⟩, args := [], testerName := "ExceptionResult..isFailure" }
+      ]
+      constrs_ne := rfl
+    }]) mdWithUnknownLoc
     let program := {
-      decls := groupedDatatypeDecls ++ constantDecls ++ orderedDecls
+      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ constantDecls ++ orderedDecls
     }
 
     -- dbg_trace "=== Generated Strata Core Program ==="

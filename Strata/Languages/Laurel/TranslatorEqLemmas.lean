@@ -305,7 +305,7 @@ theorem translateProcedure_transparent_get (proc : Procedure)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
     coreProc.header.inputs = coreInputs ∧
-    coreProc.header.outputs = coreOutputs ∧
+    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] ∧
     coreProc.spec.preconditions = [] ∧
     coreProc.spec.postconditions = [] := by
   rw [translateProcedure.eq_def] at hSucc; simp only [
@@ -421,7 +421,7 @@ theorem translateProcedure_opaque_withImpl_get (proc : Procedure)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
     coreProc.header.inputs = coreInputs ∧
-    coreProc.header.outputs = coreOutputs ∧
+    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] ∧
     coreProc.spec.preconditions = corePre ∧
     coreProc.spec.postconditions = corePost := by
   -- Rewrite hSucc by unfolding translateProcedure step by step
@@ -490,7 +490,7 @@ theorem translateProcedure_opaque_noImpl_get (proc : Procedure)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
     coreProc.header.inputs = coreInputs ∧
-    coreProc.header.outputs = coreOutputs ∧
+    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] ∧
     coreProc.spec.preconditions = corePre ∧
     coreProc.spec.postconditions = corePost := by
   have hIsSome := translateProcedure_eq_opaque_noImpl proc postconds modif

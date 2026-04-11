@@ -355,7 +355,7 @@ theorem translateProcedure_preserves_output_count
     (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
     (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs = coreOutputs :=
+    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
   (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
     coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
     hBody hState coreProc hSucc).2.2.1
@@ -439,7 +439,7 @@ theorem translateProcedure_opaque_withImpl_preserves_outputs
     (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs = coreOutputs :=
+    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
   (translateProcedure_opaque_withImpl_get proc postconds impl modif
     s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
     hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).2.2.1
@@ -499,7 +499,7 @@ theorem translateProcedure_opaque_noImpl_preserves_outputs
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
     (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs = coreOutputs :=
+    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
   (translateProcedure_opaque_noImpl_get proc postconds modif
     s sI sO sPre sPost coreInputs coreOutputs corePre corePost
     hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.2.1

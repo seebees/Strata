@@ -1,8 +1,12 @@
 # Translator Functional Model: Decisions
 
 **Date:** 2026-03-31
-**Updated:** 2026-04-08
-**Status:** Testing Complete, Proof In Progress
+**Updated:** 2026-04-11
+**Status:** DEPRECATED — Superseded by `docs/design/translator-proof/`
+
+> Model code has been removed. See D1 and D2 in
+> `docs/design/translator-proof/decisions.md` for rationale.
+> This document is retained as historical context.
 
 ## D1–D5: Original Design Decisions
 

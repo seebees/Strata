@@ -1,8 +1,26 @@
 # Translator Functional Model: Design
 
 **Date:** 2026-03-31
-**Updated:** 2026-04-08
-**Status:** Testing Complete, Proof In Progress (Category 3 proven)
+**Updated:** 2026-04-11
+**Status:** DEPRECATED — Superseded by direct pipeline properties
+
+> **This approach has been retired.** The model equivalence strategy
+> (prove `translate ≡ translateProgramModel`) is superseded by direct
+> pipeline properties in `TranslatorProperties.lean` and related files.
+> See `docs/design/translator-proof/` for the current approach.
+>
+> The model code (`TranslatorModel.lean`, `TranslatorEquivalence.lean`,
+> `TranslatorModelProof.lean`, `TranslatorModelProperties.lean`,
+> `TranslatorModelTest.lean`) has been removed. This document is
+> retained as historical context for the design decisions that led
+> to the current approach.
+>
+> Key takeaway: differential testing between the model and pipeline
+> found 44 discrepancies (mostly model bugs). The equivalence proof
+> was too expensive to maintain. Direct pipeline properties (150
+> theorems, 0 sorry) provide the same regression guarantees without
+> a parallel implementation. See D1 and D2 in
+> `docs/design/translator-proof/decisions.md`.
 
 ## Overview
 

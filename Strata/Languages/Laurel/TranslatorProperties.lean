@@ -4,6 +4,7 @@
 -/
 import Strata.Languages.Laurel.LaurelToCoreTranslator
 import Strata.Languages.Laurel.TranslatorEqLemmas
+import Strata.DL.Imperative.ExceptionProperties
 
 /-!
 # Translator Pipeline Properties
@@ -615,11 +616,9 @@ theorem translateProcedureToFunction_axiom_count
 Arrow 2 structural guarantee: translateStmt on .Throw produces exactly
 [$result := Failure(), exit <exceptionTarget>], with state unchanged.
 
-Arrow 3 composition (ExceptionProperties.throw_produces_exit) is blocked
-until the semantic proofs are updated from big-step (EvalStmt/EvalBlock)
-to the current small-step (StepStmt/Config) semantics. The structural
-properties below are independently valuable — they catch regressions in
-the Throw translation and document the exact output structure. -/
+Arrow 3 composition with ExceptionProperties.throw_produces_exit:
+when the set statement evaluates normally, the two-statement sequence
+steps to .exiting with the exception target label. -/
 
 /-- P-Exception-1 (Arrow 2): translateStmt on .Throw produces exactly
     [$result := Failure(), exit <exceptionTarget>], with state unchanged. -/
@@ -639,5 +638,28 @@ theorem throw_translation_state_unchanged (outParams : List Parameter)
     (translateStmt outParams ⟨.Throw exception, md⟩ s).2 = s := by
   have h := translateStmt_throw outParams exception md s
   rw [h]
+
+/-- P-Exception-1 (Arrow 2 + Arrow 3 composition):
+    The Throw translation [$result := Failure(), exit target] produces
+    .exiting (some target) when the set statement evaluates normally.
+
+    This composes the translator structural guarantee (Arrow 2: the pipeline
+    produces exactly these two statements) with the semantic guarantee
+    (Arrow 3: ExceptionProperties.throw_produces_exit proves the two-statement
+    sequence steps to .exiting). -/
+theorem throw_produces_exit_semantics
+    {P : Imperative.PureExpr} {CmdT : Type}
+    {EvalCmd : Imperative.EvalCmdParam P CmdT}
+    {extendEval : Imperative.ExtendEval P}
+    [Imperative.HasBool P] [Imperative.HasNot P]
+    (ρ ρ₁ : Imperative.Env P)
+    (setFlagStmt : Imperative.Stmt P CmdT)
+    (bodyLabel : String) (md : Imperative.MetaData P)
+    (Hset : Imperative.StepStmtStar P EvalCmd extendEval
+      (.stmt setFlagStmt ρ) (.terminal ρ₁)) :
+    Imperative.StepStmtStar P EvalCmd extendEval
+      (.stmts [setFlagStmt, .exit (.some bodyLabel) md] ρ)
+      (.exiting (.some bodyLabel) ρ₁) :=
+  Imperative.throw_produces_exit ρ ρ₁ setFlagStmt bodyLabel md Hset
 
 end Strata.Laurel

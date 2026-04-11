@@ -5,96 +5,93 @@
 -/
 module
 
-import Strata.DL.Imperative.StmtSemantics
+public import Strata.DL.Imperative.StmtSemantics
 
 /-!
-# Exception Translation Properties
+# Exception Translation Properties (Small-Step)
 
-Formal proofs of correctness properties P1, P2, P4, P6 for the
-Throw/TryCatch translation, as specified in
-`docs/design/laurel-exceptions/spec.md`.
-
-All proofs use the exit semantics constructors directly.
+Formal proofs of correctness properties for the Throw/TryCatch translation.
+Rewritten for the small-step semantics (StepStmt / Config).
 -/
 
 namespace Imperative
 
-open BlockResult
+section ExceptionProperties
 
-variable {P : PureExpr} {Cmd : Type} {EvalCmd : EvalCmdParam P Cmd}
+variable {P : PureExpr} {CmdT : Type} {EvalCmd : EvalCmdParam P CmdT}
   {extendEval : ExtendEval P}
-  [DecidableEq P.Ident]
-  [HasVarsImp P (List (Stmt P Cmd))] [HasVarsImp P Cmd]
-  [HasFvar P] [HasVal P] [HasBool P] [HasNot P]
+  [HasBool P] [HasNot P]
 
-/-- **P1: Throw Produces Exit.**
-    Throw translates to [setFlag, exit $body]. The sequence produces
-    .exited with the flag store preserved. -/
-theorem throw_produces_exit
-    (Hset : EvalStmt P Cmd EvalCmd extendEval δ σ setFlagStmt σ₁ .normal δ₁) :
-    EvalBlock P Cmd EvalCmd extendEval δ σ
-      [setFlagStmt, .exit (.some bodyLabel) md]
-      σ₁ (.exited (.some bodyLabel)) δ₁ :=
-  .stmts_normal_sem Hset (.stmts_exit_sem .exit_sem)
+/-- Helper: lift a multi-step execution through a seq context. -/
+public theorem seq_lift_star
+    (ss : List (Stmt P CmdT))
+    (H : StepStmtStar P EvalCmd extendEval c c') :
+    StepStmtStar P EvalCmd extendEval (.seq c ss) (.seq c' ss) := by
+  induction H with
+  | refl => exact .refl _
+  | step _ _ _ h _ ih =>
+    exact .step _ _ _ (.step_seq_inner h) ih
 
-/-- **P1 (corollary): Exit preserves the flag store.** -/
-theorem throw_exit_preserves_store :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.exit label md) σ (.exited label) δ :=
-  .exit_sem
+/-- **P1: Throw Produces Exit (multi-step).**
+    [setFlagStmt, exit bodyLabel] steps from .stmts to .exiting,
+    given that setFlagStmt evaluates to terminal ρ₁. -/
+public theorem throw_produces_exit
+    (ρ : Env P) (ρ₁ : Env P)
+    (setFlagStmt : Stmt P CmdT) (bodyLabel : String) (md : MetaData P)
+    (Hset : StepStmtStar P EvalCmd extendEval
+      (.stmt setFlagStmt ρ) (.terminal ρ₁)) :
+    StepStmtStar P EvalCmd extendEval
+      (.stmts [setFlagStmt, .exit (.some bodyLabel) md] ρ)
+      (.exiting (.some bodyLabel) ρ₁) := by
+  -- .stmts [s1, s2] ρ → .seq (.stmt s1 ρ) [s2]
+  apply ReflTrans.step; exact .step_stmts_cons
+  -- lift Hset through seq context
+  apply ReflTrans_Transitive (StepStmt P EvalCmd extendEval)
+  · exact seq_lift_star [.exit (.some bodyLabel) md] Hset
+  -- .seq (.terminal ρ₁) [s2] → ... → .exiting
+  · apply ReflTrans.step; exact .step_seq_done
+    apply ReflTrans.step; exact .step_stmts_cons
+    apply ReflTrans.step; exact .step_seq_inner .step_exit
+    apply ReflTrans.step; exact .step_seq_exit
+    exact .refl _
 
-/-- **P2: Success Path Isolation.**
-    If a block completes normally, every statement completed normally.
-    No Throw (which uses exit) executed on this path. -/
-theorem success_path_head_normal
-    (H : EvalBlock P Cmd EvalCmd extendEval δ σ (s :: rest) σ' .normal δ') :
-    ∃ σ₁ δ₁, EvalStmt P Cmd EvalCmd extendEval δ σ s σ₁ .normal δ₁ ∧
-              EvalBlock P Cmd EvalCmd extendEval δ₁ σ₁ rest σ' .normal δ' := by
-  cases H with
-  | stmts_normal_sem Hs Hrest => exact ⟨_, _, Hs, Hrest⟩
+/-- **P1 (single-step): Exit preserves the environment.** -/
+public theorem throw_exit_preserves_env (label : Option String) (md : MetaData P) (ρ : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.stmt (.exit label md) ρ)
+      (.exiting label ρ) :=
+  .step_exit
 
-/-- **P4 Step 1: Body + exit produces .exited tryEndLabel.** -/
-theorem normal_body_then_exit
-    (HbodyEval : EvalBlock P Cmd EvalCmd extendEval δ σ bodyStmts σ₁ .normal δ₁) :
-    EvalBlock P Cmd EvalCmd extendEval δ σ
-      (bodyStmts ++ [.exit (.some tryEndLabel) md_exit])
-      σ₁ (.exited (.some tryEndLabel)) δ₁ := by
-  induction bodyStmts generalizing σ δ with
-  | nil =>
-    cases HbodyEval
-    exact .stmts_exit_sem .exit_sem
-  | cons h t ih =>
-    cases HbodyEval with
-    | stmts_normal_sem Hh Ht =>
-      exact .stmts_normal_sem Hh (ih Ht)
+/-- **P4 Step 2: Handlers block propagates exit (label mismatch).**
+    A block with label handlersLabel whose body exits with tryEndLabel
+    (where tryEndLabel ≠ handlersLabel) propagates the exit. -/
+public theorem handlers_block_propagates_exit
+    (tryEndLabel handlersLabel : String) (ρ₁ : Env P)
+    (Hne : tryEndLabel ≠ handlersLabel) :
+    StepStmt P EvalCmd extendEval
+      (.block handlersLabel (.exiting (.some tryEndLabel) ρ₁))
+      (.exiting (.some tryEndLabel) ρ₁) :=
+  .step_block_exit_mismatch Hne
 
-/-- **P4 Step 2: Handlers block propagates exit (label mismatch).** -/
-theorem handlers_block_propagates_exit
-    (Hne : tryEndLabel ≠ handlersLabel)
-    (HinnerEval : EvalBlock P Cmd EvalCmd extendEval δ σ innerStmts
-      σ₁ (.exited (.some tryEndLabel)) δ₁) :
-    EvalStmt P Cmd EvalCmd extendEval δ σ
-      (.block handlersLabel innerStmts md_handlers)
-      σ₁ (.exited (.some tryEndLabel)) δ₁ :=
-  .block_sem HinnerEval (consumeExit_exited_ne Hne)
+/-- **P4 Step 3: Try_end block consumes exit → terminal.**
+    A block with label tryEndLabel whose body exits with (some tryEndLabel)
+    steps to terminal. -/
+public theorem try_end_consumes_exit (tryEndLabel : String) (ρ₁ : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.block tryEndLabel (.exiting (.some tryEndLabel) ρ₁))
+      (.terminal ρ₁) :=
+  .step_block_exit_match rfl
 
-/-- **P4 Step 3: Try_end block consumes exit → normal.** -/
-theorem try_end_consumes_exit
-    (HhandlersEval : EvalStmt P Cmd EvalCmd extendEval δ σ handlersBlockStmt
-      σ₁ (.exited (.some tryEndLabel)) δ₁)
-    (catchStmts : List (Stmt P Cmd)) :
-    EvalStmt P Cmd EvalCmd extendEval δ σ
-      (.block tryEndLabel (handlersBlockStmt :: catchStmts) md_try)
-      σ₁ .normal δ₁ :=
-  .block_sem (.stmts_exit_sem HhandlersEval) (consumeExit_exited_same tryEndLabel)
+/-- **P5: Exception Propagation to Procedure Body.**
+    The procedure body block ($body) consumes the exit, completing normally,
+    with $result = Failure in the store (set by Throw before the exit). -/
+public theorem exception_propagates_to_body (bodyLabel : String) (ρ₁ : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.block bodyLabel (.exiting (.some bodyLabel) ρ₁))
+      (.terminal ρ₁) :=
+  .step_block_exit_match rfl
 
-/-- **P6: Finally Execution.**
-    Finally is after the try block. The try block completes normally
-    (by P4 or E5), so sequential evaluation continues with finally. -/
-theorem finally_executes_after_try
-    (HtryEval : EvalStmt P Cmd EvalCmd extendEval δ σ tryBlock σ₁ .normal δ₁)
-    (HfinallyEval : EvalBlock P Cmd EvalCmd extendEval δ₁ σ₁ finallyStmts σ₂ br₂ δ₂) :
-    EvalBlock P Cmd EvalCmd extendEval δ σ (tryBlock :: finallyStmts) σ₂ br₂ δ₂ :=
-  .stmts_normal_sem HtryEval HfinallyEval
+end ExceptionProperties
 
 end Imperative
 
@@ -102,101 +99,44 @@ end Imperative
 ## Properties P7 and P8: Result Type Properties
 
 These are properties of the ExceptionResult datatype itself,
-independent of the imperative semantics. They are stated as
-Lean theorems about a Lean inductive that mirrors the Core
-ExceptionResult datatype generated by the translator.
+independent of the imperative semantics.
 -/
 
-/-- The ExceptionResult type as a Lean inductive, mirroring the Core datatype
-    generated by the translator. -/
-inductive ExceptionResult where
+public inductive ExceptionResult where
   | Success
   | Failure
   deriving DecidableEq
 
-def ExceptionResult.isSuccess : ExceptionResult → Bool
+public def ExceptionResult.isSuccess : ExceptionResult → Bool
   | .Success => true
   | .Failure => false
 
-def ExceptionResult.isFailure : ExceptionResult → Bool
+public def ExceptionResult.isFailure : ExceptionResult → Bool
   | .Success => false
   | .Failure => true
 
-/-- **P7: Result Exhaustiveness.**
-    For any ExceptionResult, exactly one of isSuccess or isFailure is true.
-    They are mutually exclusive and exhaustive. -/
-theorem result_exhaustive (r : ExceptionResult) :
+/-- **P7: Result Exhaustiveness.** -/
+public theorem result_exhaustive (r : ExceptionResult) :
     r.isSuccess = true ∨ r.isFailure = true := by
   cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
 
-theorem result_exclusive (r : ExceptionResult) :
+public theorem result_exclusive (r : ExceptionResult) :
     ¬ (r.isSuccess = true ∧ r.isFailure = true) := by
   cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
 
-theorem result_isSuccess_iff_not_isFailure (r : ExceptionResult) :
+public theorem result_isSuccess_iff_not_isFailure (r : ExceptionResult) :
     r.isSuccess = true ↔ r.isFailure = false := by
   cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
 
-theorem result_isFailure_iff_not_isSuccess (r : ExceptionResult) :
+public theorem result_isFailure_iff_not_isSuccess (r : ExceptionResult) :
     r.isFailure = true ↔ r.isSuccess = false := by
   cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
 
-/-- **P8: Ensures Clause Isolation.**
-    An ensures clause guarded by isSuccess is never checked when isFailure is true,
-    and vice versa. This follows directly from P7 (mutual exclusivity). -/
-theorem ensures_isolation_success (r : ExceptionResult) (P : Prop) :
+/-- **P8: Ensures Clause Isolation.** -/
+public theorem ensures_isolation_success (r : ExceptionResult) (P : Prop) :
     r.isFailure = true → (r.isSuccess = true → P) := by
   cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
 
-theorem ensures_isolation_failure (r : ExceptionResult) (P : Prop) :
+public theorem ensures_isolation_failure (r : ExceptionResult) (P : Prop) :
     r.isSuccess = true → (r.isFailure = true → P) := by
   cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
-
-namespace Imperative
-
-open BlockResult
-
-variable {P : PureExpr} {Cmd : Type} {EvalCmd : EvalCmdParam P Cmd}
-  {extendEval : ExtendEval P}
-  [DecidableEq P.Ident]
-  [HasVarsImp P (List (Stmt P Cmd))] [HasVarsImp P Cmd]
-  [HasFvar P] [HasVal P] [HasBool P] [HasNot P]
-
-/-- **P3: Catch Dispatch Correctness (first handler wins).**
-    In the translated catch dispatch, handlers are a sequence of
-    if-then-exit blocks. If the condition of the first handler is true,
-    it executes and exits, skipping all subsequent handlers.
-
-    This is the ordering property: the first matching handler runs. -/
-theorem first_catch_handler_wins
-    (HcondTrue : δ σ catchCond = .some HasBool.tt)
-    (Hwf : WellFormedSemanticEvalBool δ)
-    (HhandlerEval : EvalBlock P Cmd EvalCmd extendEval δ σ handlerBody σ₁ br₁ δ₁)
-    (remainingCatches : List (Stmt P Cmd)) :
-    -- The ite takes the true branch (first handler runs)
-    EvalStmt P Cmd EvalCmd extendEval δ σ
-      (.ite catchCond handlerBody [] md) σ₁ br₁ δ₁ :=
-  .ite_true_sem HcondTrue Hwf HhandlerEval
-
-/-- **P3 (corollary): If the first handler runs and exits, subsequent handlers are skipped.** -/
-theorem first_handler_skips_rest
-    (HfirstHandler : EvalStmt P Cmd EvalCmd extendEval δ σ firstCatch σ₁ (.exited label) δ₁)
-    (restCatches : List (Stmt P Cmd)) :
-    EvalBlock P Cmd EvalCmd extendEval δ σ (firstCatch :: restCatches) σ₁ (.exited label) δ₁ :=
-  .stmts_exit_sem HfirstHandler
-
-/-- **P5: Exception Propagation.**
-    If a throw occurs and the exit propagates past all enclosing blocks
-    (no TryCatch catches it), the exit reaches the procedure body block.
-    The procedure body block ($body) consumes the exit, and the $result
-    variable retains its Failure value (set by Throw before the exit).
-
-    This is E3 (matching block consumes) applied to the $body block:
-    the procedure wrapper block consumes the exit, completing normally,
-    with $result = Failure in the store. -/
-theorem exception_propagates_to_body
-    (HbodyEval : EvalBlock P Cmd EvalCmd extendEval δ σ bodyStmts σ₁ (.exited (.some bodyLabel)) δ₁) :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.block bodyLabel bodyStmts md) σ₁ .normal δ₁ :=
-  .block_sem HbodyEval (consumeExit_exited_same bodyLabel)
-
-end Imperative

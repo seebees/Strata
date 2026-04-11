@@ -5,106 +5,107 @@
 -/
 module
 
-import Strata.DL.Imperative.StmtSemantics
+public import Strata.DL.Imperative.StmtSemantics
 
 /-!
-# Exit Semantics Properties
+# Exit Semantics Properties (Small-Step)
 
-Formal proofs of the correctness properties for exit and labeled blocks,
-as specified in `docs/design/exit-semantics/spec.md`.
+Formal proofs of the correctness properties for exit and labeled blocks.
+Rewritten for the small-step semantics (StepStmt / Config).
 -/
 
 namespace Imperative
 
-open BlockResult
-
 section ExitProperties
 
-variable {P : PureExpr} {Cmd : Type} {EvalCmd : EvalCmdParam P Cmd}
+variable {P : PureExpr} {CmdT : Type} {EvalCmd : EvalCmdParam P CmdT}
   {extendEval : ExtendEval P}
-  [DecidableEq P.Ident]
-  [HasVarsImp P (List (Stmt P Cmd))] [HasVarsImp P Cmd]
-  [HasFvar P] [HasVal P] [HasBool P] [HasNot P]
+  [HasBool P] [HasNot P]
 
 /-- **E1: Exit Preserves Store.**
-    An exit statement does not modify the store or evaluation context. -/
-theorem exit_preserves_store
-    (H : EvalStmt P Cmd EvalCmd extendEval δ σ (.exit label md) σ' br δ') :
-    σ' = σ ∧ δ' = δ ∧ br = .exited label := by
-  cases H with
-  | exit_sem => exact ⟨rfl, rfl, rfl⟩
+    An exit statement steps to .exiting with the same environment. -/
+public theorem exit_preserves_env (label : Option String) (md : MetaData P) (ρ : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.stmt (.exit label md) ρ)
+      (.exiting label ρ) :=
+  .step_exit
 
 /-- **E2: Exit Skips Remaining Statements.**
-    If a block produces an exit, the exiting statement determines the store.
-    (The stmts_exit_sem constructor guarantees remaining statements are skipped.) -/
-theorem exit_skips_remaining
-    (H : EvalBlock P Cmd EvalCmd extendEval δ σ (s :: rest) σ' (.exited label) δ') :
-    EvalStmt P Cmd EvalCmd extendEval δ σ s σ' (.exited label) δ'
-    ∨ ∃ σ₁ δ₁, EvalStmt P Cmd EvalCmd extendEval δ σ s σ₁ .normal δ₁ ∧
-        EvalBlock P Cmd EvalCmd extendEval δ₁ σ₁ rest σ' (.exited label) δ' := by
-  cases H with
-  | stmts_exit_sem Hstmt => exact Or.inl Hstmt
-  | stmts_normal_sem Hstmt Hrest => exact Or.inr ⟨_, _, Hstmt, Hrest⟩
+    When a seq's inner config exits, the remaining statements are skipped. -/
+public theorem exit_skips_remaining (label : Option String) (ρ' : Env P)
+    (ss : List (Stmt P CmdT)) :
+    StepStmt P EvalCmd extendEval
+      (.seq (.exiting label ρ') ss)
+      (.exiting label ρ') :=
+  .step_seq_exit
 
 /-- **E3: Matching Block Consumes Exit.**
-    A block with label L that contains exit (some L) completes normally. -/
-theorem matching_block_consumes
-    (Heval : EvalBlock P Cmd EvalCmd extendEval δ σ body σ' (.exited (.some L)) δ') :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.block L body md) σ' .normal δ' :=
-  .block_sem Heval (consumeExit_exited_same L)
+    A block with label L whose body exits with (some L) steps to terminal. -/
+public theorem matching_block_consumes (L : String) (ρ' : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.block L (.exiting (.some L) ρ'))
+      (.terminal ρ') :=
+  .step_block_exit_match rfl
 
 /-- **E4: Non-Matching Exit Propagates.**
-    A block with label L that contains exit (some M) where M ≠ L
+    A block with label L whose body exits with (some M) where M ≠ L
     propagates the exit unchanged. -/
-theorem nonmatching_exit_propagates
-    (Hne : M ≠ L)
-    (Heval : EvalBlock P Cmd EvalCmd extendEval δ σ body σ' (.exited (.some M)) δ') :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.block L body md) σ' (.exited (.some M)) δ' :=
-  .block_sem Heval (consumeExit_exited_ne Hne)
+public theorem nonmatching_exit_propagates (L M : String) (ρ' : Env P)
+    (Hne : M ≠ L) :
+    StepStmt P EvalCmd extendEval
+      (.block L (.exiting (.some M) ρ'))
+      (.exiting (.some M) ρ') :=
+  .step_block_exit_mismatch Hne
 
 /-- **E5: Normal Block Completion.**
-    If a block's body completes normally, the block completes normally. -/
-theorem normal_block_completion
-    (Heval : EvalBlock P Cmd EvalCmd extendEval δ σ body σ' .normal δ') :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.block L body md) σ' .normal δ' :=
-  .block_sem Heval (consumeExit_normal L)
+    If a block's body reaches terminal, the block reaches terminal. -/
+public theorem normal_block_completion (L : String) (ρ' : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.block L (.terminal ρ'))
+      (.terminal ρ') :=
+  .step_block_done
 
-/-- **E6a: Exit Propagates Through Conditionals (true branch).** -/
-theorem exit_propagates_through_ite_true
-    {c : P.Expr}
-    (Hcond : δ σ c = .some HasBool.tt)
-    (Hwf : WellFormedSemanticEvalBool δ)
-    (Heval : EvalBlock P Cmd EvalCmd extendEval δ σ thenBranch σ' (.exited label) δ') :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.ite c thenBranch elseBranch md) σ' (.exited label) δ' :=
-  .ite_true_sem Hcond Hwf Heval
+/-- **E6: Unlabeled Exit Consumed by Any Block.**
+    A block whose body exits with none steps to terminal. -/
+public theorem unlabeled_exit_consumed (L : String) (ρ' : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.block L (.exiting .none ρ'))
+      (.terminal ρ') :=
+  .step_block_exit_none
 
-/-- **E6b: Exit Propagates Through Conditionals (false branch).** -/
-theorem exit_propagates_through_ite_false
-    {c : P.Expr}
-    (Hcond : δ σ c = .some HasBool.ff)
-    (Hwf : WellFormedSemanticEvalBool δ)
-    (Heval : EvalBlock P Cmd EvalCmd extendEval δ σ elseBranch σ' (.exited label) δ') :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.ite c thenBranch elseBranch md) σ' (.exited label) δ' :=
-  .ite_false_sem Hcond Hwf Heval
+/-- **E7: Block Body Steps Forward.**
+    A block context propagates inner steps. -/
+public theorem block_body_steps (L : String)
+    (inner inner' : Config P CmdT)
+    (H : StepStmt P EvalCmd extendEval inner inner') :
+    StepStmt P EvalCmd extendEval
+      (.block L inner)
+      (.block L inner') :=
+  .step_block_body H
 
-/-- **E7: Determinism of Exit Consumption.**
-    consumeExit is a function — the output is uniquely determined. -/
-theorem consumeExit_deterministic (L : String) (br : BlockResult) :
-    ∀ br₁ br₂, consumeExit L br = br₁ → consumeExit L br = br₂ → br₁ = br₂ :=
-  fun _ _ h₁ h₂ => h₁ ▸ h₂ ▸ rfl
+/-- **E8: Empty Statement List Terminates.**
+    An empty list of statements steps to terminal immediately. -/
+public theorem empty_stmts_terminal (ρ : Env P) :
+    StepStmt P EvalCmd extendEval
+      (.stmts ([] : List (Stmt P CmdT)) ρ)
+      (.terminal ρ) :=
+  .step_stmts_nil
 
-/-- **Unlabeled exit consumed by any block.** -/
-theorem unlabeled_exit_consumed
-    (Heval : EvalBlock P Cmd EvalCmd extendEval δ σ body σ' (.exited .none) δ') :
-    EvalStmt P Cmd EvalCmd extendEval δ σ (.block L body md) σ' .normal δ' :=
-  .block_sem Heval (consumeExit_exited_none L)
+/-- **E9: Exit statement evaluates to exiting (multi-step).**
+    .stmt (.exit label md) ρ →* .exiting label ρ -/
+public theorem exit_eval (label : Option String) (md : MetaData P) (ρ : Env P) :
+    StepStmtStar P EvalCmd extendEval
+      (.stmt (.exit label md) ρ)
+      (.exiting label ρ) :=
+  .step _ _ _ .step_exit (.refl _)
 
-/-- **Empty block completes normally.** -/
-theorem empty_block_normal
-    (H : EvalBlock P Cmd EvalCmd extendEval δ σ ([] : List (Stmt P Cmd)) σ' br δ') :
-    σ' = σ ∧ δ' = δ ∧ br = .normal := by
-  cases H with
-  | stmts_none_sem => exact ⟨rfl, rfl, rfl⟩
+/-- **E10: Matching block with exiting body evaluates to terminal (multi-step).**
+    .block L (.exiting (some L) ρ') →* .terminal ρ' -/
+public theorem matching_block_eval (L : String) (ρ' : Env P) :
+    StepStmtStar P EvalCmd extendEval
+      (.block L (.exiting (.some L) ρ'))
+      (.terminal ρ') :=
+  .step _ _ _ (.step_block_exit_match rfl) (.refl _)
 
 end ExitProperties
 

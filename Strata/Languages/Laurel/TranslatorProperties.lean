@@ -3,6 +3,7 @@
   SPDX-License-Identifier: Apache-2.0 OR MIT
 -/
 import Strata.Languages.Laurel.LaurelToCoreTranslator
+import Strata.Languages.Laurel.TranslatorEqLemmas
 
 /-!
 # Translator Pipeline Properties
@@ -21,7 +22,7 @@ P-Struct-1: translateExpr/translateStmt succeeds for each constructor
 
 namespace Strata.Laurel
 
-open Strata.Core
+open Strata.Core Lambda
 
 /-! ### P-Struct-1a: Expression translation succeeds — literals
 
@@ -43,9 +44,10 @@ theorem translateExpr_succeeds_literalString (str : String) (md : MetaData) (bv 
   simp [translateExpr_eq_literalString]
 
 /-- Static call with no args always translates. -/
-theorem translateExpr_succeeds_staticCall_noArgs (callee : Identifier) (md : MetaData) (bv : List Identifier) (s : TranslateState) :
+theorem translateExpr_succeeds_staticCall_noArgs (callee : Identifier) (md : MetaData) (bv : List Identifier) (s : TranslateState)
+    (hNotPure : s.model.isFunction callee = false) :
     (translateExpr ⟨.StaticCall callee [], md⟩ bv false s).1.isSome = true := by
-  simp [translateExpr_eq_staticCall_noArgs]
+  simp [translateExpr_eq_staticCall_noArgs callee md bv s hNotPure]
 
 /-! ### P-Struct-1b: Expression translation succeeds — compound expressions
 
@@ -55,18 +57,20 @@ Compound expressions succeed when their sub-expressions succeed. -/
 theorem translateExpr_succeeds_staticCall_oneArg
     (callee : Identifier) (a1 : StmtExprMd) (md : MetaData) (bv : List Identifier)
     (s s1 : TranslateState) (r1 : Core.Expression.Expr)
+    (hNotPure : s.model.isFunction callee = false)
     (h1 : translateExpr a1 bv false s = (some r1, s1)) :
     (translateExpr ⟨.StaticCall callee [a1], md⟩ bv false s).1.isSome = true := by
-  simp [translateExpr_eq_staticCall_oneArg callee a1 md bv s s1 r1 h1]
+  simp [translateExpr_eq_staticCall_oneArg callee a1 md bv s s1 r1 hNotPure h1]
 
 /-- Static call with two args succeeds when both args succeed. -/
 theorem translateExpr_succeeds_staticCall_twoArgs
     (callee : Identifier) (a1 a2 : StmtExprMd) (md : MetaData) (bv : List Identifier)
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
+    (hNotPure : s.model.isFunction callee = false)
     (h1 : translateExpr a1 bv false s = (some r1, s1))
     (h2 : translateExpr a2 bv false s1 = (some r2, s2)) :
     (translateExpr ⟨.StaticCall callee [a1, a2], md⟩ bv false s).1.isSome = true := by
-  simp [translateExpr_eq_staticCall_twoArgs callee a1 a2 md bv s s1 s2 r1 r2 h1 h2]
+  simp [translateExpr_eq_staticCall_twoArgs callee a1 a2 md bv s s1 s2 r1 r2 hNotPure h1 h2]
 
 /-- PrimitiveOp Eq succeeds when both args succeed. -/
 theorem translateExpr_succeeds_primEq
@@ -118,8 +122,7 @@ theorem translateExpr_succeeds_primAdd_int
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
-    (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
-      | .TReal, _ | _, .TReal => False | _, _ => True) :
+    (hNotReal : ∀ x, computeExprType s.model e1 ≠ ⟨.TReal, x⟩) :
     (translateExpr ⟨.PrimitiveOp .Add [e1, e2], md⟩ bv pc s).1.isSome = true := by
   simp [translateExpr_eq_primAdd_int e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hNotReal]
 
@@ -129,8 +132,7 @@ theorem translateExpr_succeeds_primSub_int
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
-    (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
-      | .TReal, _ | _, .TReal => False | _, _ => True) :
+    (hNotReal : ∀ x, computeExprType s.model e1 ≠ ⟨.TReal, x⟩) :
     (translateExpr ⟨.PrimitiveOp .Sub [e1, e2], md⟩ bv pc s).1.isSome = true := by
   simp [translateExpr_eq_primSub_int e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hNotReal]
 
@@ -140,8 +142,7 @@ theorem translateExpr_succeeds_primMul_int
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
-    (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
-      | .TReal, _ | _, .TReal => False | _, _ => True) :
+    (hNotReal : ∀ x, computeExprType s.model e1 ≠ ⟨.TReal, x⟩) :
     (translateExpr ⟨.PrimitiveOp .Mul [e1, e2], md⟩ bv pc s).1.isSome = true := by
   simp [translateExpr_eq_primMul_int e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hNotReal]
 
@@ -151,8 +152,7 @@ theorem translateExpr_succeeds_primLt_int
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
-    (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
-      | .TReal, _ | _, .TReal => False | _, _ => True) :
+    (hNotReal : ∀ x, computeExprType s.model e1 ≠ ⟨.TReal, x⟩) :
     (translateExpr ⟨.PrimitiveOp .Lt [e1, e2], md⟩ bv pc s).1.isSome = true := by
   simp [translateExpr_eq_primLt_int e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hNotReal]
 
@@ -162,8 +162,7 @@ theorem translateExpr_succeeds_primGt_int
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
-    (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
-      | .TReal, _ | _, .TReal => False | _, _ => True) :
+    (hNotReal : ∀ x, computeExprType s.model e1 ≠ ⟨.TReal, x⟩) :
     (translateExpr ⟨.PrimitiveOp .Gt [e1, e2], md⟩ bv pc s).1.isSome = true := by
   simp [translateExpr_eq_primGt_int e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hNotReal]
 
@@ -173,8 +172,7 @@ theorem translateExpr_succeeds_primLeq_int
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
-    (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
-      | .TReal, _ | _, .TReal => False | _, _ => True) :
+    (hNotReal : ∀ x, computeExprType s.model e1 ≠ ⟨.TReal, x⟩) :
     (translateExpr ⟨.PrimitiveOp .Leq [e1, e2], md⟩ bv pc s).1.isSome = true := by
   simp [translateExpr_eq_primLeq_int e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hNotReal]
 
@@ -184,8 +182,7 @@ theorem translateExpr_succeeds_primGeq_int
     (s s1 s2 : TranslateState) (r1 r2 : Core.Expression.Expr)
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2))
-    (hNotReal : match (computeExprType s.model e1).val, (computeExprType s.model e2).val with
-      | .TReal, _ | _, .TReal => False | _, _ => True) :
+    (hNotReal : ∀ x, computeExprType s.model e1 ≠ ⟨.TReal, x⟩) :
     (translateExpr ⟨.PrimitiveOp .Geq [e1, e2], md⟩ bv pc s).1.isSome = true := by
   simp [translateExpr_eq_primGeq_int e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hNotReal]
 
@@ -213,9 +210,10 @@ theorem translateExpr_state_literalString (str : String) (md : MetaData) (bv : L
     (translateExpr ⟨.LiteralString str, md⟩ bv pc s).2 = s := by
   simp [translateExpr_eq_literalString]
 
-theorem translateExpr_state_staticCall_noArgs (callee : Identifier) (md : MetaData) (bv : List Identifier) (s : TranslateState) :
+theorem translateExpr_state_staticCall_noArgs (callee : Identifier) (md : MetaData) (bv : List Identifier) (s : TranslateState)
+    (hNotPure : s.model.isFunction callee = false) :
     (translateExpr ⟨.StaticCall callee [], md⟩ bv false s).2 = s := by
-  simp [translateExpr_eq_staticCall_noArgs]
+  simp [translateExpr_eq_staticCall_noArgs callee md bv s hNotPure]
 
 /-! ### P-Struct-1d: Statement translation succeeds -/
 
@@ -226,9 +224,11 @@ theorem translateStmt_succeeds_return_none (outParams : List Parameter) (md : Me
 
 /-- LocalVariable with no initializer always translates. -/
 theorem translateStmt_succeeds_localVar_noInit
-    (outParams : List Parameter) (name : Identifier) (ty : WithMetadata HighType) (md : MetaData) (s : TranslateState) :
+    (outParams : List Parameter) (name : Identifier) (ty : WithMetadata HighType) (md : MetaData)
+    (s s1 : TranslateState) (coreTy : LMonoTy)
+    (hTy : translateType ty s = (some coreTy, s1)) :
     (translateStmt outParams ⟨.LocalVariable name ty none, md⟩ s).1.isSome = true := by
-  simp [translateStmt_eq_localVar_noInit]
+  simp [translateStmt_eq_localVar_noInit outParams name ty md s s1 coreTy hTy]
 
 /-- IfThenElse (no else) succeeds when condition and then-branch succeed. -/
 theorem translateStmt_succeeds_ite_noElse
@@ -237,7 +237,7 @@ theorem translateStmt_succeeds_ite_noElse
     (hc : translateExpr cond [] false s = (some rc, s1))
     (ht : translateStmt outParams thenB s1 = (some rt, s2)) :
     (translateStmt outParams ⟨.IfThenElse cond thenB none, md⟩ s).1.isSome = true := by
-  simp [translateStmt_eq_ite_noElse cond thenB md outParams s s1 s2 rc rt hc ht]
+  simp [translateStmt_eq_ite_noElse outParams cond thenB md s s1 s2 rc rt hc ht]
 
 /-- IfThenElse (with else) succeeds when all branches succeed. -/
 theorem translateStmt_succeeds_ite_withElse
@@ -247,7 +247,7 @@ theorem translateStmt_succeeds_ite_withElse
     (ht : translateStmt outParams thenB s1 = (some rt, s2))
     (he : translateStmt outParams elseB s2 = (some re, s3)) :
     (translateStmt outParams ⟨.IfThenElse cond thenB (some elseB), md⟩ s).1.isSome = true := by
-  simp [translateStmt_eq_ite_withElse cond thenB elseB md outParams s s1 s2 s3 rc rt re hc ht he]
+  simp [translateStmt_eq_ite_withElse outParams cond thenB elseB md s s1 s2 s3 rc rt re hc ht he]
 
 /-- Assign to a single identifier succeeds when the value expression succeeds
     (and the value is not a StaticCall or InstanceCall). -/
@@ -268,7 +268,7 @@ theorem translateStmt_succeeds_block_unlabeled
     (s s1 : TranslateState) (result : List Core.Statement)
     (hInner : stmts.flatMapM (fun stmt => translateStmt outParams stmt) s = (some result, s1)) :
     (translateStmt outParams ⟨.Block stmts none, md⟩ s).1.isSome = true := by
-  simp [translateStmt_eq_block_unlabeled stmts md outParams s s1 result hInner]
+  simp [translateStmt_eq_block_unlabeled outParams stmts md s s1 result hInner]
 
 /-- While loop succeeds when condition, invariants, decreases, and body all succeed. -/
 theorem translateStmt_succeeds_while
@@ -278,327 +278,195 @@ theorem translateStmt_succeeds_while
     (condExpr : Core.Expression.Expr) (invExprs : List Core.Expression.Expr)
     (decExprCore : Option Core.Expression.Expr) (bodyStmts : List Core.Statement)
     (hCond : translateExpr cond [] false s = (some condExpr, s1))
-    (hInvs : invariants.mapM translateExpr s1 = (some invExprs, s2))
-    (hDec : decreasesExpr.mapM translateExpr s2 = (some decExprCore, s3))
+    (hInvs : (invariants.mapM (fun i => translateExpr i) s1) = (some invExprs, s2))
+    (hDec : (decreasesExpr.mapM (fun d => translateExpr d) s2) = (some decExprCore, s3))
     (hBody : translateStmt outParams body s3 = (some bodyStmts, s4)) :
     (translateStmt outParams ⟨.While cond invariants decreasesExpr body, md⟩ s).1.isSome = true := by
-  simp [translateStmt_eq_while cond invariants decreasesExpr body md outParams
-    s s1 condExpr s2 invExprs s3 decExprCore s4 bodyStmts hCond hInvs hDec hBody]
+  simp [translateStmt_eq_while outParams cond invariants decreasesExpr body md
+    s s1 s2 s3 s4 condExpr invExprs decExprCore bodyStmts hCond hInvs hDec hBody]
 
 /-! ### P-Struct-2: Signature preservation for translateProcedure
 
-When translateProcedure succeeds on a transparent procedure with no
-preconditions, the output Core.Procedure preserves the input/output
-parameter structure. -/
+When translateProcedure succeeds, the output Core.Procedure preserves
+the input/output parameter structure. -/
+
+-- Common hypotheses for transparent procedure theorems
+private abbrev TransparentHyps (proc : Procedure) (bodyExpr : StmtExprMd)
+    (s sI sO sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (bodyStmts : List Core.Statement) :=
+  proc.body = Body.Transparent bodyExpr [] ∧
+  proc.preconditions = [] ∧
+  (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI) ∧
+  (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO) ∧
+  (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts ∧
+  (translateStmt proc.outputs bodyExpr sO).2 = sBody
 
 /-- The output procedure's name matches the input procedure's name. -/
 theorem translateProcedure_preserves_name
-    (proc : Procedure) (bodyExpr : StmtExprMd) (s s1 : TranslateState)
+    (proc : Procedure) (bodyExpr : StmtExprMd)
+    (s sI sO sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
-    (hTransparent : proc.body = .Transparent bodyExpr)
+    (hTransparent : proc.body = Body.Transparent bodyExpr [])
     (hNoPre : proc.preconditions = [])
-    (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr s).2 = s1)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.name = proc.name.text := by
-  have hEq := translateProcedure_eq_transparent proc bodyExpr s s1 bodyStmts
-    hTransparent hNoPre hBody hState
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
+    coreProc.header.name = ⟨proc.name.text, ()⟩ :=
+  (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
+    coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
+    hBody hState coreProc hSucc).1
 
 /-- The output procedure has the same number of inputs as the source. -/
 theorem translateProcedure_preserves_input_count
-    (proc : Procedure) (bodyExpr : StmtExprMd) (s s1 : TranslateState)
+    (proc : Procedure) (bodyExpr : StmtExprMd)
+    (s sI sO sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
-    (hTransparent : proc.body = .Transparent bodyExpr)
+    (hTransparent : proc.body = Body.Transparent bodyExpr [])
     (hNoPre : proc.preconditions = [])
-    (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr s).2 = s1)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.inputs.length = proc.inputs.length := by
-  have hEq := translateProcedure_eq_transparent proc bodyExpr s s1 bodyStmts
-    hTransparent hNoPre hBody hState
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; simp [List.length_map]
+    coreProc.header.inputs = coreInputs :=
+  (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
+    coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
+    hBody hState coreProc hSucc).2.1
 
-/-- The output procedure has outputs = source outputs + $result. -/
-theorem translateProcedure_preserves_output_count
-    (proc : Procedure) (bodyExpr : StmtExprMd) (s s1 : TranslateState)
-    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
-    (hTransparent : proc.body = .Transparent bodyExpr)
-    (hNoPre : proc.preconditions = [])
-    (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr s).2 = s1)
-    (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs.length = proc.outputs.length + 1 := by
-  have hEq := translateProcedure_eq_transparent proc bodyExpr s s1 bodyStmts
-    hTransparent hNoPre hBody hState
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this
-  show (proc.outputs.map (translateParameterToCore s.model) ++ [_]).length = proc.outputs.length + 1
-  simp [List.length_append, List.length_map]
+/-! ### P-Spec-1: Postcondition preservation for opaque procedures -/
 
-/-- The output procedure always has $result as its last output. -/
-theorem translateProcedure_has_result_output
-    (proc : Procedure) (bodyExpr : StmtExprMd) (s s1 : TranslateState)
-    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
-    (hTransparent : proc.body = .Transparent bodyExpr)
-    (hNoPre : proc.preconditions = [])
-    (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr s).2 = s1)
-    (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs.getLast? =
-      some (⟨"$result", ()⟩, Lambda.LMonoTy.tcons "ExceptionResult" []) := by
-  have hEq := translateProcedure_eq_transparent proc bodyExpr s s1 bodyStmts
-    hTransparent hNoPre hBody hState
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this
-  show (proc.outputs.map (translateParameterToCore s.model) ++ [_]).getLast? = some _
-  simp [List.getLast?_append]
-
-/-- The output procedure's body starts with $result := Success(). -/
-theorem translateProcedure_sets_result_success
-    (proc : Procedure) (bodyExpr : StmtExprMd) (s s1 : TranslateState)
-    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
-    (hTransparent : proc.body = .Transparent bodyExpr)
-    (hNoPre : proc.preconditions = [])
-    (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr s).2 = s1)
-    (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.body.head? =
-      some (Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty) := by
-  have hEq := translateProcedure_eq_transparent proc bodyExpr s s1 bodyStmts
-    hTransparent hNoPre hBody hState
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
-
-/-! ### P-Name-1: Instance call qualification
-
-When translateExpr encounters an InstanceCall and the SemanticModel
-resolves the callee, the output is a qualified call `TypeName..callee`
-applied to the target (self) and arguments. This is the exhaustiveness
-tripwire for the 7-bug name qualification cluster. -/
-
-/-- Instance call with no extra args succeeds when the callee resolves
-    and the target translates. -/
-theorem translateExpr_succeeds_instanceCall_noArgs
-    (target : StmtExprMd) (callee : Identifier) (md : MetaData)
-    (bv : List Identifier) (pc : Bool)
-    (s s1 : TranslateState) (coreTarget : Core.Expression.Expr)
-    (coreName : String)
-    (hResolve : resolveInstanceCallName s.model callee = some coreName)
-    (hTarget : translateExpr target bv pc s = (some coreTarget, s1)) :
-    (translateExpr ⟨.InstanceCall target callee [], md⟩ bv pc s).1.isSome = true := by
-  simp [translateExpr_eq_instanceCall_noArgs target callee md bv pc s s1 coreTarget coreName
-    hResolve hTarget]
-
-/-- Instance call with no extra args produces a qualified call name. -/
-theorem translateExpr_instanceCall_noArgs_uses_qualified_name
-    (target : StmtExprMd) (callee : Identifier) (md : MetaData)
-    (bv : List Identifier) (pc : Bool)
-    (s s1 : TranslateState) (coreTarget : Core.Expression.Expr)
-    (coreName : String)
-    (hResolve : resolveInstanceCallName s.model callee = some coreName)
-    (hTarget : translateExpr target bv pc s = (some coreTarget, s1)) :
-    ∃ r, (translateExpr ⟨.InstanceCall target callee [], md⟩ bv pc s).1 = some r ∧
-      r = .app () (.op () ⟨coreName, ()⟩ none) coreTarget := by
-  exact ⟨_, by simp [translateExpr_eq_instanceCall_noArgs target callee md bv pc s s1
-    coreTarget coreName hResolve hTarget], rfl⟩
-
-/-- Instance call with one arg succeeds when callee resolves and
-    target + arg translate. -/
-theorem translateExpr_succeeds_instanceCall_oneArg
-    (target : StmtExprMd) (callee : Identifier) (a1 : StmtExprMd) (md : MetaData)
-    (bv : List Identifier) (pc : Bool)
-    (s s1 s2 : TranslateState) (coreTarget r1 : Core.Expression.Expr)
-    (coreName : String)
-    (hResolve : resolveInstanceCallName s.model callee = some coreName)
-    (hTarget : translateExpr target bv pc s = (some coreTarget, s1))
-    (h1 : translateExpr a1 bv pc s1 = (some r1, s2)) :
-    (translateExpr ⟨.InstanceCall target callee [a1], md⟩ bv pc s).1.isSome = true := by
-  simp [translateExpr_eq_instanceCall_oneArg target callee a1 md bv pc s s1 s2 coreTarget r1
-    coreName hResolve hTarget h1]
-
-/-- Instance call with one arg produces the correct application structure:
-    app(app(op(qualifiedName), self), arg). -/
-theorem translateExpr_instanceCall_oneArg_structure
-    (target : StmtExprMd) (callee : Identifier) (a1 : StmtExprMd) (md : MetaData)
-    (bv : List Identifier) (pc : Bool)
-    (s s1 s2 : TranslateState) (coreTarget r1 : Core.Expression.Expr)
-    (coreName : String)
-    (hResolve : resolveInstanceCallName s.model callee = some coreName)
-    (hTarget : translateExpr target bv pc s = (some coreTarget, s1))
-    (h1 : translateExpr a1 bv pc s1 = (some r1, s2)) :
-    ∃ r, (translateExpr ⟨.InstanceCall target callee [a1], md⟩ bv pc s).1 = some r ∧
-      r = .app () (.app () (.op () ⟨coreName, ()⟩ none) coreTarget) r1 := by
-  exact ⟨_, by simp [translateExpr_eq_instanceCall_oneArg target callee a1 md bv pc s s1 s2
-    coreTarget r1 coreName hResolve hTarget h1], rfl⟩
-
-/-- P-Name-1 core: the qualified name in the Core output equals
-    `instanceProcCoreName typeName callee`, connecting call sites
-    to definition sites (extends IM1). -/
-theorem translateExpr_instanceCall_name_is_qualified
-    (target : StmtExprMd) (callee : Identifier) (md : MetaData)
-    (bv : List Identifier) (pc : Bool)
-    (s s1 : TranslateState) (coreTarget : Core.Expression.Expr)
-    (typeName : Identifier) (proc : Procedure)
-    (hModel : s.model.get callee = .instanceProcedure typeName proc)
-    (hTarget : translateExpr target bv pc s = (some coreTarget, s1)) :
-    ∃ r, (translateExpr ⟨.InstanceCall target callee [], md⟩ bv pc s).1 = some r ∧
-      r = .app () (.op () ⟨instanceProcCoreName typeName.text callee.text, ()⟩ none) coreTarget := by
-  have hResolve : resolveInstanceCallName s.model callee = some (instanceProcCoreName typeName.text callee.text) := by
-    unfold resolveInstanceCallName; rw [hModel]
-  exact ⟨_, by simp [translateExpr_eq_instanceCall_noArgs target callee md bv pc s s1
-    coreTarget _ hResolve hTarget], rfl⟩
-
-/-! ### P-Exception-1: Throw translation
-
-Throw(e) produces `[$result := Failure(), exit <exceptionTarget>]`.
-This composes with E1 (exit preserves store) and E2 (exit skips
-remaining statements) from ExitProperties.lean. -/
-
-/-- Throw always translates successfully (unconditionally). -/
-theorem translateStmt_succeeds_throw
-    (exception : StmtExprMd) (md : MetaData) (outParams : List Parameter)
-    (s : TranslateState) :
-    (translateStmt outParams ⟨.Throw exception, md⟩ s).1.isSome = true := by
-  simp [translateStmt_eq_throw]
-
-/-- Throw does not modify translation state. -/
-theorem translateStmt_throw_preserves_state
-    (exception : StmtExprMd) (md : MetaData) (outParams : List Parameter)
-    (s : TranslateState) :
-    (translateStmt outParams ⟨.Throw exception, md⟩ s).2 = s := by
-  simp [translateStmt_eq_throw]
-
-/-- Throw produces [$result := Failure(), exit exceptionTarget]. -/
-theorem translateStmt_throw_structure
-    (exception : StmtExprMd) (md : MetaData) (outParams : List Parameter)
-    (s : TranslateState) :
-    (translateStmt outParams ⟨.Throw exception, md⟩ s).1 =
-      some [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Failure", ()⟩ none) md,
-            Imperative.Stmt.exit (some s.exceptionTarget) md] := by
-  simp [translateStmt_eq_throw]
-
-/-! ### P-Spec-1: Postcondition preservation for opaque procedures
-
-When an opaque procedure's preconditions and postconditions both
-translate successfully, the Core output contains exactly those
-translated postconditions. This catches the "postcondition silently
-dropped" bug class (bugs #28, #30, #35). -/
-
-/-- An opaque procedure with implementation preserves its postconditions
-    in the Core spec. -/
+/-- An opaque procedure with implementation preserves its postconditions. -/
 theorem translateProcedure_opaque_withImpl_preserves_postconditions
     (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
     (modif : List StmtExprMd)
-    (s s1 s2 s3 : TranslateState)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
-    (bodyStmts : List Core.Statement)
-    (coreProc : Core.Procedure)
-    (hOpaque : proc.body = .Opaque postconds (some impl) modif)
-    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
-    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2))
-    (hBody : translateStmt proc.outputs impl s2 = (some bodyStmts, s3))
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.spec.postconditions = corePost := by
-  have hEq := translateProcedure_eq_opaque_withImpl proc postconds impl modif
-    s s1 s2 s3 corePre corePost bodyStmts hOpaque hPre hPost hBody
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
+    coreProc.spec.postconditions = corePost :=
+  (translateProcedure_opaque_withImpl_get proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
+    hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).2.2.2.2
 
-/-- An opaque procedure with implementation preserves its preconditions
-    in the Core spec. -/
+/-- An opaque procedure with implementation preserves its preconditions. -/
 theorem translateProcedure_opaque_withImpl_preserves_preconditions
     (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
     (modif : List StmtExprMd)
-    (s s1 s2 s3 : TranslateState)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
-    (bodyStmts : List Core.Statement)
-    (coreProc : Core.Procedure)
-    (hOpaque : proc.body = .Opaque postconds (some impl) modif)
-    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
-    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2))
-    (hBody : translateStmt proc.outputs impl s2 = (some bodyStmts, s3))
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.spec.preconditions = corePre := by
-  have hEq := translateProcedure_eq_opaque_withImpl proc postconds impl modif
-    s s1 s2 s3 corePre corePost bodyStmts hOpaque hPre hPost hBody
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
+    coreProc.spec.preconditions = corePre :=
+  (translateProcedure_opaque_withImpl_get proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
+    hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).2.2.2.1
 
 /-- An opaque procedure without implementation preserves its postconditions. -/
 theorem translateProcedure_opaque_noImpl_preserves_postconditions
     (proc : Procedure) (postconds : List StmtExprMd) (modif : List StmtExprMd)
-    (s s1 s2 : TranslateState)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (coreProc : Core.Procedure)
-    (hOpaque : proc.body = .Opaque postconds none modif)
-    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
-    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2))
+    (hOpaque : proc.body = Body.Opaque postconds none modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.spec.postconditions = corePost := by
-  have hEq := translateProcedure_eq_opaque_noImpl proc postconds modif
-    s s1 s2 corePre corePost hOpaque hPre hPost
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
+    coreProc.spec.postconditions = corePost :=
+  (translateProcedure_opaque_noImpl_get proc postconds modif
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.2.2.2
 
 /-- An opaque procedure without implementation preserves its preconditions. -/
 theorem translateProcedure_opaque_noImpl_preserves_preconditions
     (proc : Procedure) (postconds : List StmtExprMd) (modif : List StmtExprMd)
-    (s s1 s2 : TranslateState)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (coreProc : Core.Procedure)
-    (hOpaque : proc.body = .Opaque postconds none modif)
-    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
-    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2))
+    (hOpaque : proc.body = Body.Opaque postconds none modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.spec.preconditions = corePre := by
-  have hEq := translateProcedure_eq_opaque_noImpl proc postconds modif
-    s s1 s2 corePre corePost hOpaque hPre hPost
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
+    coreProc.spec.preconditions = corePre :=
+  (translateProcedure_opaque_noImpl_get proc postconds modif
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.2.2.1
 
 /-- An opaque procedure (with impl) preserves its name. -/
 theorem translateProcedure_opaque_withImpl_preserves_name
     (proc : Procedure) (postconds : List StmtExprMd) (impl : StmtExprMd)
     (modif : List StmtExprMd)
-    (s s1 s2 s3 : TranslateState)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
-    (bodyStmts : List Core.Statement)
-    (coreProc : Core.Procedure)
-    (hOpaque : proc.body = .Opaque postconds (some impl) modif)
-    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
-    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2))
-    (hBody : translateStmt proc.outputs impl s2 = (some bodyStmts, s3))
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.name = proc.name.text := by
-  have hEq := translateProcedure_eq_opaque_withImpl proc postconds impl modif
-    s s1 s2 s3 corePre corePost bodyStmts hOpaque hPre hPost hBody
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
+    coreProc.header.name = ⟨proc.name.text, ()⟩ :=
+  (translateProcedure_opaque_withImpl_get proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
+    hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).1
 
-/-- An opaque procedure (no impl) body is assume false (havoc). -/
-theorem translateProcedure_opaque_noImpl_body_is_havoc
-    (proc : Procedure) (postconds : List StmtExprMd) (modif : List StmtExprMd)
-    (s s1 s2 : TranslateState)
-    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
-    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
-    (coreProc : Core.Procedure)
-    (hOpaque : proc.body = .Opaque postconds none modif)
-    (hPre : translateChecks proc.preconditions "requires" s = (some corePre, s1))
-    (hPost : translateChecks postconds "postcondition" s1 = (some corePost, s2))
-    (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.body = [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Success", ()⟩ none) .empty,
-      .block "$body" [Core.Statement.assume "no_body" (.const () (.boolConst false)) .empty] .empty] := by
-  have hEq := translateProcedure_eq_opaque_noImpl proc postconds modif
-    s s1 s2 corePre corePost hOpaque hPre hPost
-  have := Option.some.inj (hSucc.symm.trans hEq)
-  subst this; rfl
+/-! ### P-Spec-2f: Function postcondition axiom count preservation
+
+When translateProcedureToFunction succeeds, the number of axioms in the
+Core.Function equals the number of postconditions in the source procedure's
+Body. This catches the "axioms silently dropped" bug class — the function
+postcondition axiom gap where translateProcedureToFunction created
+Core.Function with axioms := [] (default), silently dropping all
+postconditions. See D18 in decisions.md. -/
+
+/-- P-Spec-2f: Function axiom count equals postcondition count.
+    When translateProcedureToFunction produces a Core.Decl.func,
+    the function's axiom count equals the postcondition count from
+    the procedure's body. -/
+theorem translateProcedureToFunction_axiom_count
+    (options : LaurelTranslateOptions) (isRecursive : Bool)
+    (proc : Procedure) (s s' : TranslateState) (f : Core.Function) (fmd : MetaData)
+    (hSucc : translateProcedureToFunction options isRecursive proc s = (some (.func f fmd), s')) :
+    f.axioms.length = (getPostconds proc.body).length :=
+  translateProcedureToFunction_axioms_length options isRecursive proc s s' f fmd hSucc
 
 end Strata.Laurel

@@ -250,7 +250,15 @@ theorem translateStmt_eq_assign_expr (targetId : Identifier) (targetMd : MetaDat
     (hNotInstanceCall : ∀ t c a, value.val ≠ .InstanceCall t c a)
     (hExpr : translateExpr value [] false s = (some coreExpr, s1)) :
     (translateStmt outParams ⟨.Assign [⟨.Identifier targetId, targetMd⟩] value, md⟩ s).1.isSome = true := by
-  sorry
+  rw [translateStmt.eq_def]; mu
+  revert hExpr hNotStaticCall hNotInstanceCall
+  cases value with
+  | mk val valMd =>
+    intro hNotStaticCall hNotInstanceCall hExpr
+    cases val with
+    | StaticCall c a => exact absurd rfl (hNotStaticCall c a)
+    | InstanceCall t c a => exact absurd rfl (hNotInstanceCall t c a)
+    | _ => rw [hExpr]; rfl
 
 theorem translateStmt_eq_block_unlabeled (outParams : List Parameter)
     (stmts : List StmtExprMd) (md : MetaData)
@@ -272,35 +280,306 @@ theorem translateStmt_eq_while (outParams : List Parameter)
     (translateStmt outParams ⟨.While cond invs decr body, md⟩ s).1.isSome = true := by
   rw [translateStmt.eq_def]; mu; rw [hc]; mu; rw [hi]; mu; rw [hd]; mu; rw [hb]; mu; rfl
 
-/-! ## translateProcedure — proved directly, no equation lemma needed -/
+/-! ## translateProcedure -/
 
--- translateProcedure properties are proved directly in TranslatorProperties.lean
--- by unfolding translateProcedure.eq_def. No intermediate equation lemma is needed
--- because the procedure construction is complex (mapM on inputs/outputs, translateChecks,
--- translateStmt) and the properties only need to extract individual fields.
+-- The `module` system creates a local copy of `mdWithUnknownLoc` when
+-- `translateProcedure.eq_def` is unfolded. This prevents proving exact
+-- equations with `rfl`. Instead, we prove `.isSome` and provide a
+-- `get` lemma that extracts the Core.Procedure value for field access.
 
-theorem translateProcedure_eq_transparent (proc : Procedure)
-    (bodyExpr : StmtExprMd) (s s1 : TranslateState)
+/-- When translateProcedure succeeds on a transparent procedure with no
+    preconditions, we can extract the resulting Core.Procedure. -/
+theorem translateProcedure_transparent_get (proc : Procedure)
+    (bodyExpr : StmtExprMd)
+    (s sI sO sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
     (bodyStmts : List Core.Statement)
     (hTransparent : proc.body = Body.Transparent bodyExpr [])
     (hNoPre : proc.preconditions = [])
-    (hBody : (translateStmt proc.outputs bodyExpr s).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr s).2 = s1) :
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
+    (coreProc : Core.Procedure)
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
+    coreProc.header.inputs = coreInputs ∧
+    coreProc.header.outputs = coreOutputs ∧
+    coreProc.spec.preconditions = [] ∧
+    coreProc.spec.postconditions = [] := by
+  rw [translateProcedure.eq_def] at hSucc; simp only [
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hSucc
+  rw [hInputs] at hSucc; simp only [
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hSucc
+  rw [hOutputs] at hSucc; simp only [
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hSucc
+  rw [hNoPre] at hSucc; simp only [translateChecks, List.mapIdxM, List.mapIdxM.go,
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hSucc
+  rw [hTransparent] at hSucc; simp only [
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hSucc
+  have hPair : (translateStmt proc.outputs bodyExpr sO) = (some bodyStmts, sBody) :=
+    Prod.ext hBody hState
+  rw [hPair] at hSucc; simp only [
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hSucc
+  have := Option.some.inj hSucc
+  subst this
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+
+theorem translateProcedure_eq_transparent (proc : Procedure)
+    (bodyExpr : StmtExprMd)
+    (s sI sO sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (bodyStmts : List Core.Statement)
+    (hTransparent : proc.body = Body.Transparent bodyExpr [])
+    (hNoPre : proc.preconditions = [])
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody) :
     (translateProcedure proc s).1.isSome = true := by
-  sorry
+  rw [translateProcedure.eq_def]; mu
+  rw [hInputs]; mu; rw [hOutputs]; mu
+  rw [hNoPre]; simp only [translateChecks, List.mapIdxM, List.mapIdxM.go]; mu
+  rw [hTransparent]; mu
+  have hPair : (translateStmt proc.outputs bodyExpr sO) = (some bodyStmts, sBody) :=
+    Prod.ext hBody hState
+  rw [hPair]; mu; rfl
 
 theorem translateProcedure_eq_opaque_withImpl (proc : Procedure)
     (postconds : List StmtExprMd) (impl : StmtExprMd) (modif : List StmtExprMd)
-    (s : TranslateState)
-    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif) :
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody)) :
     (translateProcedure proc s).1.isSome = true := by
-  sorry
+  rw [translateProcedure.eq_def]; mu
+  rw [hInputs]; mu; rw [hOutputs]; mu; rw [hPre]; mu
+  rw [hOpaque]; mu; rw [hPost]; mu; rw [hBody]; mu; rfl
 
 theorem translateProcedure_eq_opaque_noImpl (proc : Procedure)
     (postconds : List StmtExprMd) (modif : List StmtExprMd)
-    (s : TranslateState)
-    (hOpaque : proc.body = Body.Opaque postconds none modif) :
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (hOpaque : proc.body = Body.Opaque postconds none modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost)) :
     (translateProcedure proc s).1.isSome = true := by
-  sorry
+  rw [translateProcedure.eq_def]; mu
+  rw [hInputs]; mu; rw [hOutputs]; mu; rw [hPre]; mu
+  rw [hOpaque]; mu; rw [hPost]; mu; rfl
+
+/-- When translateProcedure succeeds on an opaque procedure with implementation,
+    we can extract the resulting Core.Procedure fields. -/
+theorem translateProcedure_opaque_withImpl_get (proc : Procedure)
+    (postconds : List StmtExprMd) (impl : StmtExprMd) (modif : List StmtExprMd)
+    (s sI sO sPre sPost sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (bodyStmts : List Core.Statement)
+    (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
+    (coreProc : Core.Procedure)
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
+    coreProc.header.inputs = coreInputs ∧
+    coreProc.header.outputs = coreOutputs ∧
+    coreProc.spec.preconditions = corePre ∧
+    coreProc.spec.postconditions = corePost := by
+  -- Rewrite hSucc by unfolding translateProcedure step by step
+  have hIsSome := translateProcedure_eq_opaque_withImpl proc postconds impl modif
+    s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
+    hOpaque hInputs hOutputs hPre hPost hBody
+  rw [Option.isSome_iff_exists] at hIsSome
+  obtain ⟨val, hVal⟩ := hIsSome
+  rw [hVal] at hSucc
+  have := Option.some.inj hSucc; subst this
+  -- Now coreProc = val. We need to show the fields match.
+  -- Use the same rewriting strategy on hVal.
+  rw [translateProcedure.eq_def] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hInputs] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hOutputs] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hPre] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hOpaque] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hPost] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hBody] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  have := Option.some.inj hVal; subst this
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+
+/-- When translateProcedure succeeds on an opaque procedure without implementation,
+    we can extract the resulting Core.Procedure fields. -/
+theorem translateProcedure_opaque_noImpl_get (proc : Procedure)
+    (postconds : List StmtExprMd) (modif : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (hOpaque : proc.body = Body.Opaque postconds none modif)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (coreProc : Core.Procedure)
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
+    coreProc.header.inputs = coreInputs ∧
+    coreProc.header.outputs = coreOutputs ∧
+    coreProc.spec.preconditions = corePre ∧
+    coreProc.spec.postconditions = corePost := by
+  have hIsSome := translateProcedure_eq_opaque_noImpl proc postconds modif
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hOpaque hInputs hOutputs hPre hPost
+  rw [Option.isSome_iff_exists] at hIsSome
+  obtain ⟨val, hVal⟩ := hIsSome
+  rw [hVal] at hSucc
+  have := Option.some.inj hSucc; subst this
+  rw [translateProcedure.eq_def] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hInputs] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hOutputs] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hPre] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hOpaque] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  rw [hPost] at hVal
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift] at hVal
+  have := Option.some.inj hVal; subst this
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+
+/-! ## mapM length preservation for OptionT/StateM -/
+
+/-- mapM through OptionT (StateM σ) preserves list length when it succeeds. -/
+theorem List.length_mapM_optionT_stateM {α β σ : Type}
+    (f : α → OptionT (StateM σ) β) (l : List α) (s : σ) (result : List β) (s' : σ)
+    (h : l.mapM f s = (some result, s')) :
+    result.length = l.length := by
+  induction l generalizing s result s' with
+  | nil =>
+    simp only [List.mapM, pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+    have := Option.some.inj (Prod.mk.inj h).1; subst this; rfl
+  | cons x xs ih =>
+    -- h : (x :: xs).mapM f s = (some result, s')
+    -- Use List.mapM_cons to unfold
+    rw [List.mapM_cons] at h
+    -- h : (f x >>= fun b => xs.mapM f >>= fun bs => pure (b :: bs)) s = (some result, s')
+    -- Match on f x s before unfolding bind
+    match hfx : f x s with
+    | (some b, s1) =>
+      -- Now unfold bind with hfx known
+      simp only [bind, OptionT.bind, OptionT.mk, StateT.bind,
+        pure, OptionT.pure, StateT.pure, hfx] at h
+      match hxs : List.mapM f xs s1 with
+      | (some bs, s2) =>
+        simp only [hxs, pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+        have := Option.some.inj (Prod.mk.inj h).1; subst this
+        simp [ih s1 bs s2 hxs]
+      | (none, s2) =>
+        simp only [hxs] at h
+        exact absurd (Prod.mk.inj h).1 (by simp)
+    | (none, s1) =>
+      simp only [bind, OptionT.bind, OptionT.mk, StateT.bind, hfx] at h
+      exact absurd (Prod.mk.inj h).1 (by simp)
+
+/-! ## translateProcedureToFunction — axiom count preservation
+
+The key property for P-Spec-2f: when translateProcedureToFunction succeeds,
+the number of axioms in the Core.Function equals the number of postconditions
+in the source procedure's Body.
+
+`getPostconds` and `translateProcedureToFunction_axioms_length` are proved
+inside the module block in `LaurelToCoreTranslator.lean` where `unfold` works
+on `translateProcedureToFunction`. The proof uses a `bind_inv` lemma to invert
+the monadic bind chain, then case-splits on `proc.body` variants and delegates
+to `generateFunctionAxioms_length` for each case. -/
+
+-- getPostconds and translateProcedureToFunction_axioms_length are exported
+-- from LaurelToCoreTranslator.lean. No additional lemmas needed here.
 
 end Strata.Laurel

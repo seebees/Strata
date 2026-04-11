@@ -43,7 +43,7 @@ open Lambda (LMonoTy LTy LExpr)
 
 public section
 
-private def mdWithUnknownLoc : Imperative.MetaData Core.Expression :=
+@[expose] def mdWithUnknownLoc : Imperative.MetaData Core.Expression :=
   #[⟨Imperative.MetaData.fileRange, .fileRange FileRange.unknown⟩]
 
 def isFieldName (fieldNames : List Identifier) (name : Identifier) : Bool :=
@@ -617,6 +617,111 @@ structure LaurelTranslateOptions where
   emitResolutionErrors : Bool := true
   inlineFunctionsWhenPossible : Bool := false
 
+/-- Generate axioms from function postconditions.
+    For each postcondition like `x < y → result < 0`, produce an axiom:
+      ∀ x : int, ∀ y : int, x < y → compare(x, y) < 0
+    Returns a list of axioms with the same length as postconds. -/
+@[expose] def generateFunctionAxioms (proc : Procedure) (postconds : List StmtExprMd)
+    (outputTy : LMonoTy) : TranslateM (List Core.Expression.Expr) :=
+  if postconds.isEmpty then pure []
+  else do
+    -- Translate postconditions with input params as bound vars; `result` becomes fvar
+    let boundVars := proc.inputs.reverse.map (·.name)
+    let postcondExprs ← postconds.mapM (fun pc => translateExpr pc boundVars (isPureContext := true))
+    let n := proc.inputs.length
+    let inputTypes ← proc.inputs.mapM (fun p => translateType p.type)
+    -- Build the arrow type for the function: T1 → T2 → ... → Tn → ReturnType
+    let funcTy := match inputTypes with
+      | [] => outputTy
+      | ity :: irest => Lambda.LMonoTy.mkArrow ity (irest ++ [outputTy])
+    -- Build function application: f(bvar(n-1), ..., bvar(0))
+    let mkFuncApp := List.range n |>.foldl (fun acc i =>
+      LExpr.app () acc (.bvar () (n - 1 - i))) (LExpr.op () ⟨proc.name.text, ()⟩ (some funcTy))
+    -- Substitute fvar("result") with the function application in each postcondition
+    let resultId : Core.Expression.Ident := ⟨"result", ()⟩
+    let substituted := postcondExprs.map (fun (e : Core.Expression.Expr) =>
+      LExpr.substFvar (T := Core.CoreLParams) e resultId mkFuncApp)
+    -- Build individual axioms, each wrapped in ∀ quantifiers with trigger
+    substituted.mapM fun postExpr => do
+      let trigger := mkFuncApp
+      let pairs := proc.inputs.zip inputTypes
+      let rec buildQuants : List (Laurel.Parameter × LMonoTy) → TranslateM Core.Expression.Expr
+        | [] => pure postExpr
+        | [(_, ty)] => pure (LExpr.allTr () "" (some ty) trigger postExpr)
+        | (_, ty) :: rest => do
+          let inner ← buildQuants rest
+          pure (LExpr.all () "" (some ty) inner)
+      buildQuants pairs
+
+private theorem List.length_mapM_optionT_stateM'
+    {α β σ : Type} (f : α → OptionT (StateM σ) β)
+    (l : List α) (s : σ) (result : List β) (s' : σ)
+    (h : l.mapM f s = (some result, s')) :
+    result.length = l.length := by
+  induction l generalizing s result s' with
+  | nil =>
+    simp only [List.mapM, pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+    have := Option.some.inj (Prod.mk.inj h).1; subst this; rfl
+  | cons x xs ih =>
+    rw [List.mapM_cons] at h
+    match hfx : f x s with
+    | (some b, s1) =>
+      simp only [bind, OptionT.bind, OptionT.mk, StateT.bind,
+        pure, OptionT.pure, StateT.pure, hfx] at h
+      match hxs : List.mapM f xs s1 with
+      | (some bs, s2) =>
+        simp only [hxs, pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+        have := Option.some.inj (Prod.mk.inj h).1; subst this
+        simp [ih s1 bs s2 hxs]
+      | (none, s2) =>
+        simp only [hxs] at h; exact absurd (Prod.mk.inj h).1 (by simp)
+    | (none, s1) =>
+      simp only [bind, OptionT.bind, OptionT.mk, StateT.bind, hfx] at h
+      exact absurd (Prod.mk.inj h).1 (by simp)
+
+/-- generateFunctionAxioms preserves postcondition count. -/
+theorem generateFunctionAxioms_length
+    (proc : Procedure) (postconds : List StmtExprMd) (outputTy : LMonoTy)
+    (s s' : TranslateState) (axioms : List Core.Expression.Expr)
+    (h : generateFunctionAxioms proc postconds outputTy s = (some axioms, s')) :
+    axioms.length = postconds.length := by
+  unfold generateFunctionAxioms at h
+  by_cases hEmpty : postconds.isEmpty = true
+  · simp only [hEmpty, ite_true, pure, OptionT.pure, OptionT.mk, StateT.pure] at h
+    have := Option.some.inj (Prod.mk.inj h).1; subst this
+    simp [List.isEmpty_iff.mp hEmpty]
+  · simp only [Bool.not_eq_true] at hEmpty
+    simp only [generateFunctionAxioms, hEmpty, Bool.false_eq_true, ↓reduceIte,
+      pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+      bind, StateT.bind, StateT.pure,
+      liftM, monadLift, MonadLift.monadLift] at h
+    generalize hPC : postconds.mapM (fun pc =>
+      translateExpr pc (proc.inputs.reverse.map (·.name)) true) s = pcResult at h
+    obtain ⟨pcOpt, s1⟩ := pcResult
+    cases pcOpt with
+    | some postcondExprs =>
+      simp only [Prod.mk.injEq] at h
+      simp only [StateT.bind] at h
+      generalize hIT : (proc.inputs.mapM (fun p => translateType p.type) s1) = itResult at h
+      obtain ⟨itOpt, s2⟩ := itResult
+      cases itOpt with
+      | some inputTypes =>
+        simp only [bind, StateT.bind, pure, StateT.pure, Prod.fst, Prod.snd,
+          OptionT.pure, OptionT.mk, OptionT.bind] at h
+        have h1 := List.length_mapM_optionT_stateM'
+          (fun pc => translateExpr pc (proc.inputs.reverse.map (·.name)) true)
+          postconds s postcondExprs s1 hPC
+        have h2 := List.length_mapM_optionT_stateM' _ (postcondExprs.map _) s2 axioms s' h
+        simp [List.length_map] at h2
+        omega
+      | none =>
+        simp only [bind, StateT.bind, pure, StateT.pure, Prod.fst, Prod.snd,
+          OptionT.pure, OptionT.mk, OptionT.bind] at h
+        exact absurd (Prod.mk.inj h).1 (by simp)
+    | none =>
+      simp only [] at h
+      exact absurd (Prod.mk.inj h).1 (by simp)
+
 /--
 Translate a Laurel Procedure to a Core Function (when applicable) using `TranslateM`.
 Diagnostics for disallowed constructs in the function body are emitted into the monad state.
@@ -667,35 +772,7 @@ def translateProcedureToFunction (options: LaurelTranslateOptions) (isRecursive:
     | .Opaque posts _ _ => posts
     | .Abstract posts => posts
     | .External => []
-  let axioms ← if postconds.isEmpty then pure []
-  else do
-    -- Translate postconditions with input params as bound vars; `result` becomes fvar
-    let boundVars := proc.inputs.reverse.map (·.name)
-    let postcondExprs ← postconds.mapM (fun pc => translateExpr pc boundVars (isPureContext := true))
-    let n := proc.inputs.length
-    let inputTypes ← proc.inputs.mapM (fun p => translateType p.type)
-    -- Build the arrow type for the function: T1 → T2 → ... → Tn → ReturnType
-    let funcTy := match inputTypes with
-      | [] => outputTy
-      | ity :: irest => Lambda.LMonoTy.mkArrow ity (irest ++ [outputTy])
-    -- Build function application: f(bvar(n-1), ..., bvar(0))
-    let mkFuncApp := List.range n |>.foldl (fun acc i =>
-      LExpr.app () acc (.bvar () (n - 1 - i))) (LExpr.op () ⟨proc.name.text, ()⟩ (some funcTy))
-    -- Substitute fvar("result") with the function application in each postcondition
-    let resultId : Core.Expression.Ident := ⟨"result", ()⟩
-    let substituted := postcondExprs.map (fun (e : Core.Expression.Expr) =>
-      LExpr.substFvar (T := Core.CoreLParams) e resultId mkFuncApp)
-    -- Build individual axioms, each wrapped in ∀ quantifiers with trigger
-    substituted.mapM fun postExpr => do
-      let trigger := mkFuncApp
-      let pairs := proc.inputs.zip inputTypes
-      let rec buildQuants : List (Laurel.Parameter × LMonoTy) → TranslateM Core.Expression.Expr
-        | [] => pure postExpr
-        | [(_, ty)] => pure (LExpr.allTr () "" (some ty) trigger postExpr)
-        | (_, ty) :: rest => do
-          let inner ← buildQuants rest
-          pure (LExpr.all () "" (some ty) inner)
-      buildQuants pairs
+  let axioms ← generateFunctionAxioms proc postconds outputTy
 
   let f : Core.Function := {
     name := ⟨proc.name.text, ()⟩
@@ -709,6 +786,118 @@ def translateProcedureToFunction (options: LaurelTranslateOptions) (isRecursive:
     axioms := axioms
   }
   return .func f proc.md
+
+/-- Helper: getPostconds extracts postconditions from a Body. -/
+def getPostconds : Body → List StmtExprMd
+  | .Transparent _ posts => posts
+  | .Opaque posts _ _ => posts
+  | .Abstract posts => posts
+  | .External => []
+
+/-- Bind inversion for OptionT (StateM σ): if the bind succeeds, both parts succeeded. -/
+private theorem bind_inv {α β σ : Type}
+    {f : OptionT (StateM σ) α} {g : α → OptionT (StateM σ) β}
+    {s : σ} {r : β} {s' : σ}
+    (h : (f >>= g) s = (some r, s')) :
+    ∃ (x : α) (s₁ : σ), f s = (some x, s₁) ∧ g x s₁ = (some r, s') := by
+  simp only [bind, OptionT.bind, OptionT.mk, StateT.bind] at h
+  generalize hf : f s = fResult at h
+  obtain ⟨fOpt, s₁⟩ := fResult
+  cases fOpt with
+  | some x => exact ⟨x, s₁, rfl, h⟩
+  | none => exact absurd (Prod.mk.inj h).1 (by simp [StateT.pure])
+
+/-- When translateProcedureToFunction succeeds, the axiom count equals the
+    postcondition count. Proved inside the module block where `unfold` works. -/
+theorem translateProcedureToFunction_axioms_length
+    (options : LaurelTranslateOptions) (isRecursive : Bool)
+    (proc : Procedure) (s s' : TranslateState) (f : Core.Function) (fmd : MetaData)
+    (hSucc : translateProcedureToFunction options isRecursive proc s = (some (.func f fmd), s')) :
+    f.axioms.length = (getPostconds proc.body).length := by
+  unfold translateProcedureToFunction at hSucc
+  obtain ⟨inputs, s1, _, hRest⟩ := bind_inv hSucc
+  simp only [bind, OptionT.bind, OptionT.mk, StateT.bind, StateT.pure,
+    pure, OptionT.pure, OptionT.lift, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.get, liftM, monadLift, MonadLift.monadLift, Functor.map,
+    Prod.fst, Prod.snd, Function.comp] at hRest
+  cases hHead : proc.outputs.head? with
+  | some p =>
+    simp only [hHead] at hRest
+    obtain ⟨outputTy, s2, _, hRest2⟩ := bind_inv hRest
+    obtain ⟨preconditions, s3, _, hRest3⟩ := bind_inv hRest2
+    simp only [StateT.get, StateT.bind, StateT.pure, bind, pure] at hRest3
+    cases hBC : proc.body with
+    | Transparent bodyExpr postconds =>
+      simp only [hBC] at hRest3
+      obtain ⟨body, s5, _, hRest5⟩ := bind_inv hRest3
+      obtain ⟨axioms, s6, hAxioms, hRest6⟩ := bind_inv hRest5
+      simp [pure, StateT.pure] at hRest6
+      have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest6).1)
+      simp only [hBC] at hAxioms; rw [← hF.1]; simp only [getPostconds]
+      exact generateFunctionAxioms_length proc postconds outputTy s5 s6 axioms hAxioms
+    | Opaque postconds impl _ =>
+      simp only [hBC] at hRest3; cases impl <;> (
+        simp only [pure, StateT.pure, StateT.bind, bind] at hRest3
+        obtain ⟨axioms, s6, hAxioms, hRest6⟩ := bind_inv hRest3
+        simp [pure, StateT.pure] at hRest6
+        have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest6).1)
+        simp only [hBC] at hAxioms; rw [← hF.1]; simp only [getPostconds]
+        exact generateFunctionAxioms_length proc postconds outputTy s3 s6 axioms hAxioms)
+    | Abstract postconds =>
+      simp only [hBC, pure, StateT.pure, StateT.bind, bind] at hRest3
+      obtain ⟨axioms, s6, hAxioms, hRest6⟩ := bind_inv hRest3
+      simp [pure, StateT.pure] at hRest6
+      have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest6).1)
+      simp only [hBC] at hAxioms; rw [← hF.1]; simp only [getPostconds]
+      exact generateFunctionAxioms_length proc postconds outputTy s3 s6 axioms hAxioms
+    | External =>
+      simp only [hBC, pure, StateT.pure, StateT.bind, bind] at hRest3
+      match hAx : generateFunctionAxioms proc [] outputTy s3 with
+      | (some axioms, s6) =>
+        rw [hAx] at hRest3; simp [StateT.pure] at hRest3
+        have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest3).1)
+        rw [← hF.1]; simp only [getPostconds]
+        exact generateFunctionAxioms_length proc [] outputTy s3 s6 axioms hAx
+      | (none, s6) =>
+        rw [hAx] at hRest3; exact absurd (Prod.mk.inj hRest3).1 (by simp)
+  | none =>
+    simp only [hHead, pure, StateT.pure, StateT.bind, bind] at hRest
+    obtain ⟨preconditions, s3, _, hRest3⟩ := bind_inv hRest
+    simp only [StateT.get, StateT.bind, StateT.pure, bind, pure] at hRest3
+    cases hBC : proc.body with
+    | Transparent bodyExpr postconds =>
+      simp only [hBC] at hRest3
+      obtain ⟨body, s5, _, hRest5⟩ := bind_inv hRest3
+      obtain ⟨axioms, s6, hAxioms, hRest6⟩ := bind_inv hRest5
+      simp [pure, StateT.pure] at hRest6
+      have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest6).1)
+      simp only [hBC] at hAxioms; rw [← hF.1]; simp only [getPostconds]
+      exact generateFunctionAxioms_length proc postconds LMonoTy.int s5 s6 axioms hAxioms
+    | Opaque postconds impl _ =>
+      simp only [hBC] at hRest3; cases impl <;> (
+        simp only [pure, StateT.pure, StateT.bind, bind] at hRest3
+        obtain ⟨axioms, s6, hAxioms, hRest6⟩ := bind_inv hRest3
+        simp [pure, StateT.pure] at hRest6
+        have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest6).1)
+        simp only [hBC] at hAxioms; rw [← hF.1]; simp only [getPostconds]
+        exact generateFunctionAxioms_length proc postconds LMonoTy.int s3 s6 axioms hAxioms)
+    | Abstract postconds =>
+      simp only [hBC, pure, StateT.pure, StateT.bind, bind] at hRest3
+      obtain ⟨axioms, s6, hAxioms, hRest6⟩ := bind_inv hRest3
+      simp [pure, StateT.pure] at hRest6
+      have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest6).1)
+      simp only [hBC] at hAxioms; rw [← hF.1]; simp only [getPostconds]
+      exact generateFunctionAxioms_length proc postconds LMonoTy.int s3 s6 axioms hAxioms
+    | External =>
+      simp only [hBC, pure, StateT.pure, StateT.bind, bind] at hRest3
+      match hAx : generateFunctionAxioms proc [] LMonoTy.int s3 with
+      | (some axioms, s6) =>
+        rw [hAx] at hRest3; simp [StateT.pure] at hRest3
+        have hF := Core.Decl.func.inj (Option.some.inj (Prod.mk.inj hRest3).1)
+        rw [← hF.1]; simp only [getPostconds]
+        exact generateFunctionAxioms_length proc [] LMonoTy.int s3 s6 axioms hAx
+      | (none, s6) =>
+        rw [hAx] at hRest3; exact absurd (Prod.mk.inj hRest3).1 (by simp)
 
 /--
 Translate a Laurel DatatypeDefinition to an `LDatatype Unit`.

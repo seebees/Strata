@@ -313,7 +313,17 @@ def translateExpr (expr : StmtExprMd)
   | .ContractOf _ _ => throwExprDiagnostic $ md.toDiagnostic "contractOf expression translation" DiagnosticType.NotYetImplemented
   | .Abstract => throwExprDiagnostic $ md.toDiagnostic "abstract expression translation" DiagnosticType.NotYetImplemented
   | .All => throwExprDiagnostic $ md.toDiagnostic "all expression translation" DiagnosticType.NotYetImplemented
-  | .InstanceCall target callee args => throwExprDiagnostic $ md.toDiagnostic "instance call expression translation" DiagnosticType.NotYetImplemented
+  | .InstanceCall target callee args =>
+      match model.get callee with
+      | .instanceProcedure typeName _ =>
+        let coreName := instanceProcCoreName typeName.text callee.text
+        let fnOp : Core.Expression.Expr := .op () ⟨coreName, ()⟩ none
+        let coreTarget ← translateExpr target boundVars isPureContext
+        let withTarget : Core.Expression.Expr := .app () fnOp coreTarget
+        (args.attach).foldlM (fun acc ⟨arg, _⟩ => do
+          let re ← translateExpr arg boundVars isPureContext
+          pure (.app () acc re)) withTarget
+      | _ => throwExprDiagnostic $ md.toDiagnostic "instance call expression: callee not resolved as instance procedure" DiagnosticType.NotYetImplemented
   | .PureFieldUpdate _ _ _ => throwExprDiagnostic $ md.toDiagnostic "pure field update expression translation" DiagnosticType.NotYetImplemented
   | .This => throwExprDiagnostic $ md.toDiagnostic "this expression translation" DiagnosticType.NotYetImplemented
   | .TryCatch _ _ _ => disallowed expr.md "try-catch is not supported in expression position"
@@ -391,11 +401,23 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
             let initStmt := Core.Statement.init ident coreType (.det defaultExpr) md
             let callStmt := Core.Statement.call [ident] callee.text coreArgs md
             return [initStmt, callStmt]
-      | some (⟨ .InstanceCall .., _⟩) =>
-          -- Instance method call as initializer: var name := target.method(args)
-          -- Havoc the result since instance methods may be on unmodeled types
-          let initStmt := Core.Statement.init ident coreType .nondet md
-          return [initStmt]
+      | some (⟨ .InstanceCall callTarget callCallee callArgs, callMd⟩) =>
+          match model.get callCallee with
+          | .instanceProcedure typeName proc =>
+            let coreName := instanceProcCoreName typeName.text callCallee.text
+            if proc.isFunctional then
+              let coreExpr ← translateExpr (⟨ .InstanceCall callTarget callCallee callArgs, callMd ⟩)
+              return [Core.Statement.init ident coreType (.det coreExpr) md]
+            else
+              let coreTarget ← translateExpr callTarget
+              let coreArgs ← callArgs.mapM (fun a => translateExpr a)
+              let defaultExpr ← defaultExprForType ty
+              let initStmt := Core.Statement.init ident coreType (.det defaultExpr) md
+              let callStmt := Core.Statement.call [ident] coreName (coreTarget :: coreArgs) callMd
+              return [initStmt, callStmt]
+          | _ =>
+            let initStmt := Core.Statement.init ident coreType .nondet md
+            return [initStmt]
       | some (⟨ .Hole _ _, _⟩) =>
           -- Hole initializer: treat as havoc (init without value)
           return [Core.Statement.init ident coreType .nondet md]
@@ -433,9 +455,22 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                   inits := inits ++ [Core.Statement.init unusedIdent coreType .nondet md]
                   lhs := lhs ++ [unusedIdent]
                 return inits ++ [Core.Statement.call lhs callee.text coreArgs md]
-          | .InstanceCall .. =>
-              -- Instance method call: havoc the target variable
-              return [Core.Statement.havoc ident md]
+          | .InstanceCall callTarget callCallee callArgs =>
+              match model.get callCallee with
+              | .instanceProcedure typeName proc =>
+                let coreName := instanceProcCoreName typeName.text callCallee.text
+                let coreTarget ← translateExpr callTarget
+                let coreArgs ← callArgs.mapM (fun a => translateExpr a)
+                let mut inits : List Core.Statement := []
+                let mut lhs : List Core.CoreIdent := [ident]
+                for out in proc.outputs.drop 1 do
+                  let id ← freshId
+                  let unusedIdent : Core.CoreIdent := ⟨s!"$unused_{id}", ()⟩
+                  let coreType := LTy.forAll [] (← translateType out.type)
+                  inits := inits ++ [Core.Statement.init unusedIdent coreType .nondet md]
+                  lhs := lhs ++ [unusedIdent]
+                return inits ++ [Core.Statement.call lhs coreName (coreTarget :: coreArgs) md]
+              | _ => return [Core.Statement.havoc ident md]
           | _ =>
               let coreExpr ← translateExpr value
               return [Core.Statement.set ident coreExpr md]
@@ -450,13 +485,23 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                 | .Identifier name => some (⟨name.text, ()⟩)
                 | _ => none
               return [Core.Statement.call lhsIdents callee.text coreArgs value.md]
-          | .InstanceCall .. =>
-              -- Instance method call: havoc all target variables
-              let havocStmts := targets.filterMap fun t =>
-                match t.val with
-                | .Identifier name => some (Core.Statement.havoc ⟨name.text, ()⟩ md)
-                | _ => none
-              return (havocStmts)
+          | .InstanceCall callTarget callCallee callArgs =>
+              match model.get callCallee with
+              | .instanceProcedure typeName _ =>
+                let coreName := instanceProcCoreName typeName.text callCallee.text
+                let coreTarget ← translateExpr callTarget
+                let coreArgs ← callArgs.mapM (fun a => translateExpr a)
+                let lhsIdents := targets.filterMap fun t =>
+                  match t.val with
+                  | .Identifier name => some (⟨name.text, ()⟩)
+                  | _ => none
+                return [Core.Statement.call lhsIdents coreName (coreTarget :: coreArgs) value.md]
+              | _ =>
+                let havocStmts := targets.filterMap fun t =>
+                  match t.val with
+                  | .Identifier name => some (Core.Statement.havoc ⟨name.text, ()⟩ md)
+                  | _ => none
+                return havocStmts
           | _ =>
               emitDiagnostic $ md.toDiagnostic "Assignments with multiple target but without a RHS call should not be constructed"
               returnNone
@@ -489,9 +534,24 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
           inits := inits ++ [Core.Statement.init ident coreType .nondet md]
           lhs := lhs ++ [ident]
         return inits ++ [Core.Statement.call lhs callee.text coreArgs md]
-  | .InstanceCall .. =>
-      -- Instance method call as statement: no return value, treated as no-op
-      return ([])
+  | .InstanceCall target callee args =>
+      match model.get callee with
+      | .instanceProcedure typeName proc =>
+        let coreName := instanceProcCoreName typeName.text callee.text
+        let coreTarget ← translateExpr target
+        let coreArgs ← args.mapM (fun a => translateExpr a)
+        let mut inits : List Core.Statement := []
+        let mut lhs : List Core.CoreIdent := []
+        for out in proc.outputs do
+          let id ← freshId
+          let ident : Core.CoreIdent := ⟨s!"$unused_{id}", ()⟩
+          let coreType := LTy.forAll [] (← translateType out.type)
+          inits := inits ++ [Core.Statement.init ident coreType .nondet md]
+          lhs := lhs ++ [ident]
+        return inits ++ [Core.Statement.call lhs coreName (coreTarget :: coreArgs) md]
+      | _ =>
+        emitDiagnostic $ md.toDiagnostic "instance call: callee not resolved as instance procedure" DiagnosticType.NotYetImplemented
+        return []
   | .Return valueOpt =>
       match valueOpt, outputParams.head? with
       | some value, some outParam =>
@@ -1043,13 +1103,6 @@ def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): T
   datatypes share a single `.data` declaration.
   -/
   translateTypes (program : Program) : TranslateM (List Core.Decl) := do
-    -- Emit diagnostics for composite types that have instance procedures.
-    for td in program.types do
-      if let .Composite ct := td then
-        for proc in ct.instanceProcedures do
-          emitDiagnostic $ proc.md.toDiagnostic
-            s!"Instance procedure '{proc.name.text}' on composite type '{ct.name.text}' is not yet supported"
-            DiagnosticType.NotYetImplemented
     -- Translate datatype definitions to Core declarations.
     let laurelDatatypes := program.types.filterMap fun td => match td with
       | .Datatype dt => some dt
@@ -1100,6 +1153,18 @@ def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): T
         body := body
       } mdWithUnknownLoc
 
+    -- Translate instance procedures from composite types.
+    -- Each instance procedure is translated with a qualified name (TypeName..procName).
+    let instanceProcDecls ← program.types.flatMapM fun td => do
+      match td with
+      | .Composite ct =>
+        ct.instanceProcedures.mapM fun proc => do
+          let qualifiedProc := { proc with
+            name := { proc.name with text := instanceProcCoreName ct.name.text proc.name.text } }
+          let procDecl ← translateProcedure qualifiedProc
+          return Core.Decl.proc procDecl proc.md
+      | _ => return []
+
     -- Translate Laurel datatype definitions to Core declarations.
     let groupedDatatypeDecls ← translateTypes program
     -- ExceptionResult datatype for exception propagation
@@ -1113,7 +1178,7 @@ def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): T
       constrs_ne := rfl
     }]) mdWithUnknownLoc
     let program := {
-      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ constantDecls ++ orderedDecls
+      decls := [exceptionResultDecl] ++ groupedDatatypeDecls ++ constantDecls ++ orderedDecls ++ instanceProcDecls
     }
 
     -- dbg_trace "=== Generated Strata Core Program ==="

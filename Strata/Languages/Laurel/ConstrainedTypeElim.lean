@@ -263,6 +263,35 @@ theorem constraintCallFor_primitive_bool (ptMap : ConstrainedTypeMap) (varName :
     constraintCallFor ptMap .TBool varName md = none := by
   unfold constraintCallFor; rfl
 
+/-- Helper: the outputEnsures computed by elimProc. -/
+private def outputEnsuresOf (ptMap : ConstrainedTypeMap) (proc : Procedure) : List StmtExprMd :=
+  proc.outputs.filterMap fun p =>
+    (constraintCallFor ptMap p.type.val p.name p.type.md).map
+      fun c => ⟨c.val, if (Imperative.getFileRange p.type.md).isSome then p.type.md else proc.md⟩
+
+/-- For Opaque bodies, elimProc appends output constraint ensures to postconditions. -/
+theorem elimProc_opaque_body (ptMap : ConstrainedTypeMap) (proc : Procedure)
+    (postconds : List StmtExprMd) (impl : Option StmtExprMd) (modif : List StmtExprMd)
+    (hBody : proc.body = .Opaque postconds impl modif) :
+    ∃ impl', (elimProc ptMap proc).body = .Opaque
+      ((postconds ++ outputEnsuresOf ptMap proc).map (resolveExpr ptMap))
+      impl'
+      (modif.map (resolveExpr ptMap)) := by
+  unfold elimProc; simp [hBody, outputEnsuresOf, List.map_append]
+
+/-- For Abstract bodies, elimProc appends output constraint ensures to postconditions. -/
+theorem elimProc_abstract_body (ptMap : ConstrainedTypeMap) (proc : Procedure)
+    (postconds : List StmtExprMd)
+    (hBody : proc.body = .Abstract postconds) :
+    (elimProc ptMap proc).body = .Abstract
+      ((postconds ++ outputEnsuresOf ptMap proc).map (resolveExpr ptMap)) := by
+  unfold elimProc; simp [hBody, outputEnsuresOf, List.map_append]
+
+/-- elimProc preserves the procedure name. -/
+theorem elimProc_preserves_name (ptMap : ConstrainedTypeMap) (proc : Procedure) :
+    (elimProc ptMap proc).name = proc.name := by
+  unfold elimProc; rfl
+
 private def mkWitnessProc (ptMap : ConstrainedTypeMap) (ct : ConstrainedType) : Procedure :=
   let md := ct.witness.md
   let witnessId : Identifier := mkId "$witness"

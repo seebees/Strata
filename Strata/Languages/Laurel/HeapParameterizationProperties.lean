@@ -176,17 +176,13 @@ heap parameterization first. This is a design invariant: field
 access in Core is always through `readField`/`updateField` calls,
 never through direct field selection.
 
-The property that FieldSelect IS eliminated (i.e., heapTransformExpr
-on FieldSelect produces a StaticCall) requires equation lemmas for
-heapTransformExpr which are blocked by the `where` clause / module
-file interaction. Instead, we prove properties about the components:
+`heapTransformExpr_fieldSelect_is_staticCall` (in HeapParameterization.lean)
+proves that heapTransformExpr on FieldSelect always produces a StaticCall
+when the field name resolves. The properties below prove correctness of
+the components used in that StaticCall:
 
 1. resolveQualifiedFieldName produces the correct qualified name (above)
-2. boxDestructorName produces the correct destructor name (below)
-
-These compose: the heap parameterization builds
-`boxDestructor(readField($heap, target, QualifiedName()))` and
-the translator then translates this StaticCall normally. -/
+2. boxDestructorName produces the correct destructor name (below) -/
 
 /-- boxDestructorName for int fields produces the int Box destructor. -/
 theorem boxDestructorName_int (model : SemanticModel) :

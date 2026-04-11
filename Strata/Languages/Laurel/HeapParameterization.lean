@@ -784,6 +784,47 @@ public theorem heapTransformProcs_noHeap (model : SemanticModel) (procs : List P
       heapTransformProcedure_noHeap model x s (hNoRead x (.head xs)) (hNoWrite x (.head xs)),
       ih s (fun p hp => hNoRead p (.tail x hp)) (fun p hp => hNoWrite p (.tail x hp))]
 
+/-- P-Heap-2: heapTransformExpr on FieldSelect produces a StaticCall, not a FieldSelect.
+    When the field name resolves, the output is either readFunc(readField(...)) for
+    constrained types or boxDestructor(readField(...)) for other types. -/
+theorem heapTransformExpr_fieldSelect_is_staticCall
+    (heapVar : Identifier) (model : SemanticModel)
+    (target : StmtExprMd) (fieldName : Identifier) (md : MetaData)
+    (s : TransformState)
+    (qualifiedName : String)
+    (hResolve : resolveQualifiedFieldName model fieldName = some qualifiedName) :
+    ∃ (callee : Identifier) (args : List StmtExprMd) (md' : MetaData) (s' : TransformState),
+      (heapTransformExpr heapVar model ⟨.FieldSelect target fieldName, md⟩) s =
+        (WithMetadata.mk (.StaticCall callee args) md', s') := by
+  -- heapTransformExpr = recurse expr true; unfold both
+  unfold heapTransformExpr heapTransformExpr.recurse
+  simp only [hResolve]
+  -- After unfold+simp, the goal is a do block:
+  --   let selectTarget' ← recurse target
+  --   let readExpr := ...
+  --   recordBoxConstructor ...
+  --   let readFuncName? := match ... with ...
+  --   match readFuncName? with
+  --   | some readFunc => return ⟨.StaticCall readFunc [readExpr], md⟩
+  --   | none => return mkMd (.StaticCall (boxDestructorName ...) [readExpr])
+  -- Both branches produce a StaticCall.
+  -- Reduce the monadic operations
+  simp only [bind, StateT.bind, get, MonadState.get, StateT.get, getThe, MonadStateOf.get,
+    pure, StateT.pure, Functor.map, StateT.map, modify, MonadState.set, StateT.set,
+    modifyGet, MonadState.modifyGet, StateT.modifyGet]
+  -- Case split on readFuncName?
+  cases h : (match (model.get fieldName).getType.val with
+    | .UserDefined name => match model.get name with
+      | .constrainedType _ =>
+        if name.text == "int32" then some "readInt32"
+        else if name.text == "int16" then some "readInt16"
+        else if name.text == "int8" then some "readInt8"
+        else none
+      | _ => none
+    | _ => none : Option Identifier) with
+  | some readFunc => exact ⟨readFunc, _, _, _, rfl⟩
+  | none => exact ⟨_, _, _, _, rfl⟩
+
 end Strata.Laurel
 
 end -- public section

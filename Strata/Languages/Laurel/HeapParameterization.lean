@@ -825,6 +825,36 @@ theorem heapTransformExpr_fieldSelect_is_staticCall
   | some readFunc => exact ⟨readFunc, _, _, _, rfl⟩
   | none => exact ⟨_, _, _, _, rfl⟩
 
+/-- P-Heap-3a: analyzeProc is a pure function of the procedure body.
+    Two procedures with the same body, preconditions produce the same analysis. -/
+theorem analyzeProc_depends_only_on_body_and_preconditions
+    (p1 p2 : Procedure)
+    (hBody : p1.body = p2.body)
+    (hPre : p1.preconditions = p2.preconditions) :
+    analyzeProc p1 = analyzeProc p2 := by
+  unfold analyzeProc; rw [hBody, hPre]
+
+/-- P-Heap-3b: analyzeProc is independent of the procedure name. -/
+theorem analyzeProc_independent_of_name
+    (proc : Procedure) (newName : Identifier) :
+    analyzeProc { proc with name := newName } = analyzeProc proc := by
+  unfold analyzeProc; rfl
+
+/-- P-Heap-3c: analyzeProc is independent of isFunctional. -/
+theorem analyzeProc_independent_of_isFunctional
+    (proc : Procedure) (b : Bool) :
+    analyzeProc { proc with isFunctional := b } = analyzeProc proc := by
+  unfold analyzeProc; rfl
+
+/-- P-Heap-3d: analyzeProc on an External body produces no heap access. -/
+theorem analyzeProc_external (proc : Procedure)
+    (hBody : proc.body = .External)
+    (hNoPre : proc.preconditions = []) :
+    (analyzeProc proc).readsHeapDirectly = false ∧
+    (analyzeProc proc).writesHeapDirectly = false ∧
+    (analyzeProc proc).callees = [] := by
+  unfold analyzeProc; simp [hBody, hNoPre, List.forM]; exact ⟨rfl, rfl, rfl⟩
+
 end Strata.Laurel
 
 end -- public section

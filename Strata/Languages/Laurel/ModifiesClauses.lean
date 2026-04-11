@@ -37,7 +37,7 @@ namespace Strata.Laurel
 
 public section
 
-private def mkMd (e : StmtExpr) : StmtExprMd := ⟨e, #[]⟩
+def mkMd (e : StmtExpr) : StmtExprMd := ⟨e, #[]⟩
 
 /--
 A single entry in a modifies clause, either a single Composite expression
@@ -82,7 +82,7 @@ def buildNotModifiedForEntry (obj : StmtExprMd) (entry : ModifiesEntry) : StmtEx
     mkMd <| .PrimitiveOp .Not [membership]
 
 /-- Conjoin a list of StmtExprs with `&&`. -/
-def conjoinAll (exprs : List StmtExprMd) : StmtExprMd :=
+@[expose] def conjoinAll (exprs : List StmtExprMd) : StmtExprMd :=
   match exprs with
   | [] => mkMd <| .LiteralBool true
   | [single] => single
@@ -133,7 +133,7 @@ def buildModifiesEnsures (proc: Procedure) (model: SemanticModel) (modifiesExprs
 Check whether a procedure has a `$heap` output parameter,
 indicating it mutates the heap.
 -/
-def hasHeapOut (proc : Procedure) : Bool :=
+@[expose] def hasHeapOut (proc : Procedure) : Bool :=
   proc.outputs.any (fun p => p.name.text == "$heap")
 
 /--
@@ -144,7 +144,7 @@ If the procedure has a `$heap` but no modifies clause, adds a postcondition
 that all allocated objects are preserved between heaps:
   `forall $obj: Composite, $fld: Field => $obj < $heap_in.nextReference ==> readField($heap_in, $obj, $fld) == readField($heap, $obj, $fld)`
 -/
-def transformModifiesClauses (model: SemanticModel)
+@[expose] def transformModifiesClauses (model: SemanticModel)
     (proc : Procedure) : Except (Array DiagnosticModel) Procedure :=
   match proc.body with
   | .External => .ok proc

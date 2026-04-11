@@ -592,6 +592,89 @@ theorem translateProcedure_opaque_noImpl_preserves_preconditions
     s sI sO sPre sPost coreInputs coreOutputs corePre corePost
     hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.2.2.1
 
+/-! ### P-Spec-1: Abstract body postcondition preservation -/
+
+/-- An abstract procedure preserves its postconditions. -/
+theorem translateProcedure_abstract_preserves_postconditions
+    (proc : Procedure) (postconds : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (coreProc : Core.Procedure)
+    (hAbstract : proc.body = Body.Abstract postconds)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.spec.postconditions = corePost :=
+  (translateProcedure_abstract_get proc postconds
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hAbstract hInputs hOutputs hPre hPost coreProc hSucc).2.2.2.2
+
+/-- An abstract procedure preserves its preconditions. -/
+theorem translateProcedure_abstract_preserves_preconditions
+    (proc : Procedure) (postconds : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (coreProc : Core.Procedure)
+    (hAbstract : proc.body = Body.Abstract postconds)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.spec.preconditions = corePre :=
+  (translateProcedure_abstract_get proc postconds
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hAbstract hInputs hOutputs hPre hPost coreProc hSucc).2.2.2.1
+
+/-- An abstract procedure preserves its outputs (with $result appended). -/
+theorem translateProcedure_abstract_preserves_outputs
+    (proc : Procedure) (postconds : List StmtExprMd)
+    (s sI sO sPre sPost : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
+    (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
+    (coreProc : Core.Procedure)
+    (hAbstract : proc.body = Body.Abstract postconds)
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
+    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
+  (translateProcedure_abstract_get proc postconds
+    s sI sO sPre sPost coreInputs coreOutputs corePre corePost
+    hAbstract hInputs hOutputs hPre hPost coreProc hSucc).2.2.1
+
+/-! ### P-Spec-1: Transparent body has empty postconditions -/
+
+/-- A transparent procedure has empty postconditions in the Core output. -/
+theorem translateProcedure_transparent_postconditions_empty
+    (proc : Procedure) (bodyExpr : StmtExprMd)
+    (s sI sO sBody : TranslateState)
+    (coreInputs : List (Core.CoreIdent × LMonoTy))
+    (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (bodyStmts : List Core.Statement) (coreProc : Core.Procedure)
+    (hTransparent : proc.body = Body.Transparent bodyExpr [])
+    (hNoPre : proc.preconditions = [])
+    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
+    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
+    (hSucc : (translateProcedure proc s).1 = some coreProc) :
+    coreProc.spec.postconditions = [] :=
+  (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
+    coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
+    hBody hState coreProc hSucc).2.2.2.2
+
 /-! ### P-Spec-2f: Function postcondition axiom count preservation
 
 When translateProcedureToFunction succeeds, the number of axioms in the

@@ -219,6 +219,50 @@ def elimProc (ptMap : ConstrainedTypeMap) (proc : Procedure) : Procedure :=
     outputs := proc.outputs.map fun p => { p with type := resolveType ptMap p.type }
     preconditions := (proc.preconditions ++ inputRequires).map resolve }
 
+/-- P-Constrained-1: elimProc injects constraint preconditions for constrained-type inputs.
+    The output preconditions are the original preconditions concatenated with constraint calls
+    for each constrained-type input, all resolved through resolveExpr. -/
+theorem elimProc_preconditions (ptMap : ConstrainedTypeMap) (proc : Procedure) :
+    (elimProc ptMap proc).preconditions =
+      (proc.preconditions ++
+        proc.inputs.filterMap fun p => constraintCallFor ptMap p.type.val p.name p.type.md
+      ).map (resolveExpr ptMap) := by
+  unfold elimProc; rfl
+
+/-- The number of preconditions after elimProc is at least the original count. -/
+theorem elimProc_preconditions_length_ge (ptMap : ConstrainedTypeMap) (proc : Procedure) :
+    (elimProc ptMap proc).preconditions.length ≥ proc.preconditions.length := by
+  rw [elimProc_preconditions]; simp [List.length_map, List.length_append]
+
+/-- constraintCallFor on a constrained type produces a StaticCall to T$constraint. -/
+theorem constraintCallFor_constrained
+    (ptMap : ConstrainedTypeMap) (name : Identifier) (varName : Identifier)
+    (md : Imperative.MetaData Core.Expression) (ct : ConstrainedType)
+    (hLookup : ptMap.contains name.text = true) :
+    constraintCallFor ptMap (.UserDefined name) varName md =
+      some ⟨.StaticCall (mkId s!"{name.text}$constraint") [⟨.Identifier varName, md⟩], md⟩ := by
+  unfold constraintCallFor; simp [hLookup]
+
+/-- constraintCallFor on a non-constrained type returns none. -/
+theorem constraintCallFor_not_constrained
+    (ptMap : ConstrainedTypeMap) (name : Identifier) (varName : Identifier)
+    (md : Imperative.MetaData Core.Expression)
+    (hNotIn : ptMap.contains name.text = false) :
+    constraintCallFor ptMap (.UserDefined name) varName md = none := by
+  unfold constraintCallFor; simp [hNotIn]
+
+/-- constraintCallFor on a primitive type returns none. -/
+theorem constraintCallFor_primitive_int (ptMap : ConstrainedTypeMap) (varName : Identifier)
+    (md : Imperative.MetaData Core.Expression) :
+    constraintCallFor ptMap .TInt varName md = none := by
+  unfold constraintCallFor; rfl
+
+/-- constraintCallFor on TBool returns none. -/
+theorem constraintCallFor_primitive_bool (ptMap : ConstrainedTypeMap) (varName : Identifier)
+    (md : Imperative.MetaData Core.Expression) :
+    constraintCallFor ptMap .TBool varName md = none := by
+  unfold constraintCallFor; rfl
+
 private def mkWitnessProc (ptMap : ConstrainedTypeMap) (ct : ConstrainedType) : Procedure :=
   let md := ct.witness.md
   let witnessId : Identifier := mkId "$witness"

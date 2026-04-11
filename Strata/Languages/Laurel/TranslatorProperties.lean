@@ -5,6 +5,7 @@
 import Strata.Languages.Laurel.LaurelToCoreTranslator
 import Strata.Languages.Laurel.TranslatorEqLemmas
 import Strata.DL.Imperative.ExceptionProperties
+import Strata.DL.Imperative.ExitProperties
 
 /-!
 # Translator Pipeline Properties
@@ -661,5 +662,101 @@ theorem throw_produces_exit_semantics
       (.stmts [setFlagStmt, .exit (.some bodyLabel) md] ρ)
       (.exiting (.some bodyLabel) ρ₁) :=
   Imperative.throw_produces_exit ρ ρ₁ setFlagStmt bodyLabel md Hset
+
+/-! ## P-Exception-2: TryCatch Translation Structure
+
+The TryCatch translation produces:
+
+```
+[block $try_end_{id} [                          -- tryBlock
+    block $handlers_{id} [bodyStmts...,          -- handlersBlock
+                          exit $try_end_{id}]
+    if isFailure($result) { $result := Success;  -- catch dispatch
+                            catchBody1...;
+                            exit $try_end_{id} }
+    ...
+  ]
+  finallyStmts...]
+```
+
+Key structural invariants (from code inspection of LaurelToCoreTranslator.lean:523-556):
+
+1. **Body receives handlers target:** The body is translated with
+   `exceptionTarget = $handlers_{id}`, so throws inside the body
+   exit to the handlers block (not the procedure body).
+
+2. **Handlers block wraps body:** The handlers block has label
+   `$handlers_{id}` and contains `[bodyStmts..., exit $try_end_{id}]`.
+
+3. **Try block wraps everything:** The try block has label
+   `$try_end_{id}` and contains `[handlersBlock, catchStmts...]`.
+
+4. **ExceptionTarget restored:** After translating the body, the
+   exceptionTarget is restored to its saved value.
+
+5. **Finally is sequential:** Finally statements follow the try block
+   in the output list, not inside it.
+
+These compose with ExitProperties as follows:
+
+- Normal body completion: body completes → `exit $try_end` fires →
+  handlers block propagates (E4, label mismatch) → try block consumes (E3).
+
+- Throw in body: throw sets `$result := Failure` and exits to
+  `$handlers_{id}` → handlers block consumes (E3) → catch dispatch runs →
+  first matching catch resets `$result := Success`, runs handler,
+  exits `$try_end` → try block consumes (E3).
+
+- Uncaught exception: throw exits to `$handlers_{id}` → handlers block
+  consumes → catch dispatch runs but no catch matches → `$result` stays
+  Failure → try block completes normally → finally runs.
+
+An equation lemma for TryCatch is not feasible with the current tactic
+infrastructure (mu can't handle flatMapM over catches). The properties
+below prove the semantic composition that the structure enables. -/
+
+/-- P-Exception-2a: Handlers block with matching exit steps to terminal.
+    When the body completes normally and exits $try_end, the handlers block
+    (labeled $handlers) propagates the exit (label mismatch). -/
+theorem trycatch_handlers_propagates_try_exit
+    {P : Imperative.PureExpr} {CmdT : Type}
+    {EvalCmd : Imperative.EvalCmdParam P CmdT}
+    {extendEval : Imperative.ExtendEval P}
+    [Imperative.HasBool P] [Imperative.HasNot P]
+    (tryLabel handlersLabel : String) (ρ₁ : Imperative.Env P)
+    (Hne : tryLabel ≠ handlersLabel) :
+    Imperative.StepStmt P EvalCmd extendEval
+      (.block handlersLabel (.exiting (.some tryLabel) ρ₁))
+      (.exiting (.some tryLabel) ρ₁) :=
+  Imperative.nonmatching_exit_propagates handlersLabel tryLabel ρ₁ Hne
+
+/-- P-Exception-2b: Try block consumes the propagated exit.
+    After the handlers block propagates the exit, the try block
+    (labeled $try_end) consumes it and steps to terminal. -/
+theorem trycatch_try_consumes_exit
+    {P : Imperative.PureExpr} {CmdT : Type}
+    {EvalCmd : Imperative.EvalCmdParam P CmdT}
+    {extendEval : Imperative.ExtendEval P}
+    [Imperative.HasBool P] [Imperative.HasNot P]
+    (tryLabel : String) (ρ₁ : Imperative.Env P) :
+    Imperative.StepStmt P EvalCmd extendEval
+      (.block tryLabel (.exiting (.some tryLabel) ρ₁))
+      (.terminal ρ₁) :=
+  Imperative.matching_block_consumes tryLabel ρ₁
+
+/-- P-Exception-2c: Handlers block consumes throw exit.
+    When a throw inside the body exits to $handlers (the exceptionTarget),
+    the handlers block consumes it and steps to terminal, allowing the
+    catch dispatch to run. -/
+theorem trycatch_handlers_consumes_throw
+    {P : Imperative.PureExpr} {CmdT : Type}
+    {EvalCmd : Imperative.EvalCmdParam P CmdT}
+    {extendEval : Imperative.ExtendEval P}
+    [Imperative.HasBool P] [Imperative.HasNot P]
+    (handlersLabel : String) (ρ₁ : Imperative.Env P) :
+    Imperative.StepStmt P EvalCmd extendEval
+      (.block handlersLabel (.exiting (.some handlersLabel) ρ₁))
+      (.terminal ρ₁) :=
+  Imperative.matching_block_consumes handlersLabel ρ₁
 
 end Strata.Laurel

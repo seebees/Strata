@@ -11,49 +11,49 @@ import Strata.Languages.Laurel.LaurelToCoreTranslator
 
 ## IM1: Name Consistency
 
-The Core procedure name used when translating an `InstanceCall` at a call site
-must equal the Core procedure name used when translating the instance procedure
-definition, given that the SemanticModel resolves the callee to the same
-`(typeName, proc)` pair stored during resolution.
+Instance procedure names are qualified early by `qualifyInstanceProcNames`
+(before the first `resolve` call). Both definitions and call sites use the
+qualified name directly (e.g. `Position~>compareTo`). The translator no
+longer constructs names — it uses `callee.text` and `proc.name.text` as-is.
 
-Both sites use `instanceProcCoreName` (see Decision 7).
+See `docs/design/cross-type-resolution/decisions.md` D2, D4.
 
 ### Call site (translateExpr / translateStmt)
 
 When `model.get callee = .instanceProcedure typeName proc`, the translator
-computes `instanceProcCoreName typeName.text callee.text`.
+uses `callee.text` directly as the Core procedure name.
 
 ### Definition site (translateLaurelToCore)
 
 For each composite type `ct` and instance procedure `proc`, the translator
-creates `{ proc with name.text := instanceProcCoreName ct.name.text proc.name.text }`.
+uses `proc.name.text` directly — the name was already qualified by
+`qualifyInstanceProcNames`.
 
 ### Why the names match
 
-Resolution stores `(.instanceProcedure ct.name proc)` in the SemanticModel,
-so `typeName = ct.name`. Resolution also preserves the procedure name:
-`callee.text = proc.name.text`. Therefore both sites compute
-`instanceProcCoreName typeName.text procName.text` with the same arguments.
+`qualifyInstanceProcNames` sets `proc.name.text := instanceProcCoreName
+ct.name.text proc.name.text`. Resolution stores this qualified name in the
+SemanticModel. At the call site, `callee.text` is the qualified name (sent
+by the frontend). Resolution maps it to the same definition. Therefore
+`callee.text = proc.name.text`.
 -/
 
 namespace Strata.Laurel
 
 /-- `instanceProcCoreName` produces the expected qualified name shape. -/
 theorem instanceProcCoreName_shape (typeName procName : String) :
-    instanceProcCoreName typeName procName = typeName ++ ".." ++ procName := by
+    instanceProcCoreName typeName procName = typeName ++ "~>" ++ procName := by
   rfl
 
 /-- P-Name-1: Instance call name consistency.
 
     The Core procedure name produced at the call site equals the Core procedure
     name produced at the definition site, given that resolution preserves the
-    procedure name (`callee.text = proc.name.text`). Both sites use
-    `instanceProcCoreName typeName.text procName.text`. -/
+    qualified name (`callee.text = proc.name.text`). -/
 theorem instance_call_name_consistency
-    (typeName : Identifier) (callee : Identifier) (proc : Procedure)
+    (_typeName : Identifier) (callee : Identifier) (proc : Procedure)
     (hName : callee.text = proc.name.text) :
-    instanceProcCoreName typeName.text callee.text =
-    instanceProcCoreName typeName.text proc.name.text := by
-  rw [hName]
+    callee.text = proc.name.text := by
+  exact hName
 
 end Strata.Laurel

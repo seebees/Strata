@@ -349,7 +349,28 @@ def resolveStmtExpr (exprMd : StmtExprMd) : ResolveM StmtExprMd := do
     pure (.IsType target' ty')
   | .InstanceCall target callee args =>
     let target' ← resolveStmtExpr target
-    let callee' ← resolveRef callee md
+    -- Try resolving the callee directly (works for qualified names from frontends).
+    -- If that fails, try qualifying with the target's type or the enclosing type.
+    let callee' ← do
+      let s ← get
+      match s.scope.get? callee.text with
+      | some _ => resolveRef callee md
+      | none =>
+        -- Callee is unqualified (e.g. from Laurel source text). Try qualifying.
+        let typeName ← do
+          -- First try the target expression's type
+          let tgt ← targetTypeName target'
+          match tgt with
+          | some t => pure (some t)
+          | none =>
+            -- Fall back to the enclosing instance type (for self~>method() calls)
+            pure (← get).instanceTypeName
+        match typeName with
+        | some t =>
+          let qualifiedName := instanceProcCoreName t callee.text
+          let qualifiedCallee := { callee with text := qualifiedName }
+          resolveRef qualifiedCallee md
+        | none => resolveRef callee md  -- let it fail with the original name
     let args' ← args.mapM resolveStmtExpr
     pure (.InstanceCall target' callee' args')
   | .Forall param trigger body =>

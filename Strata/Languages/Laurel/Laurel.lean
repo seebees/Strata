@@ -523,6 +523,6 @@ structure Program where
     Both the definition translator and call translator must use this function.
     See Decision 7 (instance-methods/decisions.md). -/
 def instanceProcCoreName (typeName : String) (procName : String) : String :=
-  typeName ++ ".." ++ procName
+  typeName ++ "~>" ++ procName
 
 end

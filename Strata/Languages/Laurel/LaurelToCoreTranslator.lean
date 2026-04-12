@@ -316,8 +316,8 @@ def translateExpr (expr : StmtExprMd)
   | .InstanceCall target callee args =>
       match model.get callee with
       | .instanceProcedure typeName _ =>
-        let coreName := instanceProcCoreName typeName.text callee.text
-        let fnOp : Core.Expression.Expr := .op () ⟨coreName, ()⟩ none
+        -- callee.text is already qualified (e.g. "Position~>compareTo")
+        let fnOp : Core.Expression.Expr := .op () ⟨callee.text, ()⟩ none
         let coreTarget ← translateExpr target boundVars isPureContext
         let withTarget : Core.Expression.Expr := .app () fnOp coreTarget
         (args.attach).foldlM (fun acc ⟨arg, _⟩ => do
@@ -404,7 +404,6 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
       | some (⟨ .InstanceCall callTarget callCallee callArgs, callMd⟩) =>
           match model.get callCallee with
           | .instanceProcedure typeName proc =>
-            let coreName := instanceProcCoreName typeName.text callCallee.text
             if proc.isFunctional then
               let coreExpr ← translateExpr (⟨ .InstanceCall callTarget callCallee callArgs, callMd ⟩)
               return [Core.Statement.init ident coreType (.det coreExpr) md]
@@ -413,7 +412,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
               let coreArgs ← callArgs.mapM (fun a => translateExpr a)
               let defaultExpr ← defaultExprForType ty
               let initStmt := Core.Statement.init ident coreType (.det defaultExpr) md
-              let callStmt := Core.Statement.call [ident] coreName (coreTarget :: coreArgs) callMd
+              let callStmt := Core.Statement.call [ident] callCallee.text (coreTarget :: coreArgs) callMd
               return [initStmt, callStmt]
           | _ =>
             let initStmt := Core.Statement.init ident coreType .nondet md
@@ -458,7 +457,6 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
           | .InstanceCall callTarget callCallee callArgs =>
               match model.get callCallee with
               | .instanceProcedure typeName proc =>
-                let coreName := instanceProcCoreName typeName.text callCallee.text
                 let coreTarget ← translateExpr callTarget
                 let coreArgs ← callArgs.mapM (fun a => translateExpr a)
                 let mut inits : List Core.Statement := []
@@ -469,7 +467,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                   let coreType := LTy.forAll [] (← translateType out.type)
                   inits := inits ++ [Core.Statement.init unusedIdent coreType .nondet md]
                   lhs := lhs ++ [unusedIdent]
-                return inits ++ [Core.Statement.call lhs coreName (coreTarget :: coreArgs) md]
+                return inits ++ [Core.Statement.call lhs callCallee.text (coreTarget :: coreArgs) md]
               | _ => return [Core.Statement.havoc ident md]
           | _ =>
               let coreExpr ← translateExpr value
@@ -488,14 +486,13 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
           | .InstanceCall callTarget callCallee callArgs =>
               match model.get callCallee with
               | .instanceProcedure typeName _ =>
-                let coreName := instanceProcCoreName typeName.text callCallee.text
                 let coreTarget ← translateExpr callTarget
                 let coreArgs ← callArgs.mapM (fun a => translateExpr a)
                 let lhsIdents := targets.filterMap fun t =>
                   match t.val with
                   | .Identifier name => some (⟨name.text, ()⟩)
                   | _ => none
-                return [Core.Statement.call lhsIdents coreName (coreTarget :: coreArgs) value.md]
+                return [Core.Statement.call lhsIdents callCallee.text (coreTarget :: coreArgs) value.md]
               | _ =>
                 let havocStmts := targets.filterMap fun t =>
                   match t.val with
@@ -537,7 +534,6 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
   | .InstanceCall target callee args =>
       match model.get callee with
       | .instanceProcedure typeName proc =>
-        let coreName := instanceProcCoreName typeName.text callee.text
         let coreTarget ← translateExpr target
         let coreArgs ← args.mapM (fun a => translateExpr a)
         let mut inits : List Core.Statement := []
@@ -548,7 +544,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
           let coreType := LTy.forAll [] (← translateType out.type)
           inits := inits ++ [Core.Statement.init ident coreType .nondet md]
           lhs := lhs ++ [ident]
-        return inits ++ [Core.Statement.call lhs coreName (coreTarget :: coreArgs) md]
+        return inits ++ [Core.Statement.call lhs callee.text (coreTarget :: coreArgs) md]
       | _ =>
         emitDiagnostic $ md.toDiagnostic "instance call: callee not resolved as instance procedure" DiagnosticType.NotYetImplemented
         return []
@@ -1044,6 +1040,23 @@ abbrev TranslateResult := (Option Core.Program) × (List DiagnosticModel)
 abbrev TranslateResultWithLaurel := (Option Core.Program) × (List DiagnosticModel) × Program
 
 /--
+Qualify instance procedure names with their owner composite type.
+`compareTo` on Position becomes `Position~>compareTo`.
+Must run before the first `resolve` call so that the resolution pass
+registers each instance procedure under its unique qualified name.
+See `docs/design/cross-type-resolution/decisions.md` D4.
+-/
+def qualifyInstanceProcNames (program : Program) : Program :=
+  { program with types := program.types.map fun td =>
+    match td with
+    | .Composite ct =>
+      .Composite { ct with instanceProcedures :=
+        ct.instanceProcedures.map fun proc =>
+          { proc with name := { proc.name with
+            text := instanceProcCoreName ct.name.text proc.name.text } } }
+    | other => other }
+
+/--
 Translate Laurel Program to Core Program, also returning the lowered Laurel program.
 -/
 def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): TranslateResultWithLaurel :=
@@ -1051,6 +1064,10 @@ def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): T
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
     types := coreDefinitionsForLaurel.types ++ program.types
   }
+
+  -- Qualify instance procedure names before resolution so that
+  -- each type's methods have unique scope entries (no shadowing).
+  let program := qualifyInstanceProcNames program
 
   -- dbg_trace "=== Initial Laurel program ==="
   -- dbg_trace (toString (Std.Format.pretty (Std.ToFormat.format program)))
@@ -1154,14 +1171,12 @@ def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): T
       } mdWithUnknownLoc
 
     -- Translate instance procedures from composite types.
-    -- Each instance procedure is translated with a qualified name (TypeName..procName).
+    -- Names are already qualified by qualifyInstanceProcNames (e.g. Position~>compareTo).
     let instanceProcDecls ← program.types.flatMapM fun td => do
       match td with
       | .Composite ct =>
         ct.instanceProcedures.mapM fun proc => do
-          let qualifiedProc := { proc with
-            name := { proc.name with text := instanceProcCoreName ct.name.text proc.name.text } }
-          let procDecl ← translateProcedure qualifiedProc
+          let procDecl ← translateProcedure proc
           return Core.Decl.proc procDecl proc.md
       | _ => return []
 

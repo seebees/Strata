@@ -94,6 +94,7 @@ def translateType (ty : HighTypeMd) : TranslateM LMonoTy := do
   | .TTypedField _ => return .tcons "Field" []
   | .TSet elementType => return Core.mapTy (← translateType elementType) LMonoTy.bool
   | .TMap keyType valueType => return Core.mapTy (← translateType keyType) (← translateType valueType)
+  | .TSequence elementType => return Core.seqTy (← translateType elementType)
   | .UserDefined name =>
     match name.uniqueId.bind model.refToDef.get? with
     | some (.compositeType _) => return .tcons "Composite" []
@@ -333,7 +334,11 @@ def translateExpr (expr : StmtExprMd)
 
   | .AsType target _ => throwExprDiagnostic $ md.toDiagnostic "AsType expression translation" DiagnosticType.NotYetImplemented
   | .Assigned _ => throwExprDiagnostic $ md.toDiagnostic "assigned expression translation" DiagnosticType.NotYetImplemented
-  | .Old value => throwExprDiagnostic $ md.toDiagnostic "old expression translation" DiagnosticType.NotYetImplemented
+  | .Old value =>
+      -- old(expr) in postconditions references the pre-state.
+      -- Heap parameterization already substituted $heap → $heap_in inside Old.
+      -- For parameters: they're immutable, so old(x) == x.
+      translateExpr value boundVars isPureContext
   | .Fresh _ => throwExprDiagnostic $ md.toDiagnostic "fresh expression translation" DiagnosticType.NotYetImplemented
   | .Assert _ => throwExprDiagnostic $ md.toDiagnostic "assert expression translation" DiagnosticType.NotYetImplemented
   | .Assume _ => throwExprDiagnostic $ md.toDiagnostic "assume expression translation" DiagnosticType.NotYetImplemented

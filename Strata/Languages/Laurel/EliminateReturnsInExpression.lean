@@ -113,7 +113,12 @@ public section
 Transform a program by eliminating returns in all functional procedure bodies.
 -/
 def eliminateReturnsInExpressionTransform (program : Program) : Program :=
-  { program with staticProcedures := program.staticProcedures.map eliminateReturnsInExpression }
+  { program with
+    staticProcedures := program.staticProcedures.map eliminateReturnsInExpression
+    types := program.types.map fun td => match td with
+      | .Composite ct => .Composite { ct with
+          instanceProcedures := ct.instanceProcedures.map eliminateReturnsInExpression }
+      | other => other }
 
 end -- public section
 

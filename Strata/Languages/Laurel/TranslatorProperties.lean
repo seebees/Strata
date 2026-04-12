@@ -1007,4 +1007,37 @@ each other — a pass that has "nothing to do" leaves the program alone.
   (the end-to-end `constrainedTypeElim_noop` covers this case)
 -/
 
+-- P-Name-3: Instance call expression translation rejects non-functional callees.
+-- When `translateExpr` handles an `InstanceCall` where the callee resolves to
+-- a non-functional instance procedure, the translation emits a diagnostic.
+-- Non-functional procedures are not registered in `C.functions` and would cause
+-- a Core type-checking error. The `LiftImperativeExpressions` pass should have
+-- lifted these calls to statement position before `translateExpr` sees them.
+-- This catches the bug where `sum() + sum()` in expression position generates
+-- an unresolvable `.op` for a heap-reading (non-functional) procedure.
+
+end Strata.Laurel
+
+set_option maxRecDepth 8192
+
+namespace Strata.Laurel
+
+theorem translateExpr_instanceCall_nonFunctional_emits_diagnostic
+    (target : StmtExprMd) (callee : Identifier) (args : List StmtExprMd)
+    (md : Imperative.MetaData Core.Expression)
+    (typeName : Identifier) (proc : Procedure)
+    (bv : List Identifier) (pc : Bool) (s : TranslateState)
+    (hModel : s.model.get callee = .instanceProcedure typeName proc)
+    (hNotFunctional : proc.isFunctional = false) :
+    (translateExpr ⟨.InstanceCall target callee args, md⟩ bv pc s).2.coreProgramHasSuperfluousErrors = true := by
+  unfold translateExpr
+  simp only [hModel, hNotFunctional, Bool.false_eq_true, ↓reduceIte, throwExprDiagnostic,
+    emitDiagnostic, pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift,
+    modify, MonadState.set, StateT.set, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet]
+  split
+  next => split <;> rfl
+
 end Strata.Laurel

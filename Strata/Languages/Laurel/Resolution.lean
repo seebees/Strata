@@ -468,6 +468,16 @@ def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
   withScope do
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
+    -- Add $result, Success, and Failure to scope so ensures clauses can reference them.
+    -- The frontend generates postconditionOnReturn/postconditionOnThrow/guard as
+    -- ensures clauses that reference $result == Success or $result == Failure.
+    let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
+    let _ ← defineName { text := "$result" } resultParam
+    let exResultType : Identifier := { text := "ExceptionResult" }
+    let successCtor : DatatypeConstructor := { name := { text := "Success" }, args := [] }
+    let failureCtor : DatatypeConstructor := { name := { text := "Failure" }, args := [] }
+    let _ ← defineName { text := "Success" } (.datatypeConstructor exResultType successCtor)
+    let _ ← defineName { text := "Failure" } (.datatypeConstructor exResultType failureCtor)
     let pres' ← proc.preconditions.mapM resolveStmtExpr
     let dec' ← proc.decreases.mapM resolveStmtExpr
     let body' ← resolveBody proc.body
@@ -493,6 +503,14 @@ def resolveInstanceProcedure (typeName : Identifier) (proc : Procedure) : Resolv
     modify fun s => { s with instanceTypeName := some typeName.text }
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
+    -- Add $result, Success, and Failure to scope for ensures clauses.
+    let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
+    let _ ← defineName { text := "$result" } resultParam
+    let exResultType : Identifier := { text := "ExceptionResult" }
+    let successCtor : DatatypeConstructor := { name := { text := "Success" }, args := [] }
+    let failureCtor : DatatypeConstructor := { name := { text := "Failure" }, args := [] }
+    let _ ← defineName { text := "Success" } (.datatypeConstructor exResultType successCtor)
+    let _ ← defineName { text := "Failure" } (.datatypeConstructor exResultType failureCtor)
     let pres' ← proc.preconditions.mapM resolveStmtExpr
     let dec' ← proc.decreases.mapM resolveStmtExpr
     let body' ← resolveBody proc.body

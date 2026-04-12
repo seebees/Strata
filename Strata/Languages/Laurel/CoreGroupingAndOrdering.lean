@@ -149,7 +149,13 @@ public def computeSccDecls (program : Program) : List (List Procedure × Bool) :
   let (withInvokeOn, withoutInvokeOn) :=
     (program.staticProcedures.filter (fun p => !p.body.isExternal))
     |>.partition (fun p => p.invokeOn.isSome)
-  let nonExternal : List Procedure := withInvokeOn ++ withoutInvokeOn
+  -- Include instance procedures from composite types so they go through
+  -- the same functional/non-functional routing as static procedures.
+  let instanceProcs := program.types.foldl (fun acc td =>
+    match td with
+    | .Composite ct => acc ++ ct.instanceProcedures
+    | _ => acc) []
+  let nonExternal : List Procedure := instanceProcs ++ withInvokeOn ++ withoutInvokeOn
 
   -- Build a call-graph over all non-external procedures.
   -- An edge proc → callee means proc's body/contracts contain a StaticCall to callee.

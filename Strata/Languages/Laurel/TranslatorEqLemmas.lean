@@ -198,11 +198,9 @@ theorem translateExpr_eq_staticCall_twoArgs (callee : Identifier)
   rw [translateExpr.eq_def]; mu; simp only [hNotPure]
   simp (config := { decide := true }); mu; rw [h1]; mu; rw [h2]; mu; rfl
 
-/-! ## translateExpr: InstanceCall — NOT YET IMPLEMENTED in translator
+/-! ## translateExpr: InstanceCall -/
 
-InstanceCall in translateExpr calls throwExprDiagnostic (returns none).
-The old properties claiming success were stale. These are removed.
-When InstanceCall support is added to translateExpr, add equation lemmas here. -/
+set_option maxRecDepth 4096
 
 /-! ## translateStmt: Throw — NOT HANDLED as direct case
 

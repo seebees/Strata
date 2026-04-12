@@ -526,7 +526,8 @@ where
            -- First assign $heap_in to $heap, then transform body using $heap
           let assignHeap := heapMkMd (.Assign [heapMkMd (.Identifier heapName)] (heapMkMd (.Identifier heapInName)))
           let bodyExpr' ← heapTransformExpr heapName model bodyExpr bodyValueIsUsed
-          pure (.Transparent (heapMkMd (.Block [assignHeap, bodyExpr'] none)) posts)
+          let posts' ← posts.mapM (heapTransformExpr heapName model ·)
+          pure (.Transparent (heapMkMd (.Block [assignHeap, bodyExpr'] none)) posts')
       | .Opaque postconds impl modif =>
           -- Postconditions use $heap (the output state)
           let postconds' ← postconds.mapM (heapTransformExpr heapName model ·)
@@ -559,7 +560,8 @@ where
     let body' ← match proc.body with
       | .Transparent bodyExpr posts =>
           let bodyExpr' ← heapTransformExpr heapName model bodyExpr
-          pure (.Transparent bodyExpr' posts)
+          let posts' ← posts.mapM (heapTransformExpr heapName model ·)
+          pure (.Transparent bodyExpr' posts')
       | .Opaque postconds impl modif =>
           let postconds' ← postconds.mapM (heapTransformExpr heapName model ·)
           let impl' ← impl.mapM (heapTransformExpr heapName model ·)

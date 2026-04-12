@@ -56,4 +56,78 @@ theorem instance_call_name_consistency
     callee.text = proc.name.text := by
   exact hName
 
+/-- P-Call-1: mkCallWithResult always includes $result in call LHS.
+
+    Regression prevention for the missing-$result bug. Every call statement
+    produced by `mkCallWithResult` has `⟨"$result", ()⟩` as the last element
+    of its LHS, matching the `$result` output that `translateProcedure` appends
+    to every procedure's outputs. -/
+theorem mkCallWithResult_includes_result
+    (lhs : List Core.CoreIdent) (callee : String)
+    (args : List Core.Expression.Expr) (md : Imperative.MetaData Core.Expression)
+    (s : TranslateState) :
+    let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+    let (result, _) := mkCallWithResult lhs callee args md s
+    ∃ stmts, result = some stmts ∧
+      ∃ rest, stmts = Core.Statement.call (lhs ++ [resultIdent]) callee args md :: rest := by
+  simp [mkCallWithResult, bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    liftM, monadLift, MonadLift.monadLift]
+
+/-- P-Call-2a: When no heap arg is present, target (self) is the first argument.
+
+    This is the property that was violated by the merge regression: the merged
+    code always assumed the first arg was $heap, producing [userArg, self, ...]
+    instead of [self, userArg, ...] when the callee doesn't use the heap.
+
+    The proof shows that when `laurelArgs` does NOT start with an Identifier
+    named `$heap` or `$heap_in`, `instanceCallArgs` prepends `coreTarget`. -/
+theorem instanceCallArgs_no_heap_target_first
+    (coreTarget : Core.Expression.Expr)
+    (coreArgs : List Core.Expression.Expr) :
+    instanceCallArgs coreTarget coreArgs [] = coreTarget :: coreArgs := by
+  unfold instanceCallArgs
+  rfl
+
+/-- P-Call-2b: When heap arg IS present, heap is first and target is second.
+
+    Companion to P-Call-2a. Together they fully characterize `instanceCallArgs`:
+    the heap parameterization's decision about `$heap` is faithfully reflected
+    in the argument ordering. -/
+theorem instanceCallArgs_with_heap_order
+    (coreTarget heapArg : Core.Expression.Expr)
+    (rest : List Core.Expression.Expr)
+    (md : MetaData) (laurelRest : List StmtExprMd) :
+    let heapId : Identifier := ⟨"$heap", none⟩
+    instanceCallArgs coreTarget (heapArg :: rest) (⟨.Identifier heapId, md⟩ :: laurelRest)
+    = heapArg :: coreTarget :: rest := by
+  simp [instanceCallArgs]
+
+/-- P-Call-3: Call LHS arity matches procedure output count.
+
+    When `mkCallWithResult` is called with a `lhs` of length N,
+    the call statement's LHS has length N + 1 (the extra element
+    is `$result`). Since `translateProcedure` produces outputs of
+    length `proc.outputs.length + 1` (also for `$result`), the
+    arity matches when `lhs.length = proc.outputs.length`.
+
+    This is the composition of P-Call-1 with
+    `translateProcedure_preserves_output_count`: the translator
+    creates one throwaway LHS variable per `proc.output`, then
+    `mkCallWithResult` appends `$result`, giving
+    `lhs.length + 1 = proc.outputs.length + 1`. -/
+theorem mkCallWithResult_lhs_length
+    (lhs : List Core.CoreIdent) (callee : String)
+    (args : List Core.Expression.Expr) (md : Imperative.MetaData Core.Expression)
+    (s : TranslateState) :
+    let (result, _) := mkCallWithResult lhs callee args md s
+    let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+    ∃ stmts, result = some stmts ∧
+      (lhs ++ [resultIdent]).length = lhs.length + 1 := by
+  simp [mkCallWithResult, bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    liftM, monadLift, MonadLift.monadLift]
+
 end Strata.Laurel

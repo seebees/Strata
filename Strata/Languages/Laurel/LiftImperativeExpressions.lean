@@ -168,6 +168,12 @@ def containsAssignmentOrImperativeCall (model: SemanticModel) (expr : StmtExprMd
     | .staticProcedure proc => !proc.isFunctional
     | _ => false) ||
       args1.attach.any (fun x => containsAssignmentOrImperativeCall model x.val)
+  | .InstanceCall target callee args1 =>
+    (match model.get callee with
+    | .instanceProcedure _ proc => !proc.isFunctional
+    | _ => false) ||
+      containsAssignmentOrImperativeCall model target ||
+      args1.attach.any (fun x => containsAssignmentOrImperativeCall model x.val)
   | .PrimitiveOp _ args2 => args2.attach.any (fun x => containsAssignmentOrImperativeCall model x.val)
   | .Block stmts _ => stmts.attach.any (fun x => containsAssignmentOrImperativeCall model x.val)
   | .IfThenElse cond th el =>
@@ -276,6 +282,27 @@ def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
       ]
       modify fun s => { s with prependedStmts := s.prependedStmts ++ liftedCall}
       return bare (.Identifier callResultVar)
+
+  | .InstanceCall target callee args =>
+    let model := (← get).model
+    let seqTarget ← transformExpr target
+    let seqArgs ← args.reverse.mapM transformExpr
+    let seqCall := ⟨.InstanceCall seqTarget callee seqArgs.reverse, md⟩
+    match model.get callee with
+    | .instanceProcedure _ proc =>
+      if proc.isFunctional then
+        return seqCall
+      else
+        -- Non-functional instance call in expression position: lift
+        let callResultVar ← freshCondVar
+        let callResultType ← computeType expr
+        let liftedCall := [
+          ⟨ (.LocalVariable callResultVar callResultType none), md ⟩,
+          ⟨.Assign [bare (.Identifier callResultVar)] seqCall, md⟩
+        ]
+        modify fun s => { s with prependedStmts := s.prependedStmts ++ liftedCall}
+        return bare (.Identifier callResultVar)
+    | _ => return seqCall
 
   | .IfThenElse cond thenBranch elseBranch =>
       let model :=  (← get).model
@@ -401,6 +428,27 @@ def transformStmt (stmt : StmtExprMd) : LiftM (List StmtExprMd) := do
                 let argPrepends ← takePrepends
                 modify fun s => { s with subst := [] }
                 return argPrepends ++ [⟨.LocalVariable name ty (some ⟨.StaticCall callee seqArgs, initExprMd.md⟩), md⟩]
+          | .InstanceCall target callee args =>
+              let model := (← get).model
+              match model.get callee with
+              | .instanceProcedure _ proc =>
+                if proc.isFunctional then
+                  let seqInit ← transformExpr initExprMd
+                  let prepends ← takePrepends
+                  modify fun s => { s with subst := [] }
+                  return prepends ++ [⟨.LocalVariable name ty (some seqInit), md⟩]
+                else
+                  -- Pass through as-is; translateStmt will emit init + call
+                  let seqTarget ← transformExpr target
+                  let seqArgs ← args.mapM transformExpr
+                  let argPrepends ← takePrepends
+                  modify fun s => { s with subst := [] }
+                  return argPrepends ++ [⟨.LocalVariable name ty (some ⟨.InstanceCall seqTarget callee seqArgs, initExprMd.md⟩), md⟩]
+              | _ =>
+                  let seqInit ← transformExpr initExprMd
+                  let prepends ← takePrepends
+                  modify fun s => { s with subst := [] }
+                  return prepends ++ [⟨.LocalVariable name ty (some seqInit), md⟩]
           | _ =>
               let seqInit ← transformExpr initExprMd
               let prepends ← takePrepends
@@ -427,6 +475,26 @@ def transformStmt (stmt : StmtExprMd) : LiftM (List StmtExprMd) := do
             let argPrepends ← takePrepends
             modify fun s => { s with subst := [] }
             return argPrepends ++ [⟨.Assign targets ⟨.StaticCall callee seqArgs, md⟩, md⟩]
+      | .InstanceCall target callee args =>
+          let model := (← get).model
+          match model.get callee with
+          | .instanceProcedure _ proc =>
+            if proc.isFunctional then
+              let seqValue ← transformExpr valueMd
+              let prepends ← takePrepends
+              modify fun s => { s with subst := [] }
+              return prepends ++ [⟨.Assign targets seqValue, md⟩]
+            else
+              let seqTarget ← transformExpr target
+              let seqArgs ← args.mapM transformExpr
+              let argPrepends ← takePrepends
+              modify fun s => { s with subst := [] }
+              return argPrepends ++ [⟨.Assign targets ⟨.InstanceCall seqTarget callee seqArgs, md⟩, md⟩]
+          | _ =>
+              let seqValue ← transformExpr valueMd
+              let prepends ← takePrepends
+              modify fun s => { s with subst := [] }
+              return prepends ++ [⟨.Assign targets seqValue, md⟩]
       | _ =>
           let seqValue ← transformExpr valueMd
           let prepends ← takePrepends
@@ -467,6 +535,12 @@ def transformStmt (stmt : StmtExprMd) : LiftM (List StmtExprMd) := do
       let prepends ← takePrepends
       return prepends ++ [⟨.StaticCall name seqArgs, md⟩]
 
+  | .InstanceCall target callee args =>
+      let seqTarget ← transformExpr target
+      let seqArgs ← args.mapM transformExpr
+      let prepends ← takePrepends
+      return prepends ++ [⟨.InstanceCall seqTarget callee seqArgs, md⟩]
+
   | .Return (some retExpr) =>
       let seqRet ← transformExpr retExpr
       let prepends ← takePrepends
@@ -506,8 +580,15 @@ Transform a program to lift all assignments that occur in an expression context.
 -/
 def liftExpressionAssignments (model: SemanticModel) (program : Program) : Program :=
   let initState : LiftState := { model := model }
-  let (seqProcedures, _) := (program.staticProcedures.mapM transformProcedure).run initState
-  { program with staticProcedures := seqProcedures }
+  let (seqProcedures, s1) := (program.staticProcedures.mapM transformProcedure).run initState
+  -- Also transform instance procedures inside composite types
+  let (seqTypes, _) := (program.types.mapM fun td => do
+    match td with
+    | TypeDefinition.Composite ct =>
+      let seqInstProcs ← ct.instanceProcedures.mapM transformProcedure
+      pure (TypeDefinition.Composite { ct with instanceProcedures := seqInstProcs })
+    | other => pure other).run s1
+  { program with staticProcedures := seqProcedures, types := seqTypes }
 
 end -- public section
 end Laurel

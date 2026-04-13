@@ -120,6 +120,34 @@ not empty metadata. This prevents `1:1-1:1` diagnostics.
 The `outputEnsures` code already has this fallback. The `inputRequires`
 code should have the same fallback (see D5 in constrained-types-in-heap).
 
+## D4: Diagnostic responsibility boundary
+
+Strata does not know about `postcondition`, `postconditionOnReturn`, or
+`postconditionOnThrow`. By the time Strata sees the program, everything
+is Laurel `ensures` clauses with metadata.
+
+**JVerify's responsibility:**
+- Desugar `postcondition(r -> P(r))` into two ensures clauses
+- Attach source metadata (the `postcondition(...)` line) to both clauses
+- Optionally attach `propertySummary` metadata to customize the error
+  message (e.g., "postcondition no-throw guarantee" on the
+  `isFailure ==> false` clause)
+
+**Strata's responsibility:**
+- Translate ensures clauses faithfully to Core postconditions
+- Report verification failures using the metadata attached to each clause
+- Use `getPropertySummary` from metadata for the error description
+
+This design works naturally when the user writes both lines explicitly:
+`postconditionOnReturn(r -> P(r))` + `postconditionOnThrow(false)`.
+JVerify emits the same two ensures clauses, each with metadata pointing
+to its own source line. The diagnostics point to the right place because
+the user wrote both lines.
+
+The desugaring of `postcondition(r -> P(r))` just means both ensures
+clauses share the same source location. The error message distinguishes
+them via `propertySummary`.
+
 ## Open Questions
 
 ### OQ1: Asynchronous exceptions in Java

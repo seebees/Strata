@@ -192,6 +192,8 @@ private def outputEnsuresOf (ptMap : ConstrainedTypeMap) (proc : Procedure) : Li
     (constraintCallFor ptMap p.type.val p.name p.type.md).map
       fun c =>
         let md := if (Imperative.getFileRange p.type.md).isSome then p.type.md else proc.md
+        -- Guard with isSuccess($result): uses the $result identifier which the
+        -- translator maps to the unified result variable.
         let resultId := mkId "$result"
         let successId := mkId "Success"
         let isSuccess : StmtExprMd := ⟨.PrimitiveOp .Eq [⟨.Identifier resultId, md⟩, ⟨.Identifier successId, md⟩], md⟩

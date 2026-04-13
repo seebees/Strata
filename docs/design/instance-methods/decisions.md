@@ -469,13 +469,32 @@ clear. For example, `::` for instance methods (C++ convention),
 ### Decision: Option B
 
 Destructors keep `..` — it's their original syntax in Core, it
-works, and there's no reason to change it. Instance methods use
-`~>` in their Core names, matching the Laurel source syntax.
+works, and there's no reason to change it. All methods — both
+instance and static — use `~>` in their qualified names. The
+separator distinguishes methods (things you call) from
+destructors (structural access on value types).
 
 When you see `Counter~>increment` anywhere in the pipeline, you
-know it's an instance method call on a composite. When you see
-`Color..isRed`, you know it's a destructor on a datatype. The
-separator carries the semantic distinction.
+know it's a method call. When you see `Color..isRed`, you know
+it's a destructor on a datatype. The separator carries the
+semantic distinction.
+
+### Naming convention summary
+
+| Kind | Separator | Example | Meaning |
+|------|-----------|---------|---------|
+| Instance method | `~>` | `Position~>compareTo` | Method call on composite |
+| Static method | `~>` | `StrataBasic~>add` | Static method on class |
+| Instance function | `~>` | `Position~>equals` | Pure function on composite |
+| Datatype destructor | `..` | `Color..isRed` | Structural test/access on value type |
+
+The `~>` separator means "method belonging to a type." The `..`
+separator means "structural access on a datatype." Both instance
+and static methods use `~>` because they are both methods — the
+distinction between instance and static is orthogonal to the
+naming convention. Instance methods have a `self` parameter;
+static methods don't. But both belong to a type and need
+qualification to prevent name collisions across types.
 
 ### Changes required
 

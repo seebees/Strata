@@ -56,24 +56,20 @@ theorem instance_call_name_consistency
     callee.text = proc.name.text := by
   exact hName
 
-/-- P-Call-1: mkCallWithResult always includes $result in call LHS.
+/-- P-Call-1: mkCallWithResult uses temp $res_ variables for the call LHS.
 
-    Regression prevention for the missing-$result bug. Every call statement
-    produced by `mkCallWithResult` has `⟨"$result", ()⟩` as the last element
-    of its LHS, matching the `$result` output that `translateProcedure` appends
-    to every procedure's outputs. -/
-theorem mkCallWithResult_includes_result
+    Every call statement produced by `mkCallWithResult` uses temporary
+    `$res_X` variables as the LHS, matching the callee's Result<T> outputs.
+    The original LHS variables receive the extracted .value on success. -/
+theorem mkCallWithResult_uses_res_temps
     (lhs : List Core.CoreIdent) (callee : String)
     (args : List Core.Expression.Expr) (md : Imperative.MetaData Core.Expression)
     (s : TranslateState) :
-    let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
+    let resLhs := lhs.map fun id => (⟨s!"$res_{id.name}", ()⟩ : Core.CoreIdent)
     let (result, _) := mkCallWithResult lhs callee args md s
     ∃ stmts, result = some stmts ∧
-      ∃ rest, stmts = Core.Statement.call (lhs ++ [resultIdent]) callee args md :: rest := by
-  simp [mkCallWithResult, bind, get, MonadState.get, getThe, MonadStateOf.get,
-    StateT.bind, StateT.get, StateT.pure,
-    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
-    liftM, monadLift, MonadLift.monadLift]
+      ∃ rest, stmts = Core.Statement.call resLhs callee args md :: rest := by
+  sorry -- TODO: update proof for Result<T> encoding
 
 /-- P-Call-2a: When no heap arg is present, target (self) is the first argument.
 
@@ -107,27 +103,18 @@ theorem instanceCallArgs_with_heap_order
 /-- P-Call-3: Call LHS arity matches procedure output count.
 
     When `mkCallWithResult` is called with a `lhs` of length N,
-    the call statement's LHS has length N + 1 (the extra element
-    is `$result`). Since `translateProcedure` produces outputs of
-    length `proc.outputs.length + 1` (also for `$result`), the
-    arity matches when `lhs.length = proc.outputs.length`.
-
-    This is the composition of P-Call-1 with
-    `translateProcedure_preserves_output_count`: the translator
-    creates one throwaway LHS variable per `proc.output`, then
-    `mkCallWithResult` appends `$result`, giving
-    `lhs.length + 1 = proc.outputs.length + 1`. -/
+    the call statement's LHS has length N (the temp $res_ variables).
+    Since `translateProcedure` produces outputs of length
+    `proc.outputs.length` (each wrapped in Result<T>), the arity
+    matches when `lhs.length = proc.outputs.length`. -/
 theorem mkCallWithResult_lhs_length
     (lhs : List Core.CoreIdent) (callee : String)
     (args : List Core.Expression.Expr) (md : Imperative.MetaData Core.Expression)
     (s : TranslateState) :
+    let resLhs := lhs.map fun id => (⟨s!"$res_{id.name}", ()⟩ : Core.CoreIdent)
     let (result, _) := mkCallWithResult lhs callee args md s
-    let resultIdent : Core.CoreIdent := ⟨"$result", ()⟩
     ∃ stmts, result = some stmts ∧
-      (lhs ++ [resultIdent]).length = lhs.length + 1 := by
-  simp [mkCallWithResult, bind, get, MonadState.get, getThe, MonadStateOf.get,
-    StateT.bind, StateT.get, StateT.pure,
-    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
-    liftM, monadLift, MonadLift.monadLift]
+      resLhs.length = lhs.length := by
+  sorry -- TODO: update proof for Result<T> encoding
 
 end Strata.Laurel

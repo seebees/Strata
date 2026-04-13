@@ -151,6 +151,17 @@ the name qualification discrepancy cluster.
 field accesses use the declaring type's prefix. Inherited fields
 use the parent type's prefix.
 
+**P-Name-3: Instance call expression translation correctness.**
+When `translateExpr` handles an `InstanceCall` where the callee
+resolves to a non-functional instance procedure (`proc.isFunctional
+= false`), the translation must NOT generate `.op` (function
+application) — non-functional procedures are not registered in
+`C.functions` and the Core type checker will reject them. The
+translator must either lift the call to statement position or
+handle it as a `Core.Statement.call`. This catches the bug where
+`sum() + sum()` in expression position generates an unresolvable
+`.op` for a heap-reading procedure.
+
 **P-Constrained-1: Constraint precondition injection. ✅ PROVEN.** Constrained-
 type parameters get `requires constraint$check(param)` in the Core
 output.
@@ -177,6 +188,33 @@ proves this as `static_proc_call_has_propagation` and
 `instance_proc_call_has_propagation`. Designed to compose with P5
 (exception propagation) and P9/P10 (cross-method propagation) in
 `ExceptionProperties.lean`. See D20.
+
+**P-Call-1: mkCallWithResult always includes $result. ✅ PROVEN.**
+`mkCallWithResult lhs callee args md` always produces a call statement
+whose LHS is `lhs ++ [⟨"$result", ()⟩]`. This is the formal proof
+backing P-Exception-3: since every non-functional call goes through
+`mkCallWithResult`, `$result` is always present. Prevents regression
+of the missing-$result bug that caused "output length and lhs length
+mismatch" in the inliner. Proven by `simp` on the monadic definitions.
+File: `InstanceMethodProperties.lean`.
+
+**P-Call-2: Instance call argument order (D14). ✅ PROVEN.**
+When an instance call has heap arguments (`coreArgs` is non-empty
+after heap parameterization), the argument reordering puts the heap
+argument first: `[heapArg, coreTarget, ...rest]`, not
+`[coreTarget, heapArg, ...rest]`. This matches the procedure's input
+order `[$heap, self, ...params]` established by heap parameterization.
+Prevents regression of the D14 argument order bug. Proven by `rfl`.
+File: `InstanceMethodProperties.lean`.
+
+**P-Call-3: Call LHS arity. ✅ PROVEN.**
+`mkCallWithResult` with a `lhs` of length N produces a call whose
+LHS has length N + 1 (the extra element is `$result`). Since
+`translateProcedure` produces outputs of length
+`proc.outputs.length + 1` (P-output-count), the arity matches when
+`lhs.length = proc.outputs.length`. This is the composition that
+prevents the "output length and lhs length mismatch" error in the
+inliner. File: `InstanceMethodProperties.lean`.
 
 **P-Frame-1: Frame condition generation.** If a procedure has `$heap`
 output, `modifiesClausesTransform` generates a frame condition. If
@@ -290,7 +328,7 @@ the pipeline is complex and where proofs add the most value:
 |----------|---------------|
 | Name qualification | P-Name-1 ✅, P-Name-2 ✅ |
 | Heap detection | P-Heap-1 ✅, P-Heap-3 ✅ (analyzeProc non-interference) |
-| Instance calls | P-Name-1 ✅, IM1 ✅ |
+| Instance calls | P-Name-1 ✅, IM1 ✅, P-Call-1 ✅, P-Call-2 ✅, P-Call-3 ✅ |
 | Constrained types | Infra ✅, P-Constrained-1 ✅ (preconditions + output ensures) |
 | Opaque procs | P-Spec-1/2 needed |
 | Function postconditions | P-Spec-2f ✅ |

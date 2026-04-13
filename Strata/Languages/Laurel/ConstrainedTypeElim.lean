@@ -184,14 +184,23 @@ decreasing_by
   all_goals (try term_by_mem)
   all_goals omega
 
+/-- Helper: the outputEnsures computed by elimProc.
+    Guards each constraint with isSuccess($result) since return-value constraints
+    are only meaningful on the success path (see postcondition-semantics/decisions.md D2). -/
+private def outputEnsuresOf (ptMap : ConstrainedTypeMap) (proc : Procedure) : List StmtExprMd :=
+  proc.outputs.filterMap fun p =>
+    (constraintCallFor ptMap p.type.val p.name p.type.md).map
+      fun c =>
+        let md := if (Imperative.getFileRange p.type.md).isSome then p.type.md else proc.md
+        let resultId := mkId "$result"
+        let successId := mkId "Success"
+        let isSuccess : StmtExprMd := ⟨.PrimitiveOp .Eq [⟨.Identifier resultId, md⟩, ⟨.Identifier successId, md⟩], md⟩
+        ⟨.PrimitiveOp .Implies [isSuccess, c], md⟩
+
 def elimProc (ptMap : ConstrainedTypeMap) (proc : Procedure) : Procedure :=
   let inputRequires := proc.inputs.filterMap fun p =>
     constraintCallFor ptMap p.type.val p.name p.type.md
-  let outputEnsures := proc.outputs.filterMap fun p =>
-    (constraintCallFor ptMap p.type.val p.name p.type.md).map
-      -- Use the parameter type's metadata if it has a file range; otherwise fall back
-      -- to the procedure's metadata for valid diagnostic source locations.
-      fun c => ⟨c.val, if (Imperative.getFileRange p.type.md).isSome then p.type.md else proc.md⟩
+  let outputEnsures := outputEnsuresOf ptMap proc
   let initVars : PredVarMap := proc.inputs.foldl (init := {}) fun s p =>
     if isConstrainedType ptMap p.type.val then s.insert p.name.text p.type.val else s
   let body' := match proc.body with
@@ -262,12 +271,6 @@ theorem constraintCallFor_primitive_bool (ptMap : ConstrainedTypeMap) (varName :
     (md : Imperative.MetaData Core.Expression) :
     constraintCallFor ptMap .TBool varName md = none := by
   unfold constraintCallFor; rfl
-
-/-- Helper: the outputEnsures computed by elimProc. -/
-private def outputEnsuresOf (ptMap : ConstrainedTypeMap) (proc : Procedure) : List StmtExprMd :=
-  proc.outputs.filterMap fun p =>
-    (constraintCallFor ptMap p.type.val p.name p.type.md).map
-      fun c => ⟨c.val, if (Imperative.getFileRange p.type.md).isSome then p.type.md else proc.md⟩
 
 /-- For Opaque bodies, elimProc appends output constraint ensures to postconditions. -/
 theorem elimProc_opaque_body (ptMap : ConstrainedTypeMap) (proc : Procedure)

@@ -351,8 +351,17 @@ def transformExpr (expr : StmtExprMd) : LiftM StmtExprMd := do
         return ⟨.IfThenElse seqCond seqThen seqElse, md⟩
 
   | .Block stmts labelOption =>
-      let newStmts := (← stmts.reverse.mapM transformExpr).reverse
-      return ⟨ .Block (← onlyKeepSideEffectStmtsAndLast newStmts) labelOption, md ⟩
+      -- Block in expression position: lift all but last to prepends
+      match h_last : stmts.getLast? with
+      | none => return bare (.Block [] labelOption)
+      | some last => do
+          have := List.mem_of_getLast? h_last
+          let mut blockStmts : List StmtExprMd := []
+          for nonLastStatement in stmts.dropLast.attach do
+            have := List.dropLast_subset stmts nonLastStatement.property
+            blockStmts := blockStmts ++ (← transformStmt nonLastStatement)
+          for s in blockStmts.reverse do prepend s
+          transformExpr last
 
   | .LocalVariable name ty initializer =>
       -- If the substitution map has an entry for this variable, it was

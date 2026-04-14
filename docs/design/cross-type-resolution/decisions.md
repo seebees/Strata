@@ -673,3 +673,37 @@ Given all decisions, here's what needs to change:
    owner type using the `~>` separator. See the frontend's own
    design doc for implementation details.
    (`jverify/design/cross-type-resolution/README.md`)
+
+
+## D7: Type scope ordering for cross-composite field access
+
+**Date:** 2026-04-14
+**Status:** Implemented
+
+### Problem
+
+D1-D6 solved cross-type *procedure call* resolution (Range calling
+Position.compareTo). But cross-type *field access* in postconditions
+still failed. `start().line()` in Range's postcondition compiles to
+`FieldSelect(FieldSelect(self, "start"), "line")`. Resolution needs
+Position's type scope to resolve `line`, but type scopes were built
+incrementally in `resolveTypeDefinition` — if Range was processed
+before Position, Position's type scope didn't exist yet.
+
+### Decision
+
+Pre-build all type scopes in `preRegisterTopLevel`, extending the
+existing two-phase design. This is consistent with the design intent
+("declaration order doesn't matter") and provides a clean invariant
+for soundness proofs: all type scopes are populated before any
+procedure body is resolved.
+
+Alternatives considered:
+- **Lazy scope building:** build on demand in `resolveFieldInTypeScope`.
+  Harder to prove properties about. Deferred as a potential optimization.
+- **Declaration reordering:** fragile, doesn't generalize.
+
+### Details
+
+See `type-scope-ordering.md` in this directory for the full design
+document including implementation details and the invariant statement.

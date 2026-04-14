@@ -500,11 +500,17 @@ def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
              invokeOn := invokeOn',
              body := body', md := proc.md }
 
-/-- Resolve a field: define its name under the qualified key (OwnerType.fieldName) and resolve its type. -/
+/-- Resolve a field: define its name under the qualified key (OwnerType.fieldName) and resolve its type.
+    Reuses the pre-registered ID if one exists, so that type scopes built during
+    pre-registration remain valid. -/
 def resolveField (ownerName : Identifier) (field : Field) : ResolveM Field := do
   let ty' ← resolveHighType field.type
   let qualifiedName := ownerName.text ++ "." ++ field.name.text
-  let name' ← defineName field.name (.field ownerName { field with type := ty' }) (some qualifiedName)
+  -- Reuse the pre-registered ID so type scope entries stay valid
+  let fieldName := match (← get).scope.get? qualifiedName with
+    | some (existingId, _) => { field.name with uniqueId := some existingId }
+    | none => field.name
+  let name' ← defineName fieldName (.field ownerName { field with type := ty' }) (some qualifiedName)
   return { name := name', isMutable := field.isMutable, type := ty' }
 
 /-- Resolve an instance procedure on a composite type. -/
@@ -788,16 +794,18 @@ private def placeholderNode : AstNode := .var "$placeholder" ⟨.TVoid, #[]⟩
     This assigns fresh IDs and adds placeholder scope entries for:
     - Type names (composite, constrained, datatype) and their constructors/destructors/fields
     - Constant names
-    - Static procedure names -/
+    - Static procedure names
+    After pre-registration, type scopes are built for all composites so that
+    cross-composite field resolution works regardless of declaration order. -/
 private def preRegisterTopLevel (program : Program) : ResolveM Unit := do
   -- Pre-register type definitions
   for td in program.types do
     match td with
     | .Composite ct =>
-      let _ ← defineName ct.name (.compositeType ct)
+      let ctName ← defineName ct.name (.compositeType ct)
       for field in ct.fields do
         let qualifiedName := ct.name.text ++ "." ++ field.name.text
-        let _ ← defineName field.name placeholderNode (some qualifiedName)
+        let _ ← defineName field.name (.field ctName field) (some qualifiedName)
       for proc in ct.instanceProcedures do
         let _ ← defineName proc.name placeholderNode
     | .Constrained ct =>
@@ -808,6 +816,20 @@ private def preRegisterTopLevel (program : Program) : ResolveM Unit := do
         let _ ← defineName ctor.name (.datatypeConstructor dt.name ctor)
         for p in ctor.args do
           let _ ← defineName p.name placeholderNode (some (dt.destructorName p))
+  -- Build type scopes for all composites so that cross-composite field
+  -- resolution works regardless of declaration order.
+  for td in program.types do
+    match td with
+    | .Composite ct =>
+      let s ← get
+      let mut typeScope : Scope := {}
+      for field in ct.fields do
+        let qualifiedKey := ct.name.text ++ "." ++ field.name.text
+        match s.scope.get? qualifiedKey with
+        | some entry => typeScope := typeScope.insert field.name.text entry
+        | none => pure ()
+      modify fun s => { s with typeScopes := s.typeScopes.insert ct.name.text typeScope }
+    | _ => pure ()
   -- Pre-register constants
   for c in program.constants do
     let _ ← defineName c.name (.constant c)

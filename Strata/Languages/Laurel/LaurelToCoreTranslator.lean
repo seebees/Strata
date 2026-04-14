@@ -69,6 +69,13 @@ structure TranslateState where
   /-- The caller's result variable name for exception propagation.
       When a callee returns Failure, we set this to Failure and exit. -/
   callerResultIdent : Core.CoreIdent := ⟨"result", ()⟩
+  /-- Whether the current procedure wraps its result output in Result<T>.
+      True for procedures, false for functions. Controls whether `result`
+      in postconditions is unwrapped with Result..value!. -/
+  isResultWrapped : Bool := false
+  /-- The name of the Result-wrapped output parameter (e.g., "result" or "r").
+      Used to identify which identifier in postconditions needs Result..value! unwrapping. -/
+  resultOutputName : String := "result"
 
 /-- The translation monad: state over Except, allowing both accumulated diagnostics and hard failures -/
 @[expose] abbrev TranslateM := OptionT (StateM TranslateState)
@@ -168,6 +175,17 @@ When an Identifier matches a bound name at index `i`, it becomes `bvar i` (de Br
 instead of `fvar`.
 -/
 
+-- Check if a binary PrimitiveOp is a `$result == Success/Failure` pattern.
+-- Returns the tester name if so, `none` otherwise.
+-- Factored out so equation lemmas can reason about it independently.
+@[expose] def resultCheckTester (e1 e2 : StmtExprMd) : Option String :=
+  match e1.val, e2.val with
+  | .Identifier id1, .Identifier id2 =>
+    if id1.text == "$result" && id2.text == "Success" then some "Result..isSuccess"
+    else if id1.text == "$result" && id2.text == "Failure" then some "Result..isFailure"
+    else none
+  | _, _ => none
+
 def translateExpr (expr : StmtExprMd)
     (boundVars : List Identifier := []) (isPureContext : Bool := false)
     : TranslateM Core.Expression.Expr := do
@@ -199,6 +217,16 @@ def translateExpr (expr : StmtExprMd)
         else if name.text == "Success" || name.text == "Failure" then
           return .op () ⟨name.text, ()⟩ none
         else
+        -- In procedure postconditions, `result` refers to the return value (type T).
+        -- Since the output is now Result<T>, unwrap with Result..value!.
+        -- For function postconditions, result is NOT wrapped (functions don't use Result).
+        if isPureContext && name.text == s.resultOutputName && s.isResultWrapped then
+          match model.get name with
+          | .parameter _ =>
+            let resultVar : Core.Expression.Expr := .fvar () ⟨name.text, ()⟩ none
+            return .app () (.op () ⟨"Result..value!", ()⟩ none) resultVar
+          | _ => pure ()
+        else pure ()
         match model.get name with
         | .field _ f =>
             return .op () ⟨f.name.text, ()⟩ none
@@ -225,13 +253,7 @@ def translateExpr (expr : StmtExprMd)
     --              $result == Failure → Result..isFailure(result)
     -- The JVerify compiler emits these patterns for guards and conditional postconditions.
     -- With the Result<T> ADT, Success is a unary constructor, so equality doesn't work.
-    let isResultCheck := match e1.val, e2.val with
-      | .Identifier id1, .Identifier id2 =>
-        if id1.text == "$result" && id2.text == "Success" then some "Result..isSuccess"
-        else if id1.text == "$result" && id2.text == "Failure" then some "Result..isFailure"
-        else none
-      | _, _ => none
-    match op, isResultCheck with
+    match op, resultCheckTester e1 e2 with
     | .Eq, some tester =>
       let resultExpr ← translateExpr e1 boundVars isPureContext
       return .app () (.op () ⟨tester, ()⟩ none) resultExpr
@@ -419,32 +441,50 @@ private def exprAsUnusedInit (expr : StmtExprMd) (md : Imperative.MetaData Core.
   let coreType := LTy.forAll [tyVarName] (.ftvar tyVarName)
   return [Core.Statement.init ident coreType (.det coreExpr) md]
 
+/-- Find the index of the return-value output (not $heap) in a procedure's output list.
+    Returns `none` if no return-value output exists (void procedures with only $heap). -/
+def resultOutputIdx (outputs : List Parameter) : Option Nat :=
+  outputs.findIdx? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in")
+
 /-- Build a Core.Statement.call with exception propagation.
-    The callee returns Result<T>. We call into a temp $res_X variable,
-    check isFailure (propagating Failure to caller's result), then
-    extract .value into the original LHS variable on success. -/
+    The callee's output at `resultIdx` is Result<T>. We call into a temp
+    $res_X variable for that output, check isFailure (propagating Failure
+    to caller's result), then extract .value into the original LHS variable
+    on success. Other outputs are passed through directly.
+    `resultIdx` is the position in `lhs` that corresponds to the Result-wrapped output.
+    If `none`, no Result handling is done (plain call). -/
 def mkCallWithResult (lhs : List Core.CoreIdent) (callee : String)
-    (args : List Core.Expression.Expr) (md : Imperative.MetaData Core.Expression) : TranslateM (List Core.Statement) := do
+    (args : List Core.Expression.Expr) (md : Imperative.MetaData Core.Expression)
+    (resultIdx : Option Nat := some 0) : TranslateM (List Core.Statement) := do
   let exceptionTarget := (← get).exceptionTarget
-  -- Create temp Result variables for the call outputs
-  let resLhs := lhs.map fun id => (⟨s!"$res_{id.name}", ()⟩ : Core.CoreIdent)
-  let callStmt := Core.Statement.call resLhs callee args md
-  -- Check first result for failure and propagate
-  match resLhs.head?, lhs.head? with
-  | some resId, some origId =>
+  match resultIdx with
+  | none =>
+    -- No Result-wrapped output — plain call
+    return [Core.Statement.call lhs callee args md]
+  | some idx =>
+  match lhs[idx]? with
+  | some targetId =>
+    let resId : Core.CoreIdent := ⟨s!"$res_{targetId.name}", ()⟩
+    let resInit := Core.Statement.init resId (LTy.forAll [] (.tcons "Result" [.tcons "int" []])) .nondet md
+    -- Replace the result entry in LHS with the temp variable
+    let callLhs := lhs.set idx resId
+    let callStmt := Core.Statement.call callLhs callee args md
     let isFailure : Core.Expression.Expr :=
       .app () (.op () ⟨"Result..isFailure", ()⟩ none) (.fvar () resId none)
     -- On failure: propagate Failure to caller's result and exit
     let callerResult := (← get).callerResultIdent
-    let propagateFailure := Core.Statement.set callerResult (.fvar () resId none) md
+    let failureCtor : Core.Expression.Expr := .op () ⟨"Failure", ()⟩ none
+    let propagateFailure := Core.Statement.set callerResult failureCtor md
     let exitStmt : Core.Statement := Imperative.Stmt.exit (some exceptionTarget) md
     let propagate : Core.Statement := Imperative.Stmt.ite (.det isFailure) [propagateFailure, exitStmt] [] md
     -- Extract value on success path
     let extractValue : Core.Expression.Expr :=
       .app () (.op () ⟨"Result..value!", ()⟩ none) (.fvar () resId none)
-    let unwrap := Core.Statement.set origId extractValue md
-    return [callStmt, propagate, unwrap]
-  | _, _ => return [callStmt]
+    let unwrap := Core.Statement.set targetId extractValue md
+    return [resInit, callStmt, propagate, unwrap]
+  | none =>
+    -- resultIdx out of bounds — just call without Result handling
+    return [Core.Statement.call lhs callee args md]
 
 /--
 Translate Laurel StmtExpr to Core Statements using the `TranslateM` monad.
@@ -521,6 +561,11 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
               if model.isFunction callee then
                 -- Functions are translated as expressions
                 let coreExpr ← translateExpr value
+                -- If assigning to the Result-wrapped output, wrap in Success
+                let s ← get
+                let coreExpr := if s.isResultWrapped && targetId.text == s.resultOutputName then
+                  .app () (.op () ⟨"Success", ()⟩ none) coreExpr
+                else coreExpr
                 return [Core.Statement.set ident coreExpr md]
               else
                 -- Procedure calls need to be translated as call statements
@@ -539,7 +584,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                   let coreType := LTy.forAll [] (← translateType out.type)
                   inits := inits ++ [Core.Statement.init unusedIdent coreType .nondet md]
                   lhs := lhs ++ [unusedIdent]
-                let callStmts ← mkCallWithResult lhs callee.text coreArgs md
+                let callStmts ← mkCallWithResult lhs callee.text coreArgs md (resultOutputIdx outputs)
                 return inits ++ callStmts
           | .InstanceCall callTarget callCallee callArgs =>
               match model.get callCallee with
@@ -555,11 +600,16 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                   inits := inits ++ [Core.Statement.init unusedIdent coreType .nondet md]
                   lhs := lhs ++ [unusedIdent]
                 let allArgs := instanceCallArgs coreTarget coreArgs callArgs
-                let callStmts ← mkCallWithResult lhs callCallee.text allArgs md
+                let callStmts ← mkCallWithResult lhs callCallee.text allArgs md (resultOutputIdx proc.outputs)
                 return inits ++ callStmts
               | _ => return [Core.Statement.havoc ident md]
           | _ =>
               let coreExpr ← translateExpr value
+              -- If assigning to the Result-wrapped output, wrap in Success
+              let s ← get
+              let coreExpr := if s.isResultWrapped && targetId.text == s.resultOutputName then
+                .app () (.op () ⟨"Success", ()⟩ none) coreExpr
+              else coreExpr
               return [Core.Statement.set ident coreExpr md]
       | _ =>
           -- Parallel assignment: (var1, var2, ...) := expr
@@ -571,10 +621,14 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                 match t.val with
                 | .Identifier name => some (⟨name.text, ()⟩)
                 | _ => none
-              mkCallWithResult lhsIdents callee.text coreArgs value.md
+              let calleeOutputs := match model.get callee with
+                | .staticProcedure proc => proc.outputs
+                | .instanceProcedure _ proc => proc.outputs
+                | _ => []
+              mkCallWithResult lhsIdents callee.text coreArgs value.md (resultOutputIdx calleeOutputs)
           | .InstanceCall callTarget callCallee callArgs =>
               match model.get callCallee with
-              | .instanceProcedure typeName _ =>
+              | .instanceProcedure typeName proc =>
                 let coreTarget ← translateExpr callTarget
                 let coreArgs ← callArgs.mapM (fun a => translateExpr a)
                 let lhsIdents := targets.filterMap fun t =>
@@ -582,7 +636,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
                   | .Identifier name => some (⟨name.text, ()⟩)
                   | _ => none
                 let allArgs := instanceCallArgs coreTarget coreArgs callArgs
-                mkCallWithResult lhsIdents callCallee.text allArgs value.md
+                mkCallWithResult lhsIdents callCallee.text allArgs value.md (resultOutputIdx proc.outputs)
               | _ =>
                 let havocStmts := targets.filterMap fun t =>
                   match t.val with
@@ -620,7 +674,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
           let coreType := LTy.forAll [] (← translateType out.type)
           inits := inits ++ [Core.Statement.init ident coreType .nondet md]
           lhs := lhs ++ [ident]
-        let callStmts ← mkCallWithResult lhs callee.text coreArgs md
+        let callStmts ← mkCallWithResult lhs callee.text coreArgs md (resultOutputIdx outputs)
         return inits ++ callStmts
   | .InstanceCall target callee args =>
       match model.get callee with
@@ -636,7 +690,7 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
           inits := inits ++ [Core.Statement.init ident coreType .nondet md]
           lhs := lhs ++ [ident]
         let allArgs := instanceCallArgs coreTarget coreArgs args
-        let callStmts ← mkCallWithResult lhs callee.text allArgs md
+        let callStmts ← mkCallWithResult lhs callee.text allArgs md (resultOutputIdx proc.outputs)
         return inits ++ callStmts
       | _ =>
         emitDiagnostic $ md.toDiagnostic "instance call: callee not resolved as instance procedure" DiagnosticType.NotYetImplemented
@@ -652,7 +706,11 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
           let assignStmt := Core.Statement.set ident successWrapped md
           return [assignStmt, .exit (some "$body") md]
       | none, _ =>
-          return [.exit (some "$body") md]
+          -- Void return: set result := Success(true) to signal normal completion
+          let resultIdent := (← get).callerResultIdent
+          let successVoid : Core.Expression.Expr :=
+            .app () (.op () ⟨"Success", ()⟩ none) (.const () (.boolConst true))
+          return [Core.Statement.set resultIdent successVoid md, .exit (some "$body") md]
       | some _, none =>
           emitDiagnostic $ md.toDiagnostic "Return statement with value but procedure has no output parameters"
           return [.exit (some "$body") md]
@@ -684,7 +742,8 @@ def translateStmt (outputParams : List Parameter) (stmt : StmtExprMd)
         | none => ⟨"result", ()⟩
       let isFailureCheck : Core.Expression.Expr :=
         .app () (.op () ⟨"Result..isFailure", ()⟩ none) (.fvar () resultIdent none)
-      let successCtor : Core.Expression.Expr := .op () ⟨"Success", ()⟩ none
+      let successCtor : Core.Expression.Expr :=
+        .app () (.op () ⟨"Success", ()⟩ none) (.const () (.boolConst true))
       -- Translate try body with exception target set to handlers label
       let savedTarget := (← get).exceptionTarget
       modify fun s => { s with exceptionTarget := handlersLabel }
@@ -751,10 +810,23 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   let inputPairs ← proc.inputs.mapM translateParameterToCore
   let inputs := inputPairs
   let outputs ← proc.outputs.mapM translateParameterToCore
-  -- Wrap each output type in Result<T> for exception propagation (per spec §4.1).
-  -- A method returning int becomes: returns (result : Result<int>)
-  let resultOutputs := outputs.map fun (ident, ty) =>
-    (ident, LMonoTy.tcons "Result" [ty])
+  -- Find the return-value output parameter (not $heap).
+  let returnOutput := proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in")
+  let resultIdent : Core.CoreIdent := match returnOutput with
+    | some outParam => ⟨outParam.name.text, ()⟩
+    | none => ⟨"result", ()⟩
+  -- Skip Result wrapping for $check procedures (verification artifacts)
+  let isCheckProc := proc.name.text.endsWith "$check"
+  let hasResultOutput := outputs.any fun (ident, _) => ident.name == resultIdent.name
+  let needsSyntheticResult := returnOutput.isNone
+  let resultOutputs := if isCheckProc then outputs
+  else if hasResultOutput then
+    outputs.map fun (ident, ty) =>
+      if ident.name == resultIdent.name then (ident, LMonoTy.tcons "Result" [ty])
+      else (ident, ty)
+  else if needsSyntheticResult then
+    outputs ++ [(⟨"result", ()⟩, LMonoTy.tcons "Result" [LMonoTy.bool])]
+  else outputs
   let header : Core.Procedure.Header := {
     name := proc.name.text
     typeArgs := []
@@ -763,6 +835,14 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   }
   -- Translate preconditions
   let preconditions ← translateChecks proc.preconditions "requires"
+
+  -- Set callerResultIdent and isResultWrapped BEFORE translating postconditions
+  -- Set callerResultIdent and isResultWrapped BEFORE translating postconditions
+  -- so that output name in postconditions gets wrapped in Result..value!.
+  modify fun s => { s with
+    callerResultIdent := resultIdent
+    isResultWrapped := !isCheckProc && (hasResultOutput || needsSyntheticResult)
+    resultOutputName := resultIdent.name }
 
   -- Translate postconditions for Opaque and Abstract bodies
   let postconditions : ListMap Core.CoreLabel Core.Procedure.Check ←
@@ -782,8 +862,14 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
       pure (postconditions.map fun (label, check) =>
         Core.Statement.assume label check.expr mdWithUnknownLoc)
   -- Wrap body in a labeled block so early returns (exit) work correctly.
-  -- No $result := Success needed — Return wraps value in Success(value).
-  let body : List Core.Statement := [.block "$body" bodyStmts mdWithUnknownLoc]
+  -- Initialize result to Success for void procedures (no explicit return sets it).
+  -- For non-void procedures, Return wraps value in Success(value).
+  let initResult : List Core.Statement := if !isCheckProc && needsSyntheticResult then
+    let successVoid : Core.Expression.Expr :=
+      .app () (.op () ⟨"Success", ()⟩ none) (.const () (.boolConst true))
+    [Core.Statement.set resultIdent successVoid mdWithUnknownLoc]
+  else []
+  let body : List Core.Statement := [.block "$body" (initResult ++ bodyStmts) mdWithUnknownLoc]
   let spec : Core.Procedure.Spec := { modifies, preconditions, postconditions }
   return { header, spec, body }
 
@@ -937,6 +1023,8 @@ Translate a Laurel Procedure to a Core Function (when applicable) using `Transla
 Diagnostics for disallowed constructs in the function body are emitted into the monad state.
 -/
 def translateProcedureToFunction (options: LaurelTranslateOptions) (isRecursive: Bool) (proc : Procedure) : TranslateM Core.Decl := do
+  -- Functions don't use Result<T> wrapping — reset the flag
+  modify fun s => { s with isResultWrapped := false }
   let inputs ← proc.inputs.mapM translateParameterToCore
   let outputTy ← match proc.outputs.head? with
     | some p => translateType p.type
@@ -1025,7 +1113,9 @@ theorem translateProcedureToFunction_axioms_length
     (hSucc : translateProcedureToFunction options isRecursive proc s = (some (.func f fmd), s')) :
     f.axioms.length = (getPostconds proc.body).length := by
   unfold translateProcedureToFunction at hSucc
-  obtain ⟨inputs, s1, _, hRest⟩ := bind_inv hSucc
+  -- Account for the `modify` that resets isResultWrapped
+  obtain ⟨_, s0, _, hSucc'⟩ := bind_inv hSucc
+  obtain ⟨inputs, s1, _, hRest⟩ := bind_inv hSucc'
   simp only [bind, OptionT.bind, OptionT.mk, StateT.bind, StateT.pure,
     pure, OptionT.pure, OptionT.lift, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.get, liftM, monadLift, MonadLift.monadLift, Functor.map,
@@ -1114,9 +1204,16 @@ Translate a Laurel DatatypeDefinition to an `LDatatype Unit`.
 -/
 def translateDatatypeDefinition (dt : DatatypeDefinition)
     : TranslateM (Lambda.LDatatype Unit) := do
+  let typeArgNames := dt.typeArgs.map (fun id => id.text)
   let constrs ← dt.constructors.mapM fun c => do
     let args ← c.args.mapM fun ⟨ n, ty ⟩ => do
-      return (⟨n.text, ()⟩, ← translateType ty)
+      -- If the type is a UserDefined name matching a type parameter, emit ftvar
+      let coreTy ← match ty.val with
+        | .UserDefined name =>
+          if typeArgNames.contains name.text then pure (.ftvar name.text)
+          else translateType ty
+        | _ => translateType ty
+      return (⟨n.text, ()⟩, coreTy)
     return { name := ⟨c.name.text, ()⟩
              args := args
              testerName := s!"{dt.name}..is{c.name}" : Lambda.LConstr Unit }
@@ -1161,8 +1258,8 @@ Translate Laurel Program to Core Program, also returning the lowered Laurel prog
 -/
 def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): TranslateResultWithLaurel :=
   let program := { program with
-    staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
-    types := coreDefinitionsForLaurel.types ++ program.types
+    staticProcedures := coreDefinitionsForLaurelWithResult.staticProcedures ++ program.staticProcedures
+    types := coreDefinitionsForLaurelWithResult.types ++ program.types
   }
 
   -- Qualify instance procedure names before resolution so that
@@ -1298,19 +1395,8 @@ def translateWithLaurel (options: LaurelTranslateOptions) (program : Program): T
 
     -- Translate Laurel datatype definitions to Core declarations.
     let groupedDatatypeDecls ← translateTypes program
-    -- Result<T> datatype for exception propagation (per spec §1.1)
-    -- Success(value: T) carries the return value, Failure() signals an exception.
-    let resultDecl : Core.Decl := Core.Decl.type (.data [{
-      name := "Result"
-      typeArgs := ["T"]
-      constrs := [
-        { name := ⟨"Success", ()⟩, args := [(⟨"value", ()⟩, .ftvar "T")], testerName := "Result..isSuccess" },
-        { name := ⟨"Failure", ()⟩, args := [], testerName := "Result..isFailure" }
-      ]
-      constrs_ne := rfl
-    }]) mdWithUnknownLoc
     let program := {
-      decls := [resultDecl] ++ groupedDatatypeDecls ++ mkReadFuncAxioms program ++ constantDecls ++ orderedDecls
+      decls := groupedDatatypeDecls ++ mkReadFuncAxioms program ++ constantDecls ++ orderedDecls
     }
 
     -- dbg_trace "=== Generated Strata Core Program ==="

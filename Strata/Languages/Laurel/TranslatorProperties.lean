@@ -81,7 +81,21 @@ theorem translateExpr_succeeds_primEq
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2)) :
     (translateExpr ⟨.PrimitiveOp .Eq [e1, e2], md⟩ bv pc s).1.isSome = true := by
-  simp [translateExpr_eq_primEq e1 e2 md bv pc s s1 s2 r1 r2 h1 h2]
+  cases hRC : resultCheckTester e1 e2 with
+  | none => simp [translateExpr_eq_primEq e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hRC]
+  | some tester =>
+    rw [translateExpr.eq_def]
+    simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+      bind, StateT.bind, StateT.get, StateT.pure, get, MonadState.get, getThe, MonadStateOf.get,
+      liftM, monadLift, MonadLift.monadLift]
+    rw [hRC]
+    simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+      bind, StateT.bind, StateT.get, StateT.pure, get, MonadState.get, getThe, MonadStateOf.get,
+      liftM, monadLift, MonadLift.monadLift]
+    rw [h1]
+    simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+      bind, StateT.bind, StateT.get, StateT.pure, get, MonadState.get, getThe, MonadStateOf.get,
+      liftM, monadLift, MonadLift.monadLift]; rfl
 
 /-- PrimitiveOp Neq succeeds when both args succeed. -/
 theorem translateExpr_succeeds_primNeq
@@ -90,7 +104,21 @@ theorem translateExpr_succeeds_primNeq
     (h1 : translateExpr e1 bv pc s = (some r1, s1))
     (h2 : translateExpr e2 bv pc s1 = (some r2, s2)) :
     (translateExpr ⟨.PrimitiveOp .Neq [e1, e2], md⟩ bv pc s).1.isSome = true := by
-  simp [translateExpr_eq_primNeq e1 e2 md bv pc s s1 s2 r1 r2 h1 h2]
+  cases hRC : resultCheckTester e1 e2 with
+  | none => simp [translateExpr_eq_primNeq e1 e2 md bv pc s s1 s2 r1 r2 h1 h2 hRC]
+  | some tester =>
+    rw [translateExpr.eq_def]
+    simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+      bind, StateT.bind, StateT.get, StateT.pure, get, MonadState.get, getThe, MonadStateOf.get,
+      liftM, monadLift, MonadLift.monadLift]
+    rw [hRC]
+    simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+      bind, StateT.bind, StateT.get, StateT.pure, get, MonadState.get, getThe, MonadStateOf.get,
+      liftM, monadLift, MonadLift.monadLift]
+    rw [h1]
+    simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+      bind, StateT.bind, StateT.get, StateT.pure, get, MonadState.get, getThe, MonadStateOf.get,
+      liftM, monadLift, MonadLift.monadLift]; rfl
 
 /-- PrimitiveOp Not succeeds when the arg succeeds. -/
 theorem translateExpr_succeeds_primNot
@@ -302,8 +330,8 @@ private abbrev TransparentHyps (proc : Procedure) (bodyExpr : StmtExprMd)
   proc.preconditions = [] ∧
   (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI) ∧
   (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO) ∧
-  (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts ∧
-  (translateStmt proc.outputs bodyExpr sO).2 = sBody
+  (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).1 = some bodyStmts ∧
+  (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).2 = sBody
 
 /-- The output procedure's name matches the input procedure's name. -/
 theorem translateProcedure_preserves_name
@@ -316,8 +344,8 @@ theorem translateProcedure_preserves_name
     (hNoPre : proc.preconditions = [])
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
-    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
+    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).2 = sBody)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ :=
   (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
@@ -335,8 +363,8 @@ theorem translateProcedure_preserves_input_count
     (hNoPre : proc.preconditions = [])
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
-    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
+    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).2 = sBody)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.inputs = coreInputs :=
   (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
@@ -354,10 +382,10 @@ theorem translateProcedure_preserves_output_count
     (hNoPre : proc.preconditions = [])
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
-    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
+    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).2 = sBody)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
+    coreProc.header.outputs = computeResultOutputs proc coreOutputs :=
   (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
     coreInputs coreOutputs bodyStmts hTransparent hNoPre hInputs hOutputs
     hBody hState coreProc hSucc).2.2.1
@@ -394,7 +422,7 @@ theorem translateProcedure_opaque_withImpl_preserves_name
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ :=
@@ -416,7 +444,7 @@ theorem translateProcedure_opaque_withImpl_preserves_inputs
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.inputs = coreInputs :=
@@ -438,10 +466,10 @@ theorem translateProcedure_opaque_withImpl_preserves_outputs
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
+    coreProc.header.outputs = computeResultOutputs proc coreOutputs :=
   (translateProcedure_opaque_withImpl_get proc postconds impl modif
     s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts
     hOpaque hInputs hOutputs hPre hPost hBody coreProc hSucc).2.2.1
@@ -459,7 +487,7 @@ theorem translateProcedure_opaque_noImpl_preserves_name
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ :=
   (translateProcedure_opaque_noImpl_get proc postconds modif
@@ -479,7 +507,7 @@ theorem translateProcedure_opaque_noImpl_preserves_inputs
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.inputs = coreInputs :=
   (translateProcedure_opaque_noImpl_get proc postconds modif
@@ -499,9 +527,9 @@ theorem translateProcedure_opaque_noImpl_preserves_outputs
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
+    coreProc.header.outputs = computeResultOutputs proc coreOutputs :=
   (translateProcedure_opaque_noImpl_get proc postconds modif
     s sI sO sPre sPost coreInputs coreOutputs corePre corePost
     hOpaque hInputs hOutputs hPre hPost coreProc hSucc).2.2.1
@@ -522,7 +550,7 @@ theorem translateProcedure_opaque_withImpl_preserves_postconditions
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.postconditions = corePost :=
@@ -544,7 +572,7 @@ theorem translateProcedure_opaque_withImpl_preserves_preconditions
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.preconditions = corePre :=
@@ -565,7 +593,7 @@ theorem translateProcedure_opaque_noImpl_preserves_postconditions
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.postconditions = corePost :=
   (translateProcedure_opaque_noImpl_get proc postconds modif
@@ -585,7 +613,7 @@ theorem translateProcedure_opaque_noImpl_preserves_preconditions
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.preconditions = corePre :=
   (translateProcedure_opaque_noImpl_get proc postconds modif
@@ -607,7 +635,7 @@ theorem translateProcedure_abstract_preserves_postconditions
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.postconditions = corePost :=
   (translateProcedure_abstract_get proc postconds
@@ -627,7 +655,7 @@ theorem translateProcedure_abstract_preserves_preconditions
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.preconditions = corePre :=
   (translateProcedure_abstract_get proc postconds
@@ -647,9 +675,9 @@ theorem translateProcedure_abstract_preserves_outputs
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
-    coreProc.header.outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])] :=
+    coreProc.header.outputs = computeResultOutputs proc coreOutputs :=
   (translateProcedure_abstract_get proc postconds
     s sI sO sPre sPost coreInputs coreOutputs corePre corePost
     hAbstract hInputs hOutputs hPre hPost coreProc hSucc).2.2.1
@@ -667,8 +695,8 @@ theorem translateProcedure_transparent_postconditions_empty
     (hNoPre : proc.preconditions = [])
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
-    (hBody : (translateStmt proc.outputs bodyExpr sO).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr sO).2 = sBody)
+    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).2 = sBody)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.postconditions = [] :=
   (translateProcedure_transparent_get proc bodyExpr s sI sO sBody
@@ -711,14 +739,14 @@ theorem translateProcedure_opaque_withImpl_postcondition_count
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.postconditions.length = postconds.length := by
   rw [translateProcedure_opaque_withImpl_preserves_postconditions proc postconds impl modif
     s sI sO sPre sPost sBody coreInputs coreOutputs corePre corePost bodyStmts coreProc
     hOpaque hInputs hOutputs hPre hPost hBody hSucc]
-  exact translateChecks_preserves_length postconds "postcondition" sPre sPost corePost hPost
+  exact translateChecks_preserves_length postconds "postcondition" (computeBodyState proc coreOutputs sPre) sPost corePost hPost
 
 /-- P-Struct-3: Opaque procedure with implementation preserves precondition count. -/
 theorem translateProcedure_opaque_withImpl_precondition_count
@@ -734,7 +762,7 @@ theorem translateProcedure_opaque_withImpl_precondition_count
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.preconditions.length = proc.preconditions.length := by
@@ -756,13 +784,13 @@ theorem translateProcedure_abstract_postcondition_count
     (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" sPre = (some corePost, sPost))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.spec.postconditions.length = postconds.length := by
   rw [translateProcedure_abstract_preserves_postconditions proc postconds
     s sI sO sPre sPost coreInputs coreOutputs corePre corePost coreProc
     hAbstract hInputs hOutputs hPre hPost hSucc]
-  exact translateChecks_preserves_length postconds "postcondition" sPre sPost corePost hPost
+  exact translateChecks_preserves_length postconds "postcondition" (computeBodyState proc coreOutputs sPre) sPost corePost hPost
 
 /-! ### P-Spec-2f: Function postcondition axiom count preservation
 
@@ -794,15 +822,23 @@ when the set statement evaluates normally, the two-statement sequence
 steps to .exiting with the exception target label. -/
 
 /-- P-Exception-1 (Arrow 2): translateStmt on .Throw produces exactly
-    [$result := Failure(), exit <exceptionTarget>], with state unchanged. -/
+    [resultIdent := Failure(), exit <exceptionTarget>], with state unchanged.
+    The resultIdent is determined by the procedure's output parameters:
+    if there's a return output, its name is used; otherwise "result". -/
 theorem throw_translation_structure (outParams : List Parameter)
     (exception : WithMetadata StmtExpr) (md : MetaData)
     (s : TranslateState) :
+    let resultIdent : Core.CoreIdent := match outParams.head? with
+      | some p => ⟨p.name.text, ()⟩
+      | none => ⟨"result", ()⟩
     (translateStmt outParams ⟨.Throw exception, md⟩ s).1 =
-      some [Core.Statement.set ⟨"$result", ()⟩ (.op () ⟨"Failure", ()⟩ none) md,
+      some [Core.Statement.set resultIdent (.op () ⟨"Failure", ()⟩ none) md,
             Imperative.Stmt.exit (some s.exceptionTarget) md] := by
-  have h := translateStmt_throw outParams exception md s
-  rw [h]
+  simp only [translateStmt.eq_def,
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, get, MonadState.get, getThe, MonadStateOf.get,
+    StateT.bind, StateT.get, StateT.pure,
+    liftM, monadLift, MonadLift.monadLift]; rfl
 
 /-- P-Exception-1 (state preservation): Throw does not modify translator state. -/
 theorem throw_translation_state_unchanged (outParams : List Parameter)
@@ -931,47 +967,34 @@ theorem trycatch_handlers_consumes_throw
       (.terminal ρ₁) :=
   Imperative.matching_block_consumes handlersLabel ρ₁
 
-/-! ## P-Exception-3: $result in Procedure Header Outputs
+/-! ## P-Exception-3: Result<T> wrapping in Procedure Header Outputs
 
-Every Core procedure produced by translateProcedure has `$result` of type
-`ExceptionResult` as its last output parameter. This is unconditional —
-it holds for Transparent, Opaque (with/without impl), and Abstract bodies.
+Every Core procedure produced by translateProcedure has its result output
+wrapped in `Result<T>`. For procedures with an explicit return output,
+the output type is wrapped: `(name, T)` → `(name, Result [T])`. For
+procedures without a return output, a synthetic `(result, Result [bool])`
+is appended.
 
 The body-type-specific proofs are in:
 - `translateProcedure_preserves_output_count` (Transparent)
 - `translateProcedure_opaque_withImpl_preserves_outputs` (Opaque + impl)
 - `translateProcedure_opaque_noImpl_preserves_outputs` (Opaque, no impl)
+- `translateProcedure_abstract_preserves_outputs` (Abstract)
 
-The properties below provide the consequence: `$result` is always present
-in the outputs, enabling exception propagation through call chains. -/
+All use `computeResultOutputs proc coreOutputs` to describe the output list.
+The properties below provide consequences of the Result wrapping. -/
 
-/-- P-Exception-3 (list property): If outputs = xs ++ [(id, ty)], then
-    (id, ty) is a member of outputs. -/
-theorem result_in_outputs_of_append
-    (coreOutputs : List (Core.CoreIdent × LMonoTy))
-    (outputs : List (Core.CoreIdent × LMonoTy))
-    (h : outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])]) :
-    (⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" []) ∈ outputs := by
-  rw [h]; exact List.mem_append_right _ (List.Mem.head _)
-
-/-- P-Exception-3 (list property): If outputs = xs ++ [(id, ty)], then
-    outputs is nonempty. -/
-theorem outputs_nonempty_of_append
-    (coreOutputs : List (Core.CoreIdent × LMonoTy))
-    (outputs : List (Core.CoreIdent × LMonoTy))
-    (h : outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])]) :
-    outputs ≠ [] := by
-  rw [h]; exact List.append_ne_nil_of_right_ne_nil _ (List.cons_ne_nil _ _)
-
-/-- P-Exception-3 (list property): If outputs = xs ++ [(id, ty)], then
-    the last element is ($result, ExceptionResult). -/
-theorem result_is_last_output
-    (coreOutputs : List (Core.CoreIdent × LMonoTy))
-    (outputs : List (Core.CoreIdent × LMonoTy))
-    (h : outputs = coreOutputs ++ [(⟨"$result", ()⟩, .tcons "ExceptionResult" [])]) :
-    outputs.getLast (outputs_nonempty_of_append coreOutputs outputs h) =
-      (⟨"$result", ()⟩, LMonoTy.tcons "ExceptionResult" []) := by
-  subst h; simp [List.getLast_append]
+/-- P-Exception-3: computeResultOutputs never produces an empty list
+    when the procedure has outputs. -/
+theorem computeResultOutputs_nonempty_of_outputs
+    (proc : Procedure) (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (h : coreOutputs ≠ []) :
+    computeResultOutputs proc coreOutputs ≠ [] := by
+  rw [computeResultOutputs]
+  intro heq
+  simp only [beq_iff_eq] at heq
+  split at heq <;> (try (split at heq)) <;> (try (split at heq)) <;> (try (split at heq))
+  all_goals simp_all [List.map_eq_nil_iff]
 
 /-! ## P-Identity-1: Pass Non-Interference (Identity Properties)
 
@@ -1030,14 +1053,13 @@ theorem translateExpr_instanceCall_nonFunctional_emits_diagnostic
     (hModel : s.model.get callee = .instanceProcedure typeName proc)
     (hNotFunctional : proc.isFunctional = false) :
     (translateExpr ⟨.InstanceCall target callee args, md⟩ bv pc s).2.coreProgramHasSuperfluousErrors = true := by
-  unfold translateExpr
-  simp only [hModel, hNotFunctional, Bool.false_eq_true, ↓reduceIte, throwExprDiagnostic,
-    emitDiagnostic, pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+  simp only [translateExpr.eq_def, hModel, hNotFunctional,
+    throwExprDiagnostic, emitDiagnostic,
+    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
-    StateT.bind, StateT.get, StateT.pure,
+    StateT.bind, StateT.get, StateT.pure, StateT.set, MonadState.set,
     liftM, monadLift, MonadLift.monadLift,
-    modify, MonadState.set, StateT.set, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet]
-  split
-  next => split <;> rfl
+    Bool.false_eq_true, ↓reduceIte]; rfl
 
 end Strata.Laurel

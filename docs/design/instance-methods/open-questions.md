@@ -23,22 +23,12 @@ use `self` as a regular parameter (`Identifier("self")`). Field access
 to how static procedures access composite fields (`c#intValue`).
 No special handling needed. See Decision 6.
 
-## ~~Q4: Heap analysis for InstanceCall callees~~ → Not a decision, mechanical fix
+## ~~Q4: Heap analysis for InstanceCall callees~~ → Fixed
 
-Confirmed this is a real bug. The analysis does NOT add `InstanceCall`
-callees to the `callees` list. A procedure that only interacts with
-the heap through instance calls (no direct field access, no `new`)
-won't be identified as a heap reader/writer.
-
-The analysis already runs over all procedures including instance ones
-(line 478: `allProcs := staticProcedures ++ instanceProcs`), so
-instance procedures themselves are correctly analyzed. The gap is
-at CALL SITES — `InstanceCall` in a caller's body doesn't propagate
-the callee's heap status to the caller.
-
-Fix: add callee to `callees` list in `collectExpr`, same as `StaticCall`.
-Also: inject `$heap` into `InstanceCall` in the transform phase, same
-pattern as `StaticCall`. Both are mechanical — follow the existing code.
+Fixed. `collectExpr` now adds `InstanceCall` callees to the `callees`
+list (HeapParameterization.lean, `.InstanceCall target callee args`
+case). The heap parameterization also injects `$heap` into
+`InstanceCall` args in the transform phase.
 
 ## ~~Q5: Modifies clauses for instance procedures~~ → Not a decision, mechanical fix
 

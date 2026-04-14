@@ -79,6 +79,24 @@ def coreDefinitionsForLaurel : Program :=
   | .ok program => program
   | .error e => dbg_trace s!"BUG: CoreDefinitionsForLaurel parse error: {e}"; default
 
+private def resultId (s : String) : Identifier := { text := s }
+
+/-- Result<T> ADT for exception propagation (spec §1.1).
+    `Success(value: T)` carries the return value; `Failure()` signals an exception.
+    Defined programmatically because the Laurel DDM grammar doesn't support type parameters. -/
+def resultDatatypeDefinition : DatatypeDefinition where
+  name := resultId "Result"
+  typeArgs := [resultId "T"]
+  constructors := [
+    { name := resultId "Success", args := [{ name := resultId "value", type := ⟨.UserDefined (resultId "T"), #[]⟩ }] },
+    { name := resultId "Failure", args := [] }
+  ]
+
+/-- Core definitions for Laurel, including the Result<T> datatype. -/
+def coreDefinitionsForLaurelWithResult : Program :=
+  { coreDefinitionsForLaurel with
+    types := coreDefinitionsForLaurel.types ++ [.Datatype resultDatatypeDefinition] }
+
 end -- public section
 
 end Strata.Laurel

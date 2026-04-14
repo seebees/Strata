@@ -485,11 +485,11 @@ def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
     -- ensures clauses that reference $result == Success or $result == Failure.
     let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
     let _ ← defineName { text := "$result" } resultParam
-    let exResultType : Identifier := { text := "ExceptionResult" }
-    let successCtor : DatatypeConstructor := { name := { text := "Success" }, args := [] }
+    let resultType : Identifier := { text := "Result" }
+    let successCtor : DatatypeConstructor := { name := { text := "Success" }, args := [{ name := { text := "value" }, type := ⟨.UserDefined { text := "T" }, .empty⟩ }] }
     let failureCtor : DatatypeConstructor := { name := { text := "Failure" }, args := [] }
-    let _ ← defineName { text := "Success" } (.datatypeConstructor exResultType successCtor)
-    let _ ← defineName { text := "Failure" } (.datatypeConstructor exResultType failureCtor)
+    let _ ← defineName { text := "Success" } (.datatypeConstructor resultType successCtor)
+    let _ ← defineName { text := "Failure" } (.datatypeConstructor resultType failureCtor)
     let pres' ← proc.preconditions.mapM resolveStmtExpr
     let dec' ← proc.decreases.mapM resolveStmtExpr
     let body' ← resolveBody proc.body
@@ -518,11 +518,11 @@ def resolveInstanceProcedure (typeName : Identifier) (proc : Procedure) : Resolv
     -- Add $result, Success, and Failure to scope for ensures clauses.
     let resultParam := AstNode.parameter { name := { text := "$result" }, type := ⟨HighType.Unknown, .empty⟩ }
     let _ ← defineName { text := "$result" } resultParam
-    let exResultType : Identifier := { text := "ExceptionResult" }
-    let successCtor : DatatypeConstructor := { name := { text := "Success" }, args := [] }
+    let resultType : Identifier := { text := "Result" }
+    let successCtor : DatatypeConstructor := { name := { text := "Success" }, args := [{ name := { text := "value" }, type := ⟨.UserDefined { text := "T" }, .empty⟩ }] }
     let failureCtor : DatatypeConstructor := { name := { text := "Failure" }, args := [] }
-    let _ ← defineName { text := "Success" } (.datatypeConstructor exResultType successCtor)
-    let _ ← defineName { text := "Failure" } (.datatypeConstructor exResultType failureCtor)
+    let _ ← defineName { text := "Success" } (.datatypeConstructor resultType successCtor)
+    let _ ← defineName { text := "Failure" } (.datatypeConstructor resultType failureCtor)
     let pres' ← proc.preconditions.mapM resolveStmtExpr
     let dec' ← proc.decreases.mapM resolveStmtExpr
     let body' ← resolveBody proc.body
@@ -575,13 +575,19 @@ def resolveTypeDefinition (td : TypeDefinition) : ResolveM TypeDefinition := do
                           constraint := constraint', witness := witness' }
   | .Datatype dt =>
     let dtName' ← defineName dt.name (.datatypeDefinition dt)
+    -- Add type parameters to scope so constructor arg types can reference them
+    let typeArgNames := dt.typeArgs.map (fun id => id.text)
     let ctors' ← dt.constructors.mapM fun ctor => do
       let ctorName' ← defineName ctor.name (.datatypeConstructor dt.name ctor)
       _ ← defineName ctor.name (.datatypeConstructor dt.name ctor) (some (dt.testerName ctor))
       let args' ← ctor.args.mapM fun (p: Parameter) => do
-        let ty' ← resolveHighType p.type
+        -- If the type is a type parameter reference, skip resolution
+        let ty' ← match p.type.val with
+          | .UserDefined name =>
+            if typeArgNames.contains name.text then pure p.type
+            else resolveHighType p.type
+          | _ => resolveHighType p.type
         let destructorId ← defineName p.name (.parameter p) (some (dt.destructorName p))
-        -- unsafeDestructorId
         _ ← defineName p.name (.parameter p) (some (dt.unsafeDestructorName p))
         return ⟨ destructorId, ty' ⟩
       return { name := ctorName', args := args' : DatatypeConstructor }

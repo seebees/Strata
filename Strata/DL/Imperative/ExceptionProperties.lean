@@ -98,45 +98,94 @@ end Imperative
 /-!
 ## Properties P7 and P8: Result Type Properties
 
-These are properties of the ExceptionResult datatype itself,
+These are properties of the Result<T> algebraic datatype (spec §1.1),
 independent of the imperative semantics.
+
+The Core-level `Result<T>` is defined as an `LDatatype` in
+`CoreDefinitionsForLaurel.lean` with constructors `Success(value: T)`
+and `Failure()`. The TypeFactory generates testers, destructors, and
+eliminators automatically.
+
+These Lean-level proofs mirror the Core-level properties and serve as
+the foundation for composing with the translator proofs (Arrow 2 + Arrow 3).
 -/
 
-public inductive ExceptionResult where
-  | Success
+/-- Result<T>: a method either succeeds with a value or fails. -/
+public inductive Result (T : Type) where
+  | Success (value : T)
   | Failure
   deriving DecidableEq
 
-public def ExceptionResult.isSuccess : ExceptionResult → Bool
-  | .Success => true
+public def Result.isSuccess : Result T → Bool
+  | .Success _ => true
   | .Failure => false
 
-public def ExceptionResult.isFailure : ExceptionResult → Bool
-  | .Success => false
+public def Result.isFailure : Result T → Bool
+  | .Success _ => false
   | .Failure => true
 
-/-- **P7: Result Exhaustiveness.** -/
-public theorem result_exhaustive (r : ExceptionResult) :
+/-- Extract the value from a Success result. Partial — undefined on Failure. -/
+public def Result.value! [Inhabited T] : Result T → T
+  | .Success v => v
+  | .Failure => default
+
+/-- **P7: Result Exhaustiveness.** Every Result is either Success or Failure. -/
+public theorem result_exhaustive (r : Result T) :
     r.isSuccess = true ∨ r.isFailure = true := by
-  cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
+  cases r <;> simp [Result.isSuccess, Result.isFailure]
 
-public theorem result_exclusive (r : ExceptionResult) :
+/-- **P7b: Result Exclusivity.** A Result cannot be both Success and Failure. -/
+public theorem result_exclusive (r : Result T) :
     ¬ (r.isSuccess = true ∧ r.isFailure = true) := by
-  cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
+  cases r <;> simp [Result.isSuccess, Result.isFailure]
 
-public theorem result_isSuccess_iff_not_isFailure (r : ExceptionResult) :
+/-- isSuccess ↔ ¬isFailure -/
+public theorem result_isSuccess_iff_not_isFailure (r : Result T) :
     r.isSuccess = true ↔ r.isFailure = false := by
-  cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
+  cases r <;> simp [Result.isSuccess, Result.isFailure]
 
-public theorem result_isFailure_iff_not_isSuccess (r : ExceptionResult) :
+/-- isFailure ↔ ¬isSuccess -/
+public theorem result_isFailure_iff_not_isSuccess (r : Result T) :
     r.isFailure = true ↔ r.isSuccess = false := by
-  cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
+  cases r <;> simp [Result.isSuccess, Result.isFailure]
 
-/-- **P8: Ensures Clause Isolation.** -/
-public theorem ensures_isolation_success (r : ExceptionResult) (P : Prop) :
+/-- **P7c: Constructor Disjointness.** Success and Failure are distinct. -/
+public theorem result_success_ne_failure (v : T) :
+    Result.Success v ≠ Result.Failure := by
+  intro h; cases h
+
+/-- **P7d: Value Extraction.** Extracting the value from Success recovers the original. -/
+public theorem result_value_of_success [Inhabited T] (v : T) :
+    (Result.Success v).value! = v := by
+  simp [Result.value!]
+
+/-- **P7e: Constructor Injectivity.** Success is injective on its value. -/
+public theorem result_success_injective (v₁ v₂ : T) :
+    Result.Success v₁ = Result.Success v₂ → v₁ = v₂ := by
+  intro h; cases h; rfl
+
+/-- **P7f: isSuccess characterization.** isSuccess is true iff the result is Success. -/
+public theorem result_isSuccess_iff (r : Result T) :
+    r.isSuccess = true ↔ ∃ v, r = .Success v := by
+  cases r with
+  | Success v => simp [Result.isSuccess]
+  | Failure => simp [Result.isSuccess]
+
+/-- **P7g: isFailure characterization.** isFailure is true iff the result is Failure. -/
+public theorem result_isFailure_iff (r : Result T) :
+    r.isFailure = true ↔ r = .Failure := by
+  cases r with
+  | Success _ => simp [Result.isFailure]
+  | Failure => simp [Result.isFailure]
+
+/-- **P8: Ensures Clause Isolation (Success).** If r is Failure, any Success-guarded
+    postcondition holds vacuously. -/
+public theorem ensures_isolation_success (r : Result T) (P : Prop) :
     r.isFailure = true → (r.isSuccess = true → P) := by
-  cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
+  cases r <;> simp [Result.isSuccess, Result.isFailure]
 
-public theorem ensures_isolation_failure (r : ExceptionResult) (P : Prop) :
+/-- **P8b: Ensures Clause Isolation (Failure).** If r is Success, any Failure-guarded
+    postcondition holds vacuously. -/
+public theorem ensures_isolation_failure (r : Result T) (P : Prop) :
     r.isSuccess = true → (r.isFailure = true → P) := by
-  cases r <;> simp [ExceptionResult.isSuccess, ExceptionResult.isFailure]
+  cases r <;> simp [Result.isSuccess, Result.isFailure]

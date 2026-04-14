@@ -70,6 +70,7 @@ Each pipeline pass gets a property file in the same directory:
 | `Resolution.lean` | `ResolutionProperties.lean` |
 | `ModifiesClauses.lean` | `ModifiesClausesProperties.lean` |
 | `FunctionPostcondCheck.lean` | `TranslatorProperties.lean` (P-Spec-2f) |
+| Ion serialization | `IonProperties.lean` (P-Ion-1..3) |
 
 Property files import the pass but do not modify it. They are new
 files — zero risk to the existing pipeline.
@@ -97,11 +98,17 @@ theorem bool_literal_always_translates (b : Bool) :
 Each pass's postconditions are the next pass's preconditions:
 
 ```
+Ion deserialization:      "fromIon(toIon(node)) = node" (P-Ion-1)
+    ↓ (= parseProgram input consistency)
+resolve precondition:     "all type scopes populated" (P-Resolve-1)
 resolve postcondition:    "all identifiers are resolved in SemanticModel"
+                          "field IDs stable" (P-Resolve-2)
+                          "resolveQualifiedFieldName succeeds" (P-Resolve-3)
     ↓ (= constrainedTypeElim precondition)
 constrainedTypeElim post: "all constrained types resolved to base types"
     ↓ (= heapParam precondition)
 heapParam postcondition:  "$heap injected for all heap-accessing procs"
+                          "FieldSelect → StaticCall" (P-Heap-2, uses P-Resolve-3)
     ↓ (= translateLaurelToCore precondition)
 translateLTC postcondition: "Core AST has correct structure"
     ↓ (= semantic proof precondition)
@@ -234,7 +241,78 @@ The model proves these as `resolveInstanceCallInStmt_id`,
 Valuable for Tier 3 composition — lets you skip passes in the proof
 chain when the feature isn't relevant. See D21.
 
-### Tier 3: Compositional
+### Tier 5: Resolution Properties
+
+Target the resolution pass, which was previously unproven. The
+cross-composite field resolution fix (D7 in cross-type-resolution)
+introduced a provable invariant: all type scopes are populated
+before any procedure body is resolved.
+
+**P-Resolve-1: Type scope completeness.** After `preRegisterTopLevel`,
+for every composite C and every field f on C,
+`state.typeScopes[C.name]` contains an entry for `f.name` whose
+type matches `f.type`. This is the "nothing is lost" property —
+every field declared in the source program is available for
+cross-composite resolution. New property, no existing file.
+
+**P-Resolve-2: Field ID stability.** The field ID assigned in
+`preRegisterTopLevel` is the same ID used by `resolveField` in
+`resolveTypeDefinition`. This guarantees that type scope entries
+don't go stale when the field is re-registered with resolved type
+information. Connects to `resolveQualifiedFieldName` in heap
+parameterization — if IDs are stable, the model lookup succeeds.
+New property, no existing file.
+
+**P-Resolve-3: Cross-composite field resolution succeeds.** For
+any field on any composite in the program, after the first
+resolution pass, `resolveQualifiedFieldName model fieldName`
+returns `some qualifiedName`. This connects to the existing
+`heapTransformExpr_fieldSelect_is_staticCall` theorem (P-Heap-2):
+if P-Resolve-3 holds, then P-Heap-2's precondition is satisfied,
+giving the end-to-end chain: field declared → type scope populated
+→ resolution succeeds → heap transform produces StaticCall.
+New property, no existing file.
+
+### Tier 6: Ion/Parser Consistency
+
+Target the divergence risk between the two paths that produce
+`Strata.Program`: Laurel text parsing and Ion binary deserialization.
+Both paths converge at `ConcreteToAbstractTreeTranslator.parseProgram`,
+so the risk is upstream — in how `Strata.Program` is constructed.
+
+**P-Ion-1: toIon/fromIon round-trip per AST node.** For each of
+the ~61 Laurel AST node types, `fromIon(toIon(node)) = node`.
+This is mechanical but voluminous. Each lemma is a structural
+fact about serialization/deserialization being inverses. Proves
+the Lean side is internally consistent. The Java serializer still
+needs testing (IonRoundTripTest), but at least the Lean
+deserializer faithfully reconstructs what was serialized.
+New property, no existing file.
+
+**P-Ion-2: parseProgram determinism.** `parseProgram` is a pure
+function from `Strata.Program` to `Laurel.Program`. Given the
+same `Strata.Program`, it always produces the same
+`Laurel.Program`. This is trivially true (it's a pure function),
+but stating it explicitly documents the convergence point and
+makes it a regression target — if someone adds IO or state to
+`parseProgram`, this property breaks.
+
+**P-Ion-3: Ion round-trip at program level.** For any
+`Laurel.Program` that can be serialized to Ion and deserialized
+back, the result is equal to the original. This is the
+composition of P-Ion-1 across all nodes in a program. The
+existing `IonRoundTripTest` tests this on specific programs;
+P-Ion-3 would prove it for all programs (or identify the
+preconditions under which it holds).
+
+Note: P-Ion-1 through P-Ion-3 prove consistency of the Lean
+serialization layer. The Java→Ion path (Java `IonSerializer`)
+is outside Lean's reach — it must be validated by testing
+(IonRoundTripTest) or by a separate Java verification effort
+(Tier 2 in proof-targets.md). The value of P-Ion-1 is that
+it isolates the trust boundary: if the Java serializer produces
+valid Ion AND P-Ion-1 holds, then the Lean deserializer
+reconstructs the intended program.
 
 Catch interaction bugs between features. May be proven by composing
 Tier 2 properties rather than stated independently.
@@ -332,6 +410,8 @@ the pipeline is complex and where proofs add the most value:
 | Constrained types | Infra ✅, P-Constrained-1 ✅ (preconditions + output ensures) |
 | Opaque procs | P-Spec-1/2 needed |
 | Function postconditions | P-Spec-2f ✅ |
+| Resolution | P-Resolve-1/2/3 needed (Phase 6) |
+| Ion consistency | P-Ion-1/3 needed (Phase 7) |
 | Labels | Not yet targeted |
 | Operators | P-Struct-1 partial |
 | Statement translation | P-Exception-1 unblocked (D19), P-Exception-2 unblocked (D19) |
@@ -464,7 +544,33 @@ designed to compose with them. See D7 in decisions.
     `computeWritesHeap` (P-Heap-3 completion).
 27. Migrate remaining model properties, deprecate model files.
 
-### Current status (2026-04-11)
+### Phase 6: Resolution properties (NEW — see cross-type-resolution/type-scope-ordering.md)
+
+28. Create `ResolutionProperties.lean`.
+29. Add P-Resolve-1 (type scope completeness): after
+    `preRegisterTopLevel`, every composite's type scope contains
+    all its fields. Structural proof over the loop.
+30. Add P-Resolve-2 (field ID stability): `resolveField` reuses
+    the pre-registered ID. Proof by case analysis on scope lookup.
+31. Add P-Resolve-3 (cross-composite field resolution succeeds):
+    for any field on any composite, `resolveQualifiedFieldName`
+    returns `some`. Composition of P-Resolve-1 + P-Resolve-2 +
+    model construction.
+32. Compose P-Resolve-3 with `heapTransformExpr_fieldSelect_is_staticCall`
+    (P-Heap-2) for the end-to-end chain: field declared → type
+    scope → resolution → heap transform → StaticCall.
+
+### Phase 7: Ion consistency properties (NEW)
+
+33. Create `IonProperties.lean` (or per-node files if too large).
+34. Add P-Ion-1 lemmas: `fromIon(toIon(node)) = node` for each
+    AST node type. Start with the nodes used by JVerify (FieldAccess,
+    InstanceCall, Identifier, Procedure, Composite, etc.).
+35. Add P-Ion-3 (program-level round-trip) by composing P-Ion-1
+    lemmas. This replaces the IonRoundTripTest with a proof for
+    the Lean side.
+
+### Current status (2026-04-14)
 
 | File | Theorems | Sorry |
 |------|----------|-------|
@@ -474,10 +580,14 @@ designed to compose with them. See D7 in decisions.
 | `HeapParameterization.lean` (P-Heap-3) | 11 | 0 |
 | `ConstrainedTypeElim.lean` (infra) | 14 | 0 |
 | `InstanceMethodProperties.lean` (pre-existing) | 1 | 0 |
+| `ModifiesClausesProperties.lean` | 2 | 0 |
+| `ResolutionProperties.lean` | — | — |
+| `IonProperties.lean` | — | — |
 | `ExitProperties.lean` (Arrow 3) | 10 | 0 |
 | `ExceptionProperties.lean` (Arrow 3) | 16 | 0 |
 | `PropagationProperties.lean` (Arrow 3) | 5 | 0 |
-| **Total** | **150** | **0** |
+| **Total proven** | **152** | **0** |
+| **Planned (Resolution + Ion)** | ~10-70 | — |
 
 Note: Arrow 3 proofs (ExitProperties, ExceptionProperties,
 PropagationProperties) are semantic proofs about Core constructs.
@@ -499,6 +609,8 @@ guarantees. The first composition target is P-Exception-1 (D19).
 | Inheritance | T5_inheritance | ❌ No properties |
 | Quantifiers | T14 | ❌ No properties |
 | Function postconditions | Position.compareTo | ✅ P-Spec-2f |
+| Resolution (cross-composite) | StrataRangeCompareTo | ❌ P-Resolve-1/2/3 needed (Phase 6) |
+| Ion round-trip | IonRoundTripTest | ❌ P-Ion-1/3 needed (Phase 7) |
 
 ### Success criteria
 

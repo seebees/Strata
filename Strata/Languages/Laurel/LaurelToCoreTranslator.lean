@@ -76,6 +76,9 @@ structure TranslateState where
   /-- The name of the Result-wrapped output parameter (e.g., "result" or "r").
       Used to identify which identifier in postconditions needs Result..value! unwrapping. -/
   resultOutputName : String := "result"
+  /-- The Core type of the result output (e.g., int, bool). Used to type
+      $result as Result<T> in ensures clauses. -/
+  resultCoreType : LMonoTy := .tcons "int" []
 
 /-- The translation monad: state over Except, allowing both accumulated diagnostics and hard failures -/
 @[expose] abbrev TranslateM := OptionT (StateM TranslateState)
@@ -115,7 +118,7 @@ def translateType (ty : HighTypeMd) : TranslateM LMonoTy := do
       return .tcons "Composite" []
   | .TCore s => return .tcons s []
   | .TReal => return LMonoTy.real
-  | .Unknown => return .tcons "Result" [.tcons "int" []] -- Used for $result/Success/Failure in ensures clauses
+  | .Unknown => return .tcons "Result" [(← get).resultCoreType] -- Used for $result/Success/Failure in ensures clauses
   | _ => throwTypeDiagnostic ty "cannot translate type to Core: not supported yet"
 termination_by ty.val
 decreasing_by all_goals (first | (cases elementType; term_by_mem) | (cases keyType; term_by_mem) | (cases valueType; term_by_mem))
@@ -213,7 +216,7 @@ def translateExpr (expr : StmtExprMd)
         -- Handle synthetic exception-result identifiers injected by the frontend.
         -- $result in ensures clauses maps to the unified result variable.
         if name.text == "$result" then
-          return .fvar () ⟨"result", ()⟩ (some (.tcons "Result" [.tcons "int" []]))
+          return .fvar () ⟨"result", ()⟩ (some (.tcons "Result" [s.resultCoreType]))
         else if name.text == "Success" || name.text == "Failure" then
           return .op () ⟨name.text, ()⟩ none
         else
@@ -839,10 +842,14 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   -- Set callerResultIdent and isResultWrapped BEFORE translating postconditions
   -- Set callerResultIdent and isResultWrapped BEFORE translating postconditions
   -- so that output name in postconditions gets wrapped in Result..value!.
+  let resultTy ← match returnOutput with
+    | some outParam => translateType outParam.type
+    | none => pure LMonoTy.bool
   modify fun s => { s with
     callerResultIdent := resultIdent
     isResultWrapped := !isCheckProc && (hasResultOutput || needsSyntheticResult)
-    resultOutputName := resultIdent.name }
+    resultOutputName := resultIdent.name
+    resultCoreType := resultTy }
 
   -- Translate postconditions for Opaque and Abstract bodies
   let postconditions : ListMap Core.CoreLabel Core.Procedure.Check ←

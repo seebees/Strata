@@ -318,12 +318,17 @@ def computeResultOutputs (proc : Procedure)
     coreOutputs ++ [(⟨"result", ()⟩, LMonoTy.tcons "Result" [LMonoTy.bool])]
   else coreOutputs
 
+
+/-- Compute the state after setting typeParamNames at the start of translateProcedure. -/
+def computeTypeParamState (proc : Procedure) (st : TranslateState) : TranslateState :=
+  { st with typeParamNames := proc.typeArgs.map (fun tp => tp.name.text) }
 /-- Compute the state modification that translateProcedure applies after
     translating preconditions and before translating the body/postconditions.
     This sets callerResultIdent, isResultWrapped, and resultOutputName. -/
 def computeBodyState (proc : Procedure)
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
-    (st : TranslateState) : TranslateState :=
+    (st : TranslateState)
+    (resultTy : LMonoTy) : TranslateState :=
   let returnOutput := proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in")
   let resultIdent : Core.CoreIdent := match returnOutput with
     | some outParam => ⟨outParam.name.text, ()⟩
@@ -334,7 +339,8 @@ def computeBodyState (proc : Procedure)
   { st with
     callerResultIdent := resultIdent
     isResultWrapped := !isCheckProc && (hasResultOutput || needsSyntheticResult)
-    resultOutputName := resultIdent.name }
+    resultOutputName := resultIdent.name
+    resultCoreType := resultTy }
 
 -- The `module` system creates a local copy of `mdWithUnknownLoc` when
 -- `translateProcedure.eq_def` is unfolded. This prevents proving exact
@@ -345,16 +351,20 @@ def computeBodyState (proc : Procedure)
     preconditions, we can extract the resulting Core.Procedure. -/
 theorem translateProcedure_transparent_get (proc : Procedure)
     (bodyExpr : StmtExprMd)
-    (s sI sO sBody : TranslateState)
+    (s sI sO sRT sBody : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (bodyStmts : List Core.Statement)
     (hTransparent : proc.body = Body.Transparent bodyExpr [])
     (hNoPre : proc.preconditions = [])
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
-    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).2 = sBody)
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sO = (some resultTy, sRT))
+    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sRT resultTy)).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sRT resultTy)).2 = sBody)
     (coreProc : Core.Procedure)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
@@ -363,115 +373,131 @@ theorem translateProcedure_transparent_get (proc : Procedure)
     coreProc.spec.preconditions = [] ∧
     coreProc.spec.postconditions = [] := by
   simp only [computeBodyState] at hBody hState
-  simp only [translateProcedure.eq_def,
+  simp only [translateProcedure.eq_def, computeTypeParamState, computeBodyState,
     hInputs, hOutputs, hNoPre, hTransparent,
-    translateChecks, List.mapIdxM, List.mapIdxM.go,
+    translateChecks, List.mapIdxM, List.mapIdxM.go, List.map,
     modify, MonadState.set, StateT.set, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
     liftM, monadLift, MonadLift.monadLift] at hSucc
+  rw [hResultTy] at hSucc
+  rw [hBody] at hSucc
   split at hSucc
-  next a s_state heq =>
-    have hA : a = some bodyStmts := (congrArg Prod.fst heq).symm.trans hBody
-    subst hA
-    have := Option.some.inj hSucc; subst this
+  · have := Option.some.inj hSucc; subst this
     exact ⟨rfl, rfl, rfl, rfl, rfl⟩
-
 theorem translateProcedure_eq_transparent (proc : Procedure)
     (bodyExpr : StmtExprMd)
-    (s sI sO sBody : TranslateState)
+    (s sI sO sRT sBody : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (bodyStmts : List Core.Statement)
     (hTransparent : proc.body = Body.Transparent bodyExpr [])
     (hNoPre : proc.preconditions = [])
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
-    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).1 = some bodyStmts)
-    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sO)).2 = sBody) :
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sO = (some resultTy, sRT))
+    (hBody : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sRT resultTy)).1 = some bodyStmts)
+    (hState : (translateStmt proc.outputs bodyExpr (computeBodyState proc coreOutputs sRT resultTy)).2 = sBody) :
     (translateProcedure proc s).1.isSome = true := by
   simp only [computeBodyState] at hBody hState
-  simp only [translateProcedure.eq_def,
+  simp only [translateProcedure.eq_def, computeTypeParamState, computeBodyState,
     hInputs, hOutputs, hNoPre, hTransparent,
-    translateChecks, List.mapIdxM, List.mapIdxM.go,
+    translateChecks, List.mapIdxM, List.mapIdxM.go, List.map,
     modify, MonadState.set, StateT.set, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
-    liftM, monadLift, MonadLift.monadLift]
-  split
-  next a s_state heq =>
-    have hA : a = some bodyStmts := (congrArg Prod.fst heq).symm.trans hBody
-    subst hA; rfl
-
+    liftM, monadLift, MonadLift.monadLift] at hSucc
+  rw [hResultTy] at hSucc
+  rw [hBody] at hSucc
+  split at hSucc
+  · simp_all
 theorem translateProcedure_eq_opaque_withImpl (proc : Procedure)
     (postconds : List StmtExprMd) (impl : StmtExprMd) (modif : List StmtExprMd)
-    (s sI sO sPre sPost sBody : TranslateState)
+    (s sI sO sPre sRT sPost sBody : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (bodyStmts : List Core.Statement)
     (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sPre = (some resultTy, sRT))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sRT resultTy) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody)) :
     (translateProcedure proc s).1.isSome = true := by
   simp only [translateProcedure.eq_def]
-  simp only [hInputs, hOutputs, hPre, hOpaque,
+  simp only [computeTypeParamState, hInputs, hOutputs, hPre, hOpaque,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
     liftM, monadLift, MonadLift.monadLift,
-    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet]
-  conv in translateChecks postconds "postcondition" _ =>
-    arg 3; change computeBodyState proc coreOutputs sPre
-  simp only [hPost, hBody, StateT.bind, StateT.pure]
-  repeat (first | rfl | split)
-
+    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, computeBodyState]
+  rw [hResultTy]
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, StateT.bind, StateT.pure, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    computeBodyState]
+  rw [hPost, hBody]
+  simp
 theorem translateProcedure_eq_opaque_noImpl (proc : Procedure)
     (postconds : List StmtExprMd) (modif : List StmtExprMd)
-    (s sI sO sPre sPost : TranslateState)
+    (s sI sO sPre sRT sPost : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (hOpaque : proc.body = Body.Opaque postconds none modif)
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost)) :
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sPre = (some resultTy, sRT))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sRT resultTy) = (some corePost, sPost)) :
     (translateProcedure proc s).1.isSome = true := by
+
   simp only [translateProcedure.eq_def]
-  simp only [hInputs, hOutputs, hPre, hOpaque,
+  simp only [computeTypeParamState, hInputs, hOutputs, hPre, hOpaque,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
     liftM, monadLift, MonadLift.monadLift,
-    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet]
-  conv in translateChecks postconds "postcondition" _ =>
-    arg 3; change computeBodyState proc coreOutputs sPre
-  simp only [hPost, StateT.bind, StateT.pure]
-  repeat (first | rfl | split)
-
+    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, computeBodyState]
+  rw [hResultTy]
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, StateT.bind, StateT.pure, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    computeBodyState]
+  rw [hPost]
+  simp
 /-- When translateProcedure succeeds on an opaque procedure with implementation,
     we can extract the resulting Core.Procedure fields. -/
 theorem translateProcedure_opaque_withImpl_get (proc : Procedure)
     (postconds : List StmtExprMd) (impl : StmtExprMd) (modif : List StmtExprMd)
-    (s sI sO sPre sPost sBody : TranslateState)
+    (s sI sO sPre sRT sPost sBody : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (bodyStmts : List Core.Statement)
     (hOpaque : proc.body = Body.Opaque postconds (some impl) modif)
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sPre = (some resultTy, sRT))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sRT resultTy) = (some corePost, sPost))
     (hBody : translateStmt proc.outputs impl sPost = (some bodyStmts, sBody))
     (coreProc : Core.Procedure)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
@@ -480,35 +506,39 @@ theorem translateProcedure_opaque_withImpl_get (proc : Procedure)
     coreProc.header.outputs = computeResultOutputs proc coreOutputs ∧
     coreProc.spec.preconditions = corePre ∧
     coreProc.spec.postconditions = corePost := by
+
   simp only [translateProcedure.eq_def] at hSucc
-  simp only [hInputs, hOutputs, hPre, hOpaque,
+  simp only [computeTypeParamState, hInputs, hOutputs, hPre, hOpaque,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
     liftM, monadLift, MonadLift.monadLift,
-    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet] at hSucc
-  conv at hSucc in translateChecks postconds "postcondition" _ =>
-    arg 3; change computeBodyState proc coreOutputs sPre
-  rw [hPost] at hSucc
-  simp only [bind, StateT.bind, pure, StateT.pure, hBody, Prod.fst, Prod.snd,
-    Option.some.injEq] at hSucc
-  subst hSucc
+    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, computeBodyState] at hSucc
+  rw [hResultTy] at hSucc
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, StateT.bind, StateT.pure, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    computeBodyState] at hSucc
+  rw [hPost, hBody] at hSucc
+  have := Option.some.inj hSucc; subst this
   exact ⟨rfl, rfl, rfl, rfl, rfl⟩
-
 /-- When translateProcedure succeeds on an opaque procedure without implementation,
     we can extract the resulting Core.Procedure fields. -/
 theorem translateProcedure_opaque_noImpl_get (proc : Procedure)
     (postconds : List StmtExprMd) (modif : List StmtExprMd)
-    (s sI sO sPre sPost : TranslateState)
+    (s sI sO sPre sRT sPost : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (hOpaque : proc.body = Body.Opaque postconds none modif)
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sPre = (some resultTy, sRT))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sRT resultTy) = (some corePost, sPost))
     (coreProc : Core.Procedure)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
@@ -516,63 +546,71 @@ theorem translateProcedure_opaque_noImpl_get (proc : Procedure)
     coreProc.header.outputs = computeResultOutputs proc coreOutputs ∧
     coreProc.spec.preconditions = corePre ∧
     coreProc.spec.postconditions = corePost := by
+
   simp only [translateProcedure.eq_def] at hSucc
-  simp only [hInputs, hOutputs, hPre, hOpaque,
+  simp only [computeTypeParamState, hInputs, hOutputs, hPre, hOpaque,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
     liftM, monadLift, MonadLift.monadLift,
-    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet] at hSucc
-  conv at hSucc in translateChecks postconds "postcondition" _ =>
-    arg 3; change computeBodyState proc coreOutputs sPre
+    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, computeBodyState] at hSucc
+  rw [hResultTy] at hSucc
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, StateT.bind, StateT.pure, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    computeBodyState] at hSucc
   rw [hPost] at hSucc
-  simp only [bind, StateT.bind, pure, StateT.pure, Prod.fst, Prod.snd,
-    Option.some.injEq] at hSucc
-  subst hSucc
+  have := Option.some.inj hSucc; subst this
   exact ⟨rfl, rfl, rfl, rfl, rfl⟩
-
-/-! ## Abstract body equation lemmas -/
-
 /-- When translateProcedure is called on an abstract procedure, it succeeds. -/
 theorem translateProcedure_eq_abstract (proc : Procedure)
     (postconds : List StmtExprMd)
-    (s sI sO sPre sPost : TranslateState)
+    (s sI sO sPre sRT sPost : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (hAbstract : proc.body = Body.Abstract postconds)
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost)) :
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sPre = (some resultTy, sRT))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sRT resultTy) = (some corePost, sPost)) :
     (translateProcedure proc s).1.isSome = true := by
+
   simp only [translateProcedure.eq_def]
-  simp only [hInputs, hOutputs, hPre, hAbstract,
+  simp only [computeTypeParamState, hInputs, hOutputs, hPre, hAbstract,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
     liftM, monadLift, MonadLift.monadLift,
-    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet]
-  conv in translateChecks postconds "postcondition" _ =>
-    arg 3; change computeBodyState proc coreOutputs sPre
-  simp only [hPost, StateT.bind, StateT.pure]
-  repeat (first | rfl | split)
-
+    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, computeBodyState]
+  rw [hResultTy]
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, StateT.bind, StateT.pure, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    computeBodyState]
+  rw [hPost]
+  simp
 /-- When translateProcedure succeeds on an abstract procedure,
     we can extract the resulting Core.Procedure fields. -/
 theorem translateProcedure_abstract_get (proc : Procedure)
     (postconds : List StmtExprMd)
-    (s sI sO sPre sPost : TranslateState)
+    (s sI sO sPre sRT sPost : TranslateState)
     (coreInputs : List (Core.CoreIdent × LMonoTy))
     (coreOutputs : List (Core.CoreIdent × LMonoTy))
+    (resultTy : LMonoTy)
     (corePre : ListMap Core.CoreLabel Core.Procedure.Check)
     (corePost : ListMap Core.CoreLabel Core.Procedure.Check)
     (hAbstract : proc.body = Body.Abstract postconds)
-    (hInputs : (proc.inputs.mapM translateParameterToCore s) = (some coreInputs, sI))
+    (hInputs : (proc.inputs.mapM translateParameterToCore (computeTypeParamState proc s)) = (some coreInputs, sI))
     (hOutputs : (proc.outputs.mapM translateParameterToCore sI) = (some coreOutputs, sO))
     (hPre : translateChecks proc.preconditions "requires" sO = (some corePre, sPre))
-    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sPre) = (some corePost, sPost))
+    (hResultTy : (match proc.outputs.find? (fun p => p.name.text != "$heap" && p.name.text != "$heap_in") with
+      | some outParam => translateType outParam.type
+      | none => pure LMonoTy.bool) sPre = (some resultTy, sRT))
+    (hPost : translateChecks postconds "postcondition" (computeBodyState proc coreOutputs sRT resultTy) = (some corePost, sPost))
     (coreProc : Core.Procedure)
     (hSucc : (translateProcedure proc s).1 = some coreProc) :
     coreProc.header.name = ⟨proc.name.text, ()⟩ ∧
@@ -580,23 +618,21 @@ theorem translateProcedure_abstract_get (proc : Procedure)
     coreProc.header.outputs = computeResultOutputs proc coreOutputs ∧
     coreProc.spec.preconditions = corePre ∧
     coreProc.spec.postconditions = corePost := by
+
   simp only [translateProcedure.eq_def] at hSucc
-  simp only [hInputs, hOutputs, hPre, hAbstract,
+  simp only [computeTypeParamState, hInputs, hOutputs, hPre, hAbstract,
     pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
     bind, get, MonadState.get, getThe, MonadStateOf.get,
     StateT.bind, StateT.get, StateT.pure,
     liftM, monadLift, MonadLift.monadLift,
-    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet] at hSucc
-  conv at hSucc in translateChecks postconds "postcondition" _ =>
-    arg 3; change computeBodyState proc coreOutputs sPre
+    modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, computeBodyState] at hSucc
+  rw [hResultTy] at hSucc
+  simp only [pure, OptionT.pure, OptionT.mk, OptionT.bind, OptionT.lift,
+    bind, StateT.bind, StateT.pure, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    computeBodyState] at hSucc
   rw [hPost] at hSucc
-  simp only [bind, StateT.bind, pure, StateT.pure, Prod.fst, Prod.snd,
-    Option.some.injEq] at hSucc
-  subst hSucc
+  have := Option.some.inj hSucc; subst this
   exact ⟨rfl, rfl, rfl, rfl, rfl⟩
-
-/-! ## mapM length preservation for OptionT/StateM -/
-
 /-- mapM through OptionT (StateM σ) preserves list length when it succeeds. -/
 theorem List.length_mapM_optionT_stateM {α β σ : Type}
     (f : α → OptionT (StateM σ) β) (l : List α) (s : σ) (result : List β) (s' : σ)

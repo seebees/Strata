@@ -170,6 +170,18 @@ inductive HighType : Type where
 mutual
 
 /--
+A type parameter for a generic procedure or type.
+
+Currently only carries the name. The structure is extensible for future
+bounded type parameters (e.g., Java's `<T extends Comparable>`,
+TypeScript's structural bounds). See `design/generics/decisions.md` D1, D6.
+-/
+structure TypeParameter where
+  /-- The type parameter name (e.g., "T", "K", "V"). -/
+  name : Identifier
+  deriving Inhabited, Repr
+
+/--
 A procedure in Laurel. Procedures are the main unit of specification and
 verification. Unlike separate functions and methods, Laurel uses a single
 general concept that covers both.
@@ -177,6 +189,8 @@ general concept that covers both.
 structure Procedure : Type where
   /-- The procedure's name. -/
   name : Identifier
+  /-- Type parameters for generic procedures (e.g., `<T>`, `<K, V>`). -/
+  typeArgs : List TypeParameter := []
   /-- Input parameters with their types. -/
   inputs : List Parameter
   /-- Output parameters with their types. Multiple outputs are supported. -/

@@ -475,25 +475,48 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
     | some (.option _ none) => (false, op.args.extract 1 op.args.size)
     | _ => (false, op.args)
   else (false, op.args)
-  -- Normalize to 9-arg form:
-  -- 7-arg (old Java, no returnParameters/invokeOn):
+  -- Normalize to 10-arg form:
+  -- 7-arg (old Java, no returnParameters/invokeOn/typeArgs):
   --   [name, params, retType, requires, ensures, modifies, body]
-  --   → insert retParams after retType (pos 3), invokeOn after requires (pos 5)
-  -- 8-arg (Java with returnParameters, no invokeOn):
+  -- 8-arg (old Java with returnParameters, no invokeOn/typeArgs):
   --   [name, params, retType, retParams, requires, ensures, modifies, body]
-  --   → insert invokeOn after requires (pos 5)
+  -- 9-arg: either old Laurel grammar (with invokeOn, no typeArgs) or new Java (with typeArgs, no invokeOn)
+  --   Old: [name, params, retType, retParams, requires, invokeOn, ensures, modifies, body]
+  --   New: [name, params, retType, retParams, requires, ensures, modifies, body, typeArgs]
+  -- 10-arg (new Java with invokeOn and typeArgs):
+  --   [name, params, retType, retParams, requires, invokeOn, ensures, modifies, body, typeArgs]
+  let emptyList : Arg := .seq default .comma #[]
   let args := if args.size == 7 then
+    -- insert retParams, invokeOn, typeArgs
     let a := args.extract 0 3 ++ #[.option default none] ++ args.extract 3 7
-    -- now 8 args: [name, params, retType, retParams, requires, ensures, modifies, body]
-    a.extract 0 5 ++ #[.option default none] ++ a.extract 5 8
+    let a := a.extract 0 5 ++ #[.option default none] ++ a.extract 5 8
+    a ++ #[emptyList]
   else if args.size == 8 then
-    args.extract 0 5 ++ #[.option default none] ++ args.extract 5 8
+    -- insert invokeOn, typeArgs
+    let a := args.extract 0 5 ++ #[.option default none] ++ args.extract 5 8
+    a ++ #[emptyList]
+  else if args.size == 9 then
+    -- Distinguish old (with invokeOn at pos 5) from new (with typeArgs at pos 8)
+    -- Old format has an option at pos 5 (invokeOn); new format has a seq at pos 8 (typeArgs)
+    match args[5]? with
+    | some (ArgF.option _ _) =>
+      -- Old format with invokeOn: insert typeArgs at end
+      args ++ #[emptyList]
+    | _ =>
+      -- New format with typeArgs at end: insert invokeOn at pos 5
+      args.extract 0 5 ++ #[.option default none] ++ args.extract 5 9
   else args
   match args with
   | #[nameArg, paramArg, returnTypeArg, returnParamsArg,
-      requiresArg, invokeOnArg, ensuresArg, modifiesArg, bodyArg] =>
+      requiresArg, invokeOnArg, ensuresArg, modifiesArg, bodyArg, typeArgsArg] =>
     let name ← translateIdent nameArg
     let nameMd ← getArgMetaData nameArg
+    -- Parse type parameters
+    let typeArgs ← match typeArgsArg with
+      | .seq _ _ tpArgs => tpArgs.toList.mapM fun a => do
+          let name ← translateIdent a
+          pure ({ name := name : TypeParameter })
+      | _ => pure []
     let parameters ← translateParameters paramArg
     -- Either returnTypeArg or returnParamsArg may have a value, not both
     -- If returnTypeArg is set, create a single "result" parameter
@@ -553,6 +576,7 @@ def parseProcedure (arg : Arg) : TransM Procedure := do
       | [], none => Body.Opaque [] none modifies
     return {
       name := name
+      typeArgs := typeArgs
       inputs := parameters
       outputs := returnParameters
       preconditions := preconditions

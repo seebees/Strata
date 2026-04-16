@@ -478,6 +478,9 @@ def resolveBody (body : Body) : ResolveM Body := do
 def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
   let procName' ← defineName proc.name (.staticProcedure proc)
   withScope do
+    -- Add type parameters to scope so type references can resolve them
+    for tp in proc.typeArgs do
+      let _ ← defineName tp.name (.parameter { name := tp.name, type := ⟨HighType.Unknown, .empty⟩ })
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
     -- Add $result, Success, and Failure to scope so ensures clauses can reference them.
@@ -494,7 +497,8 @@ def resolveProcedure (proc : Procedure) : ResolveM Procedure := do
     let dec' ← proc.decreases.mapM resolveStmtExpr
     let body' ← resolveBody proc.body
     let invokeOn' ← proc.invokeOn.mapM resolveStmtExpr
-    return { name := procName', inputs := inputs', outputs := outputs',
+    return { name := procName', typeArgs := proc.typeArgs,
+             inputs := inputs', outputs := outputs',
              isFunctional := proc.isFunctional,
              preconditions := pres', decreases := dec',
              invokeOn := invokeOn',
@@ -519,6 +523,9 @@ def resolveInstanceProcedure (typeName : Identifier) (proc : Procedure) : Resolv
   withScope do
     let savedInstType := (← get).instanceTypeName
     modify fun s => { s with instanceTypeName := some typeName.text }
+    -- Add type parameters to scope so type references can resolve them
+    for tp in proc.typeArgs do
+      let _ ← defineName tp.name (.parameter { name := tp.name, type := ⟨HighType.Unknown, .empty⟩ })
     let inputs' ← proc.inputs.mapM resolveParameter
     let outputs' ← proc.outputs.mapM resolveParameter
     -- Add $result, Success, and Failure to scope for ensures clauses.
@@ -534,7 +541,8 @@ def resolveInstanceProcedure (typeName : Identifier) (proc : Procedure) : Resolv
     let body' ← resolveBody proc.body
     let invokeOn' ← proc.invokeOn.mapM resolveStmtExpr
     modify fun s => { s with instanceTypeName := savedInstType }
-    return { name := procName', inputs := inputs', outputs := outputs',
+    return { name := procName', typeArgs := proc.typeArgs,
+             inputs := inputs', outputs := outputs',
              isFunctional := proc.isFunctional,
              preconditions := pres', decreases := dec',
              invokeOn := invokeOn',

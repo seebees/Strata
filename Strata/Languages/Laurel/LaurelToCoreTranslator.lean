@@ -79,6 +79,9 @@ structure TranslateState where
   /-- The Core type of the result output (e.g., int, bool). Used to type
       $result as Result<T> in ensures clauses. -/
   resultCoreType : LMonoTy := .tcons "int" []
+  /-- Type parameter names in scope for the current procedure.
+      When a UserDefined name matches one of these, it translates to ftvar. -/
+  typeParamNames : List String := []
 
 /-- The translation monad: state over Except, allowing both accumulated diagnostics and hard failures -/
 @[expose] abbrev TranslateM := OptionT (StateM TranslateState)
@@ -109,7 +112,9 @@ def translateType (ty : HighTypeMd) : TranslateM LMonoTy := do
   | .TMap keyType valueType => return Core.mapTy (← translateType keyType) (← translateType valueType)
   | .TSequence elementType => return Core.seqTy (← translateType elementType)
   | .UserDefined name =>
-    match name.uniqueId.bind model.refToDef.get? with
+    -- Check if this is a type parameter (ftvar) before checking the resolution model
+    if (← get).typeParamNames.contains name.text then return .ftvar name.text
+    else match name.uniqueId.bind model.refToDef.get? with
     | some (.compositeType _) => return .tcons "Composite" []
     | some (.datatypeDefinition dt) => return .tcons dt.name.text []
     | some (.datatypeConstructor typeName _) => return .tcons typeName.text []
@@ -119,9 +124,29 @@ def translateType (ty : HighTypeMd) : TranslateM LMonoTy := do
   | .TCore s => return .tcons s []
   | .TReal => return LMonoTy.real
   | .Unknown => return .tcons "Result" [(← get).resultCoreType] -- Used for $result/Success/Failure in ensures clauses
+  | .Applied base args =>
+    let argTys ← args.mapM fun arg => translateType arg
+    -- For Applied types, use the original name from the Laurel AST
+    -- since composite types all translate to tcons "Composite" []
+    let baseName := match base.val with
+      | .UserDefined name => name.text
+      | _ => ""
+    if baseName != "" then return .tcons baseName argTys
+    else
+      let baseTy ← translateType base
+      match baseTy with
+      | .tcons name [] => return .tcons name argTys
+      | .ftvar name => return .tcons name argTys
+      | _ => throwTypeDiagnostic ty "Applied base must be a named type"
   | _ => throwTypeDiagnostic ty "cannot translate type to Core: not supported yet"
 termination_by ty.val
-decreasing_by all_goals (first | (cases elementType; term_by_mem) | (cases keyType; term_by_mem) | (cases valueType; term_by_mem))
+decreasing_by
+  all_goals first
+    | (cases elementType; term_by_mem)
+    | (cases keyType; term_by_mem)
+    | (cases valueType; term_by_mem)
+    | (cases base; term_by_mem)
+    | (have h := List.sizeOf_lt_of_mem ‹_ ∈ _›; cases arg; simp_all; omega)
 
 def lookupType (name : Identifier) : TranslateM LMonoTy := do
   translateType ((← get).model.get name).getType
@@ -810,6 +835,8 @@ Diagnostics from disallowed constructs in preconditions, postconditions, and bod
 are emitted into the monad state.
 -/
 def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
+  -- Set type parameter names in scope so translateType can emit ftvar
+  modify fun s => { s with typeParamNames := proc.typeArgs.map (fun tp => tp.name.text) }
   let inputPairs ← proc.inputs.mapM translateParameterToCore
   let inputs := inputPairs
   let outputs ← proc.outputs.mapM translateParameterToCore
@@ -832,7 +859,7 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
   else outputs
   let header : Core.Procedure.Header := {
     name := proc.name.text
-    typeArgs := []
+    typeArgs := proc.typeArgs.map (fun tp => tp.name.text)
     inputs := inputs
     outputs := resultOutputs
   }
@@ -851,10 +878,10 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
     resultOutputName := resultIdent.name
     resultCoreType := resultTy }
 
-  -- Translate postconditions for Opaque and Abstract bodies
+  -- Translate postconditions
   let postconditions : ListMap Core.CoreLabel Core.Procedure.Check ←
     match proc.body with
-    | .Opaque postconds _ _ | .Abstract postconds =>
+    | .Opaque postconds _ _ | .Abstract postconds | .Transparent _ postconds =>
         translateChecks postconds "postcondition"
     | _ => pure []
   let modifies : List Core.Expression.Ident := []
@@ -1031,7 +1058,8 @@ Diagnostics for disallowed constructs in the function body are emitted into the 
 -/
 def translateProcedureToFunction (options: LaurelTranslateOptions) (isRecursive: Bool) (proc : Procedure) : TranslateM Core.Decl := do
   -- Functions don't use Result<T> wrapping — reset the flag
-  modify fun s => { s with isResultWrapped := false }
+  -- Set type parameter names in scope so translateType can emit ftvar
+  modify fun s => { s with isResultWrapped := false, typeParamNames := proc.typeArgs.map (fun tp => tp.name.text) }
   let inputs ← proc.inputs.mapM translateParameterToCore
   let outputTy ← match proc.outputs.head? with
     | some p => translateType p.type
@@ -1081,7 +1109,7 @@ def translateProcedureToFunction (options: LaurelTranslateOptions) (isRecursive:
 
   let f : Core.Function := {
     name := ⟨proc.name.text, ()⟩
-    typeArgs := []
+    typeArgs := proc.typeArgs.map (fun tp => tp.name.text)
     inputs := inputs
     output := outputTy
     body := body
@@ -1431,13 +1459,16 @@ def verifyToVcResults (program : Program)
   | some coreProgram =>
     -- Enable removeIrrelevantAxioms to avoid polluting simple assertions with heap axioms
     let options := { options with removeIrrelevantAxioms := .Precise }
-    let runner tempDir :=
-      EIO.toIO (fun f => IO.Error.userError (toString f))
-          (Core.verify coreProgram tempDir .none options)
-    let ioResult ← match options.vcDirectory with
-      | .none => IO.FS.withTempDir runner
-      | .some p => IO.FS.createDirAll ⟨p.toString⟩; runner ⟨p.toString⟩
-    return (some ioResult, translateDiags)
+    let runner tempDir := do
+      match ← (Core.verify coreProgram tempDir .none options).toIO' with
+      | .ok vcResults => return (some vcResults, translateDiags)
+      | .error errDiag =>
+        -- Type checking or verification errors should be reported as diagnostics,
+        -- not swallowed as unhandled exceptions.
+        return (none, translateDiags ++ [errDiag])
+    match options.vcDirectory with
+    | .none => IO.FS.withTempDir runner
+    | .some p => IO.FS.createDirAll ⟨p.toString⟩; runner ⟨p.toString⟩
   | none => return (none, translateDiags)
 
 def verifyToDiagnostics (files: Map Strata.Uri Lean.FileMap) (program : Program)
